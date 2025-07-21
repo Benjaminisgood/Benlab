@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block content %}
+<h3 class="mb-3">物品列表</h3>
+<form class="row g-3 mb-3" method="get" action="{{ url_for('items') }}">
+  <div class="col-auto">
+    <input type="text" name="search" value="{{ search }}" class="form-control" placeholder="搜索物品...">
+  </div>
+  <div class="col-auto">
+    <select name="category" class="form-select">
+      <option value="">全部类别</option>
+      {% for cat in categories %}
+      <option value="{{ cat }}" {% if cat == category %}selected{% endif %}>{{ cat }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-auto">
+    <button type="submit" class="btn btn-secondary">筛选</button>
+  </div>
+  <div class="col-auto ms-auto">
+    <a href="{{ url_for('add_item') }}" class="btn btn-primary">新增物品</a>
+  </div>
+</form>
+<table class="table table-hover">
+  <thead class="table-light">
+    <tr>
+      <th>名称</th><th>类别</th><th>状态</th><th>存放位置</th><th>负责人</th><th>操作</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for item in items %}
+    {%- set row_class = "" -%}
+    {% if item.status %}
+      {% if '用完' in item.status %}
+        {% set row_class = 'table-danger' %}
+      {% elif '少量' in item.status %}
+        {% set row_class = 'table-warning' %}
+      {% elif '充足' in item.status %}
+        {% set row_class = 'table-success' %}
+      {% endif %}
+    {% endif %}
+    <tr class="{{ row_class }}">
+      <td><a href="{{ url_for('item_detail', item_id=item.id) }}">{{ item.name }}</a></td>
+      <td>{{ item.category or '' }}</td>
+      <td>{{ item.status or '' }}</td>
+      <td>
+        {% if item.location %}
+          <a href="{{ url_for('view_location', loc_id=item.location.id) }}">{{ item.location.name }}</a>
+        {% else %}-{% endif %}
+      </td>
+      <td>
+        {% if item.responsible_member %}
+          <a href="{{ url_for('profile', member_id=item.responsible_member.id) }}">{{ item.responsible_member.name }}</a>
+        {% else %}-{% endif %}
+      </td>
+      <td>
+        <a href="{{ url_for('edit_item', item_id=item.id) }}" class="btn btn-sm btn-outline-primary">编辑</a>
+        <form action="{{ url_for('delete_item', item_id=item.id) }}" method="post" class="d-inline" onsubmit="return confirm('确定删除该物品吗？');">
+          <button type="submit" class="btn btn-sm btn-outline-danger">删除</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    {% if items|length == 0 %}
+    <tr><td colspan="6" class="text-center text-muted">没有找到物品</td></tr>
+    {% endif %}
+  </tbody>
+</table>
+{% endblock %}

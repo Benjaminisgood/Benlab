@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-4">
+    <h3 class="mb-4">用户注册</h3>
+    <form method="post" action="{{ url_for('register') }}">
+      <div class="mb-3">
+        <label for="name" class="form-label">姓名</label>
+        <input type="text" class="form-control" id="name" name="name" required>
+      </div>
+      <div class="mb-3">
+        <label for="username" class="form-label">用户名</label>
+        <input type="text" class="form-control" id="username" name="username" required>
+      </div>
+      <div class="mb-3">
+        <label for="password" class="form-label">密码</label>
+        <input type="password" class="form-control" id="password" name="password" required>
+      </div>
+      <div class="mb-3">
+        <label for="contact" class="form-label">联系方式 (邮箱或电话)</label>
+        <input type="text" class="form-control" id="contact" name="contact">
+      </div>
+      <button type="submit" class="btn btn-primary">注册</button>
+      <a href="{{ url_for('login') }}" class="btn btn-link">已有账号？登录</a>
+    </form>
+  </div>
+</div>
+{% endblock %}

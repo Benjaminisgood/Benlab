@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<h3 class="mb-3">课题组成员</h3>
+<table class="table table-hover">
+  <thead class="table-light">
+    <tr><th>姓名</th><th>用户名</th><th>联系方式</th><th>负责物品数</th><th>负责位置数</th></tr>
+  </thead>
+  <tbody>
+    {% for mem in members %}
+    <tr>
+      <td><a href="{{ url_for('profile', member_id=mem.id) }}">{{ mem.name }}</a></td>
+      <td>{{ mem.username }}</td>
+      <td>{{ mem.contact or '-' }}</td>
+      <td>{{ mem.items|length }}</td>
+      <td>{{ mem.locations|length }}</td>
+    </tr>
+    {% endfor %}
+    {% if members|length == 0 %}
+    <tr><td colspan="5" class="text-center text-muted">暂无成员</td></tr>
+    {% endif %}
+  </tbody>
+</table>
+{% endblock %}

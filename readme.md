@@ -155,7 +155,7 @@ id (主键), sender_id (外键), content, timestamp
 
 注: 请确保安装上述依赖库 (pip install flask flask-login flask-sqlalchemy pandas) 并在项目根目录下创建 static/images 文件夹用于保存上传的图片。以下是完整的代码文件列表，请按照对应文件名和路径保存。在终端进入项目目录后，运行 python app.py 启动 Flask 应用。
 
-app.py (Flask 后端代码)
+# app.py (Flask 后端代码)
 
 import os
 from datetime import datetime
@@ -643,7 +643,7 @@ def export_data(datatype):
 if __name__ == '__main__':
     app.run(debug=False)
 
-templates/base.html
+# templates/base.html
 
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -739,7 +739,7 @@ templates/base.html
 </body>
 </html>
 
-templates/login.html
+# templates/login.html
 
 {% extends "base.html" %}
 {% block content %}
@@ -793,7 +793,7 @@ templates/register.html
 </div>
 {% endblock %}
 
-templates/items.html
+# templates/items.html
 
 {% extends "base.html" %}
 {% block content %}
@@ -864,7 +864,7 @@ templates/items.html
 </table>
 {% endblock %}
 
-templates/item_form.html
+# templates/item_form.html
 
 {% extends "base.html" %}
 {% block content %}
@@ -956,7 +956,7 @@ templates/item_form.html
 </script>
 {% endblock %}
 
-templates/item_detail.html
+# templates/item_detail.html
 
 {% extends "base.html" %}
 {% block content %}
@@ -1001,7 +1001,7 @@ templates/item_detail.html
 </div>
 {% endblock %}
 
-templates/locations.html
+# templates/locations.html
 
 {% extends "base.html" %}
 {% block content %}
@@ -1036,7 +1036,7 @@ templates/locations.html
 </table>
 {% endblock %}
 
-templates/location_form.html
+# templates/location_form.html
 
 {% extends "base.html" %}
 {% block content %}
@@ -1090,7 +1090,7 @@ templates/location_form.html
 </script>
 {% endblock %}
 
-templates/location.html
+# templates/location.html
 
 {% extends "base.html" %}
 {% block content %}
@@ -1174,7 +1174,7 @@ templates/location.html
 </ul>
 {% endblock %}
 
-templates/members.html
+# templates/members.html
 
 {% extends "base.html" %}
 {% block content %}
@@ -1200,7 +1200,7 @@ templates/members.html
 </table>
 {% endblock %}
 
-templates/profile.html
+# templates/profile.html
 
 {% extends "base.html" %}
 {% block content %}
@@ -1315,7 +1315,7 @@ templates/profile.html
 </div>
 {% endblock %}
 
-templates/edit_profile.html
+# templates/edit_profile.html
 
 {% extends "base.html" %}
 {% block content %}

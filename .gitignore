@@ -1,5 +1,6 @@
 venv/
-instance/
+instance/**/*
 __pycache__/
+static/**/*
 *.pyc
 *.sqlite3

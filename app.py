@@ -52,7 +52,12 @@ class Item(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)    # 物品名称
     category = db.Column(db.String(50))                 # 类别/危险级别
-    status = db.Column(db.String(50))                   # 当前状态（库存/危险等）
+    stock_status = db.Column(db.String(50))        # ✅ 新增字段：库存状态
+    features = db.Column(db.String(200))           # ✅ 多选：用逗号分隔
+    value = db.Column(db.Float)                    # ✅ 价值（数字）
+    quantity = db.Column(db.Float)                 # ✅ 数量
+    unit = db.Column(db.String(20))                # ✅ 单位（例如：瓶、包）
+    purchase_date = db.Column(db.Date)             # ✅ 购入时间
     responsible_id = db.Column(db.Integer, db.ForeignKey('members.id'))  # 负责人（成员ID）
     location_id = db.Column(db.Integer, db.ForeignKey('locations.id'))   # 存放位置（位置ID）
     image = db.Column(db.String(200))                   # 图片文件名
@@ -193,39 +198,72 @@ def item_detail(item_id):
 @login_required
 def add_item():
     if request.method == 'POST':
-        # 获取表单数据并创建新物品
+        # 获取表单数据
         name = request.form.get('name')
         category = request.form.get('category')
-        status = request.form.get('status')
+
+        stock_status = request.form.get('stock_status')  # ✅ 单选字段
+        features_str = request.form.get('features')  # 返回单个字符串
+
+        value = request.form.get('value')
+        value = float(value) if value else None          # ✅ 数字输入
+
+        quantity = request.form.get('quantity')
+        quantity = float(quantity) if quantity else None # ✅ 数量输入
+        unit = request.form.get('unit')                  # ✅ 单位选择
+
+        purchase_date_str = request.form.get('purchase_date')  # ✅ 日期处理
+        purchase_date = datetime.strptime(purchase_date_str, '%Y-%m-%d').date() if purchase_date_str else None
+
         responsible_id = request.form.get('responsible_id')
         location_id = request.form.get('location_id')
         notes = request.form.get('notes')
         purchase_link = request.form.get('purchase_link')
+
+        # 图片处理
         image_file = request.files.get('image')
         image_filename = None
         if image_file and image_file.filename != '' and allowed_file(image_file.filename):
-            # 保存上传的物品图片文件
             os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
             filename = secure_filename(image_file.filename)
             filename = datetime.now().strftime("%Y%m%d%H%M%S_") + filename
             image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             image_file.save(image_path)
             image_filename = filename
+
+        # ✅ 创建新的 Item 实例（已更新字段）
         new_item = Item(
-            name=name, category=category, status=status,
+            name=name,
+            category=category,
+            stock_status=stock_status,
+            features=features_str,
+            value=value,
+            quantity=quantity,
+            unit=unit,
+            purchase_date=purchase_date,
             responsible_id=responsible_id if responsible_id else None,
             location_id=location_id if location_id else None,
-            notes=notes, purchase_link=purchase_link, image=image_filename
+            notes=notes,
+            purchase_link=purchase_link,
+            image=image_filename
         )
         db.session.add(new_item)
         db.session.commit()
-        # 记录日志
-        log = Log(user_id=current_user.id, item_id=new_item.id, action_type="新增物品", details=f"Added item {new_item.name}")
+
+        # ✅ 写入日志
+        log = Log(
+            user_id=current_user.id,
+            item_id=new_item.id,
+            action_type="新增物品",
+            details=f"Added item {new_item.name}"
+        )
         db.session.add(log)
         db.session.commit()
+
         flash('物品已添加', 'success')
         return redirect(url_for('items'))
-    # GET 请求时，返回物品添加表单
+
+    # GET 请求
     members = Member.query.all()
     locations = Location.query.all()
     return render_template('item_form.html', members=members, locations=locations, item=None)
@@ -238,11 +276,23 @@ def edit_item(item_id):
         # 更新物品信息
         item.name = request.form.get('name')
         item.category = request.form.get('category')
-        item.status = request.form.get('status')
+        
+        item.stock_status = request.form.get('stock_status')  # 单选库存状态
+        item.features = request.form.get('features')          # 单选物品特性
+        
+        item.value = request.form.get('value', type=float)    # 新增：价值（数值）
+        item.quantity = request.form.get('quantity', type=float)  # 数量（数字）
+        item.unit = request.form.get('unit')                      # 数量单位
+
+        purchase_date_str = request.form.get('purchase_date')
+        if purchase_date_str:
+            item.purchase_date = datetime.strptime(purchase_date_str, '%Y-%m-%d').date()
+
         item.responsible_id = request.form.get('responsible_id')
         item.location_id = request.form.get('location_id')
         item.notes = request.form.get('notes')
         item.purchase_link = request.form.get('purchase_link')
+
         # 处理图片更新（如果有新上传）
         image_file = request.files.get('image')
         if image_file and image_file.filename != '' and allowed_file(image_file.filename):
@@ -251,16 +301,19 @@ def edit_item(item_id):
             filename = datetime.now().strftime("%Y%m%d%H%M%S_") + filename
             image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             image_file.save(image_path)
-            # 可选：删除旧图片文件以节省空间（此处暂不删除）
-            item.image = filename
+            item.image = filename  # 更新图片路径
+
         item.last_modified = datetime.utcnow()
         db.session.commit()
+
         # 记录日志
         log = Log(user_id=current_user.id, item_id=item.id, action_type="修改物品", details=f"Edited item {item.name}")
         db.session.add(log)
         db.session.commit()
+
         flash('物品信息已更新', 'success')
         return redirect(url_for('items'))
+
     members = Member.query.all()
     locations = Location.query.all()
     return render_template('item_form.html', members=members, locations=locations, item=item)
@@ -482,4 +535,4 @@ def export_data(datatype):
     return send_file(filename, as_attachment=True, mimetype='text/csv', download_name=filename)
 
 if __name__ == '__main__':
-    app.run(debug=False)
+    app.run(debug=True)

@@ -11,25 +11,44 @@
     <input type="text" class="form-control" id="category" name="category" value="{{ item.category if item else '' }}">
   </div>
   <div class="mb-3">
-    <label for="status" class="form-label">状态</label>
-    <select id="status" name="status" class="form-select">
-      <option value="" {% if not item or not item.status %}selected{% endif %}>--选择状态--</option>
-      <optgroup label="库存状态">
-        <option value="充足" {% if item and item.status == '充足' %}selected{% endif %}>充足</option>
-        <option value="少量" {% if item and item.status == '少量' %}selected{% endif %}>少量</option>
-        <option value="用完" {% if item and item.status == '用完' %}selected{% endif %}>用完</option>
-      </optgroup>
-      <optgroup label="物品特性">
-        <option value="安全" {% if item and item.status == '安全' %}selected{% endif %}>安全</option>
-        <option value="一般" {% if item and item.status == '一般' %}selected{% endif %}>一般</option>
-        <option value="危险" {% if item and item.status == '危险' %}selected{% endif %}>危险</option>
-        <option value="昂贵" {% if item and item.status == '昂贵' %}selected{% endif %}>昂贵</option>
-      </optgroup>
-      {% if item and item.status not in ['充足','少量','用完','安全','一般','危险','昂贵'] and item.status %}
-      <!-- 保留编辑时的其他状态选项 -->
-      <option value="{{ item.status }}" selected>{{ item.status }}</option>
-      {% endif %}
+    <label for="stock_status">库存状态</label>
+    <select name="stock_status" class="form-select">
+      {% for opt in ['充足','少量','用完','舍弃'] %}
+      <option value="{{ opt }}" {% if item and item.stock_status == opt %}selected{% endif %}>{{ opt }}</option>
+      {% endfor %}
     </select>
+  </div>
+
+  <div class="mb-3">
+    <label for="features" class="form-label">物品特性</label>
+    <select name="features" class="form-select">
+      <option value="">-- 请选择 --</option>
+      {% for opt in ['安全','注意','危险'] %}
+      <option value="{{ opt }}" {% if item and item.features == opt %}selected{% endif %}>{{ opt }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="mb-3">
+    <label for="value">价值（￥）</label>
+    <input type="number" step="0.01" class="form-control" name="value" value="{{ item.value if item else '' }}">
+  </div>
+
+  <div class="mb-3">
+    <label for="quantity">数量</label>
+    <div class="input-group">
+      <input type="number" step="0.01" class="form-control" name="quantity" value="{{ item.quantity if item else '' }}">
+      <select class="form-select" name="unit">
+        {% for u in ['瓶','个','包','支','盒','ml','g'] %}
+          <option value="{{ u }}" {% if item and item.unit == u %}selected{% endif %}>{{ u }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
+  <div class="mb-3">
+    <label for="purchase_date">购入时间</label>
+    <input type="date" name="purchase_date" class="form-control" value="{{ item.purchase_date if item and item.purchase_date else '' }}">
   </div>
   <div class="mb-3">
     <label for="responsible" class="form-label">负责人</label>

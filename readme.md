@@ -886,17 +886,32 @@ templates/register.html
         <option value="充足" {% if item and item.status == '充足' %}selected{% endif %}>充足</option>
         <option value="少量" {% if item and item.status == '少量' %}selected{% endif %}>少量</option>
         <option value="用完" {% if item and item.status == '用完' %}selected{% endif %}>用完</option>
+        <option value="舍弃" {% if item and item.status == '舍弃' %}selected{% endif %}>舍弃</option>
+
       </optgroup>
       <optgroup label="物品特性">
         <option value="安全" {% if item and item.status == '安全' %}selected{% endif %}>安全</option>
-        <option value="一般" {% if item and item.status == '一般' %}selected{% endif %}>一般</option>
+        <option value="注意" {% if item and item.status == '注意' %}selected{% endif %}>注意</option>
         <option value="危险" {% if item and item.status == '危险' %}selected{% endif %}>危险</option>
+      </optgroup>
+      <optgroup label="价值">
+        <option value="便宜" {% if item and item.status == '便宜' %}selected{% endif %}>便宜</option>
+        <option value="一般" {% if item and item.status == '一般' %}selected{% endif %}>一般</option>
         <option value="昂贵" {% if item and item.status == '昂贵' %}selected{% endif %}>昂贵</option>
       </optgroup>
-      {% if item and item.status not in ['充足','少量','用完','安全','一般','危险','昂贵'] and item.status %}
+      {% if item and item.status not in ['充足','少量','用完','舍弃','安全','注意','危险','便宜','一般','昂贵'] and item.status %}
       <!-- 保留编辑时的其他状态选项 -->
       <option value="{{ item.status }}" selected>{{ item.status }}</option>
       {% endif %}
+    </select>
+  </div>
+  <div class="mb-3">
+    <label for="responsible" class="form-label">负责人</label>
+    <select id="responsible" name="responsible_id" class="form-select">
+      <option value="">(未指定)</option>
+      {% for m in members %}
+      <option value="{{ m.id }}" {% if item and item.responsible_id == m.id %}selected{% endif %}>{{ m.name }}</option>
+      {% endfor %}
     </select>
   </div>
   <div class="mb-3">

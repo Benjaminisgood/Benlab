@@ -6,7 +6,21 @@
     <ul class="list-group mb-3">
       <li class="list-group-item"><strong>名称:</strong> {{ item.name }}</li>
       <li class="list-group-item"><strong>类别:</strong> {{ item.category or '未分类' }}</li>
-      <li class="list-group-item"><strong>状态:</strong> {{ item.status or '未指定' }}</li>
+      
+      <li class="list-group-item"><strong>库存状态:</strong> {{ item.stock_status or '未指定' }}</li>
+      <li class="list-group-item"><strong>物品特性:</strong> {{ item.features or '未指定' }}</li>
+      <li class="list-group-item"><strong>价值:</strong> {{ item.value if item.value is not none else '未指定' }}</li>
+      <li class="list-group-item"><strong>数量:</strong> 
+        {% if item.quantity is not none and item.unit %}
+          {{ item.quantity }} {{ item.unit }}
+        {% else %}
+          未指定
+        {% endif %}
+      </li>
+      <li class="list-group-item"><strong>购入时间:</strong> 
+        {{ item.purchase_date.strftime('%Y-%m-%d') if item.purchase_date else '未指定' }}
+      </li>
+
       <li class="list-group-item"><strong>负责人:</strong>
         {% if item.responsible_member %}
           <a href="{{ url_for('profile', member_id=item.responsible_member.id) }}">{{ item.responsible_member.name }}</a>
@@ -17,20 +31,28 @@
           <a href="{{ url_for('view_location', loc_id=item.location.id) }}">{{ item.location.name }}</a>
         {% else %} 未指定 {% endif %}
       </li>
-      <li class="list-group-item"><strong>最近更新时间:</strong> {{ item.last_modified.strftime("%Y-%m-%d %H:%M:%S") if item.last_modified else '' }}</li>
+      <li class="list-group-item"><strong>最近更新时间:</strong> 
+        {{ item.last_modified.strftime("%Y-%m-%d %H:%M:%S") if item.last_modified else '' }}
+      </li>
+      
       {% if item.purchase_link %}
-      <li class="list-group-item"><strong>购买链接:</strong> <a href="{{ item.purchase_link }}" target="_blank">点击打开</a></li>
+      <li class="list-group-item"><strong>购买链接:</strong> 
+        <a href="{{ item.purchase_link }}" target="_blank">点击打开</a>
+      </li>
       {% endif %}
+      
       {% if item.notes %}
       <li class="list-group-item"><strong>备注:</strong><br>{{ item.notes }}</li>
       {% endif %}
     </ul>
+
     <a href="{{ url_for('edit_item', item_id=item.id) }}" class="btn btn-primary">编辑</a>
     <form action="{{ url_for('delete_item', item_id=item.id) }}" method="post" class="d-inline" onsubmit="return confirm('确定删除该物品吗？');">
       <button type="submit" class="btn btn-danger">删除</button>
     </form>
     <a href="{{ url_for('items') }}" class="btn btn-secondary">返回列表</a>
   </div>
+
   <div class="col-md-6">
     {% if item.image %}
       <img src="{{ url_for('static', filename='images/' + item.image) }}" alt="物品图片" class="img-fluid img-thumbnail">

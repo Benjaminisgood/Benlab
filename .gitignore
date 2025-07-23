@@ -6,4 +6,5 @@ static/**/*
 *.sqlite3
 instance/
 *.db
-
+migrations/versions/
+migrations/

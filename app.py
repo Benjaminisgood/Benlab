@@ -5,6 +5,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
+from collections import Counter
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'supersecretkey'  # 为安全起见，部署时请使用更复杂的随机值
@@ -413,7 +414,17 @@ def view_location(loc_id):
     location = Location.query.get_or_404(loc_id)
     # 获取该位置包含的所有物品及其坐标
     items_at_location = Item.query.filter_by(location_id=loc_id).all()
-    return render_template('location.html', location=location, items=items_at_location)
+        # 分类统计状态标签（如：用完、少量、充足）
+    status_counter = Counter()
+    for item in items_at_location:
+        if item.stock_status:
+            statuses = item.stock_status.split(',')  # 支持多个状态
+            for s in statuses:
+                status_counter[s.strip()] += 1
+
+    return render_template('location.html', location=location, 
+                           items=items_at_location,
+                           status_counter=status_counter)
 
 @app.route('/locations/<int:loc_id>/set_item_position', methods=['POST'])
 @login_required
@@ -438,6 +449,16 @@ def set_item_position(loc_id):
     else:
         flash("无效的物品或位置", "danger")
     return redirect(url_for('view_location', loc_id=loc_id))
+
+@app.route('/locations/reset_position/<int:item_id>', methods=['POST'])
+@login_required
+def reset_item_position(item_id):
+    item = Item.query.get_or_404(item_id)
+    item.pos_x = None
+    item.pos_y = None
+    db.session.commit()
+    flash(f"已重置物品 {item.name} 的位置", "info")
+    return redirect(url_for('view_location', loc_id=request.form.get('loc_id')))
 
 @app.route('/members')
 @login_required

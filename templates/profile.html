@@ -27,7 +27,7 @@
       {% for it in items_resp %}
       <li class="list-group-item">
         <a href="{{ url_for('item_detail', item_id=it.id) }}">{{ it.name }}</a>
-        {% if it.status %}<span class="badge bg-secondary">{{ it.status }}</span>{% endif %}
+        {% if it.stock_status %}<span class="badge bg-secondary">{{ it.stock_status }}</span>{% endif %}
       </li>
       {% else %}
       <li class="list-group-item text-muted">无负责物品</li>

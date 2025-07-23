@@ -9,27 +9,57 @@
   <br><small class="text-muted">{{ location.notes }}</small>
   {% endif %}
 </p>
+<p>最近修改：{{ location.last_modified.strftime('%Y-%m-%d %H:%M') if location.last_modified else '未知' }}</p>
+
+<h5 class="mt-4">物品统计</h5>
+<ul class="list-group mb-3">
+  <li class="list-group-item">总数：<strong>{{ items|length }}</strong></li>
+  {% for label, count in status_counter.items() %}
+    <li class="list-group-item">{{ label }}：<span class="badge bg-info">{{ count }}</span></li>
+  {% endfor %}
+</ul>
+
 {% if location.image %}
-  <div class="mb-3">
-    <div class="position-relative border" style="display: inline-block;">
-      <img id="locationImg" src="{{ url_for('static', filename='images/' + location.image) }}" alt="{{ location.name }}" class="img-fluid">
-      {% for it in items %}
-        {% if it.pos_x is not none and it.pos_y is not none %}
-        <a href="{{ url_for('item_detail', item_id=it.id) }}" class="pin-icon" style="left: {{ it.pos_x }}%; top: {{ it.pos_y }}%;" title="{{ it.name }}">📌</a>
-        {% endif %}
-      {% endfor %}
-    </div>
+<div class="mb-3">
+  <div class="position-relative border" id="mapWrapper" style="display: inline-block;">
+    <img id="locationImg" src="{{ url_for('static', filename='images/' + location.image) }}" alt="{{ location.name }}" class="img-fluid">
+    {% for it in items if it.pos_x is not none and it.pos_y is not none %}
+      <div class="pin-icon" style="left: {{ it.pos_x }}%; top: {{ it.pos_y }}%;" data-id="{{ it.id }}" title="{{ it.name }}">
+        📍
+        <div class="pin-popup d-none" id="popup-{{ it.id }}">
+          <div><strong><a href="{{ url_for('item_detail', item_id=it.id) }}">{{ it.name }}</a></strong></div>
+          {% if it.stock_status %}
+            <div><span class="badge bg-secondary">状态：{{ it.stock_status }}</span></div>
+          {% endif %}
+          {% if it.quantity %}
+            <div>数量：{{ it.quantity }}{% if it.unit %} {{ it.unit }}{% endif %}</div>
+          {% endif %}
+          {% if it.responsible_member %}
+            <div>负责人：<small>{{ it.responsible_member.name }}</small></div>
+          {% endif %}
+          {% if it.notes %}
+            <div><small class="text-muted">备注：{{ it.notes|truncate(50) }}</small></div>
+          {% endif %}
+          <form method="post" action="{{ url_for('reset_item_position', item_id=it.id) }}">
+            <input type="hidden" name="loc_id" value="{{ location.id }}">
+            <button type="submit" class="btn btn-sm btn-outline-danger">重置位置</button>
+          </form>
+        </div>
+      </div>
+    {% endfor %}
   </div>
-  {% set items_no_pos = items|selectattr("pos_x", "==", none) | list %}
-  {% if items_no_pos %}
+</div>
+
+{% set unplaced_items = items|selectattr("pos_x", "==", none) | list %}
+{% if unplaced_items %}
   <form method="post" action="{{ url_for('set_item_position', loc_id=location.id) }}" class="mb-4">
     <div class="row align-items-center">
       <div class="col-auto">
-        <label for="itemSelect" class="form-label mb-0">将物品标记在图中:</label>
+        <label for="itemSelect" class="form-label mb-0">标记新物品:</label>
       </div>
       <div class="col-auto">
         <select id="itemSelect" name="item_id" class="form-select">
-          {% for it in items_no_pos %}
+          {% for it in unplaced_items %}
           <option value="{{ it.id }}">{{ it.name }}</option>
           {% endfor %}
         </select>
@@ -44,38 +74,109 @@
       </div>
     </div>
   </form>
-  <script>
-    // 点击图片获取坐标脚本
-    const locImg = document.getElementById('locationImg');
-    if(locImg) {
-      locImg.addEventListener('click', function(e) {
-        const rect = locImg.getBoundingClientRect();
-        const xPercent = ((e.clientX - rect.left) / rect.width) * 100;
-        const yPercent = ((e.clientY - rect.top) / rect.height) * 100;
-        const posXInput = document.getElementById('posX');
-        const posYInput = document.getElementById('posY');
-        if(posXInput && posYInput) {
-          posXInput.value = xPercent.toFixed(2);
-          posYInput.value = yPercent.toFixed(2);
-        }
-      });
-    }
-  </script>
-  {% endif %}
-{% else %}
-  <p class="text-muted">无图片</p>
 {% endif %}
+{% else %}
+<p class="text-muted">无图片</p>
+{% endif %}
+
 <h5 class="mt-4">包含的物品</h5>
 <ul class="list-group">
   {% for it in items %}
     <li class="list-group-item">
-      {% if it.pos_x is not none and it.pos_y is not none %}📌 {% endif %}
       <a href="{{ url_for('item_detail', item_id=it.id) }}">{{ it.name }}</a>
-      {% if it.status %}<span class="badge bg-secondary">{{ it.status }}</span>{% endif %}
-      {% if it.responsible_member %}<small class="text-muted"> - {{ it.responsible_member.name }}</small>{% endif %}
+      {% if it.stock_status %}
+        <span class="badge bg-secondary">{{ it.stock_status }}</span>
+      {% endif %}
+      {% if it.responsible_member %}
+        <small class="text-muted"> - {{ it.responsible_member.name }}</small>
+      {% endif %}
     </li>
   {% else %}
     <li class="list-group-item text-muted">（此位置暂无物品）</li>
   {% endfor %}
 </ul>
+
+<style>
+  .pin-icon {
+    position: absolute;
+    transform: translate(-50%, -100%);
+    cursor: pointer;
+    font-size: 1.5rem;
+    color: #e74c3c;
+    text-shadow: 0 0 2px rgba(0, 0, 0, 0.2);
+    transition: transform 0.2s, filter 0.2s;
+  }
+
+  .pin-icon:hover {
+    transform: translate(-50%, -110%) scale(1.1);
+    filter: brightness(1.2);
+  }
+
+  .pin-popup {
+    position: absolute;
+    top: -10px;
+    left: 30px;
+    background: #fff;
+    border: 1px solid #ccc;
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    z-index: 10;
+    width: max-content;
+    max-width: 240px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    font-size: 0.9rem;
+    line-height: 1.4;
+  }
+
+  .pin-popup.d-none {
+    display: none;
+  }
+
+  .pin-popup small {
+    color: #888;
+  }
+
+  .pin-popup .badge {
+    font-size: 0.75rem;
+  }
+
+  .pin-popup .btn {
+    font-size: 0.75rem;
+    padding: 0.2rem 0.6rem;
+    margin-top: 0.5rem;
+  }
+</style>
+
+<script>
+  const img = document.getElementById('locationImg');
+  const posXInput = document.getElementById('posX');
+  const posYInput = document.getElementById('posY');
+
+  if (img) {
+    img.addEventListener('click', e => {
+      const rect = img.getBoundingClientRect();
+      const x = ((e.clientX - rect.left) / rect.width) * 100;
+      const y = ((e.clientY - rect.top) / rect.height) * 100;
+      if (posXInput && posYInput) {
+        posXInput.value = x.toFixed(2);
+        posYInput.value = y.toFixed(2);
+      }
+    });
+  }
+
+  // 弹窗逻辑：点击图钉显示信息，点击空白隐藏
+  document.querySelectorAll('.pin-icon').forEach(pin => {
+    pin.addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.querySelectorAll('.pin-popup').forEach(p => p.classList.add('d-none'));
+      const popup = pin.querySelector('.pin-popup');
+      if (popup) popup.classList.remove('d-none');
+    });
+  });
+
+  document.addEventListener('click', () => {
+    document.querySelectorAll('.pin-popup').forEach(p => p.classList.add('d-none'));
+  });
+</script>
+
 {% endblock %}

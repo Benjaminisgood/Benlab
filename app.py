@@ -6,6 +6,8 @@ from flask_login import LoginManager, UserMixin, login_user, logout_user, login_
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from collections import Counter
+from sqlalchemy.orm import selectinload
+
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'supersecretkey'  # 为安全起见，部署时请使用更复杂的随机值
@@ -76,6 +78,11 @@ class Location(db.Model):
     __tablename__ = 'locations'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)    # 位置名称
+    parent_id = db.Column(db.Integer, db.ForeignKey('locations.id'))  # 父级位置
+    
+    children = db.relationship('Location',
+                            backref=db.backref('parent', remote_side=[id]),
+                            cascade='all, delete-orphan')
     responsible_id = db.Column(db.Integer, db.ForeignKey('members.id'))  # 负责人（成员ID）
     image = db.Column(db.String(200))                   # 位置图片文件名
     notes = db.Column(db.Text)                          # 备注
@@ -335,7 +342,10 @@ def delete_item(item_id):
 @app.route('/locations')
 @login_required
 def locations_list():
-    locations = Location.query.order_by(Location.name).all()
+    locations = Location.query.options(
+        # selectinload 用于加载多级 children 避免 N+1 查询问题
+        db.selectinload(Location.children).selectinload(Location.children)
+    ).order_by(Location.name).all()
     return render_template('locations.html', locations=locations)
 
 @app.route('/locations/add', methods=['GET', 'POST'])
@@ -344,6 +354,7 @@ def add_location():
     if request.method == 'POST':
         # 获取并保存新的位置记录
         name = request.form.get('name')
+        parent_id = request.form.get('parent_id')
         responsible_id = request.form.get('responsible_id')
         notes = request.form.get('notes')
         image_file = request.files.get('image')
@@ -355,17 +366,26 @@ def add_location():
             image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             image_file.save(image_path)
             image_filename = filename
-        new_loc = Location(name=name, responsible_id=responsible_id if responsible_id else None, notes=notes, image=image_filename)
+        new_loc = Location(
+            name=name,
+            parent_id=parent_id if parent_id else None,
+            responsible_id=responsible_id if responsible_id else None,
+            notes=notes,
+            image=image_filename
+        )
         db.session.add(new_loc)
         db.session.commit()
         # 记录日志
         log = Log(user_id=current_user.id, location_id=new_loc.id, action_type="新增位置", details=f"Added location {new_loc.name}")
         db.session.add(log)
         db.session.commit()
+
         flash('实验室位置已添加', 'success')
         return redirect(url_for('locations_list'))
+    
     members = Member.query.all()
-    return render_template('location_form.html', members=members, location=None)
+    parents = Location.query.all()
+    return render_template('location_form.html', members=members, location=None, parents=parents)
 
 @app.route('/locations/<int:loc_id>/edit', methods=['GET', 'POST'])
 @login_required

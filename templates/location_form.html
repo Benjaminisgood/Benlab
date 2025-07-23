@@ -16,6 +16,15 @@
     </select>
   </div>
   <div class="mb-3">
+    <label for="parent_id" class="form-label">父位置（可选）</label>
+    <select name="parent_id" id="parent_id" class="form-select">
+      <option value="">无</option>
+      {% for parent in parents %}
+        <option value="{{ parent.id }}">{{ parent.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="mb-3">
     <label for="imageInput" class="form-label">位置图片 (可选)</label>
     {% if location and location.image %}
     <div class="mb-2">

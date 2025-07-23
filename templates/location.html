@@ -9,7 +9,25 @@
   <br><small class="text-muted">{{ location.notes }}</small>
   {% endif %}
 </p>
+
 <p>最近修改：{{ location.last_modified.strftime('%Y-%m-%d %H:%M') if location.last_modified else '未知' }}</p>
+{% macro render_children(parent) %}
+<ul class="list-group mb-2 ms-3">
+  {% for child in parent.children %}
+    <li class="list-group-item">
+      <a href="{{ url_for('view_location', loc_id=child.id) }}">{{ child.name }}</a>
+      {% if child.children %}
+        {{ render_children(child) }}
+      {% endif %}
+    </li>
+  {% endfor %}
+</ul>
+{% endmacro %}
+
+{% if location.children %}
+  <h5 class="mt-4">子区域</h5>
+  {{ render_children(location) }}
+{% endif %}
 
 <h5 class="mt-4">物品统计</h5>
 <ul class="list-group mb-3">

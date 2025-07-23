@@ -20,26 +20,50 @@
     </div>
   </div>
 </div>
+{% if any_item_empty %}
+  <div class="alert alert-danger">你有库存用完的物品，请尽快处理！</div>
+{% endif %}
+{% if any_location_dirty %}
+  <div class="alert alert-danger">你有卫生差的位置，请尽快清洁！</div>
+{% endif %}
 <div class="row">
   <div class="col-md-6">
     <h5>负责的物品</h5>
     <ul class="list-group mb-4">
       {% for it in items_resp %}
-      <li class="list-group-item">
-        <a href="{{ url_for('item_detail', item_id=it.id) }}">{{ it.name }}</a>
-        {% if it.stock_status %}<span class="badge bg-secondary">{{ it.stock_status }}</span>{% endif %}
+      <li class="list-group-item d-flex justify-content-between align-items-center">
+        <div>
+          <a href="{{ url_for('item_detail', item_id=it.id) }}">{{ it.name }}</a>
+          {% if it.stock_status %}
+            <span class="badge bg-secondary">{{ it.stock_status }}</span>
+          {% endif %}
+        </div>
+        {% if it.stock_status and '用完' in it.stock_status %}
+          <span class="badge bg-danger">⚠ 用完</span>
+          <a href="{{ url_for('edit_item', item_id=it.id) }}" class="btn btn-sm btn-outline-primary">去购买</a>
+        {% endif %}
       </li>
       {% else %}
       <li class="list-group-item text-muted">无负责物品</li>
       {% endfor %}
     </ul>
   </div>
+
   <div class="col-md-6">
     <h5>负责的位置</h5>
     <ul class="list-group mb-4">
       {% for loc in locations_resp %}
-      <li class="list-group-item">
-        <a href="{{ url_for('view_location', loc_id=loc.id) }}">{{ loc.name }}</a>
+      <li class="list-group-item d-flex justify-content-between align-items-center">
+        <div>
+          <a href="{{ url_for('view_location', loc_id=loc.id) }}">{{ loc.name }}</a>
+          {% if loc.clean_status %}
+            <span class="badge bg-secondary">{{ loc.clean_status }}</span>
+          {% endif %}
+        </div>
+        {% if loc.clean_status == '脏' %}
+          <span class="badge bg-danger">⚠ 卫生差</span>
+          <a href="{{ url_for('edit_location', loc_id=loc.id) }}" class="btn btn-sm btn-outline-primary">去打扫</a>
+        {% endif %}
       </li>
       {% else %}
       <li class="list-group-item text-muted">无负责位置</li>
@@ -47,6 +71,7 @@
     </ul>
   </div>
 </div>
+
 {% if current_user.id == profile_user.id %}
 <div class="mb-4">
   <h5>通知</h5>

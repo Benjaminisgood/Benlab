@@ -1557,3 +1557,74 @@ git push
 如果你希望我帮你配置 .github/workflows/ 自动部署或打包项目到 Flask 服务器，我也可以继续生成！
 
 要不要我也帮你补上 README.md 自动生成文档？✅
+
+
+我们在执行迁移命令时由于超时中断了。你可以直接在你的终端中一步一步执行以下命令来完成 Flask-Migrate 的数据库初始化与更新。以下是完整步骤和解释，确保你理解每一步的目的：
+
+⸻
+
+🧪 Flask-Migrate 数据库迁移流程
+
+✅ 步骤 1：安装依赖
+
+pip install flask-migrate
+
+确保你的虚拟环境已激活，否则就会装到全局环境里。
+
+⸻
+
+✅ 步骤 2：修改 app.py 支持 Flask-Migrate
+
+在 app.py 里加入以下内容（你已写了 db = SQLAlchemy(app)）：
+
+from flask_migrate import Migrate
+
+# 在 db 初始化之后加
+migrate = Migrate(app, db)
+
+
+⸻
+
+✅ 步骤 3：初始化迁移目录
+
+在项目根目录执行：
+
+export FLASK_APP=app.py  # Mac/Linux
+# set FLASK_APP=app.py  # Windows
+
+flask db init
+
+会创建一个 migrations/ 文件夹用于跟踪迁移历史。
+
+⸻
+
+✅ 步骤 4：生成初始迁移脚本
+
+flask db migrate -m "Initial migration"
+
+这一步会根据模型变化自动生成迁移脚本（不会立即修改数据库）。
+
+⸻
+
+✅ 步骤 5：应用迁移到数据库
+
+flask db upgrade
+
+这一步会根据上一步生成的脚本修改你的 SQLite 数据库结构，新增字段如 stock_status, features, value 等就会正式加入数据库结构中。
+
+⸻
+
+📌 注意事项
+	•	之后你每次修改模型类（例如添加字段），都应该执行：
+
+flask db migrate -m "Added xxx"
+flask db upgrade
+
+	•	如果报错 “target database is not up to date”，可以用：
+
+flask db stamp head
+
+
+⸻
+
+是否需要我帮你生成一个 bash 脚本或 Makefile 来一键执行这些操作？或者你在执行过程中遇到报错，我可以帮你分析。你可以贴出终端报错信息。

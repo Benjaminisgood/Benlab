@@ -28,7 +28,19 @@
   <h5 class="mt-4">子区域</h5>
   {{ render_children(location) }}
 {% endif %}
-
+{% if location.clean_status %}
+<p>卫生状态：
+  <span class="badge 
+      {% if location.clean_status == '干净' %}bg-success
+      {% elif location.clean_status == '一般' %}bg-warning text-dark
+      {% elif location.clean_status == '脏' %}bg-danger
+      {% else %}bg-secondary
+      {% endif %}
+    ">
+    {{ location.clean_status }}
+  </span>
+</p>
+{% endif %}
 <h5 class="mt-4">物品统计</h5>
 <ul class="list-group mb-3">
   <li class="list-group-item">总数：<strong>{{ items|length }}</strong></li>
@@ -54,6 +66,26 @@
           {% endif %}
           {% if it.responsible_member %}
             <div>负责人：<small>{{ it.responsible_member.name }}</small></div>
+          {% endif %}
+          {% if location.clean_status %}
+          <p>卫生状态：
+            <span class="badge 
+                {% if location.clean_status == '干净' %}bg-success
+                {% elif location.clean_status == '一般' %}bg-warning text-dark
+                {% elif location.clean_status == '脏' %}bg-danger
+                {% endif %}
+              ">
+                {{ location.clean_status }}
+              </span>
+            </p>
+          {% endif %}
+          {% if it.image %}
+            <div class="mb-2">
+              <img src="{{ url_for('static', filename='images/' + it.image) }}" alt="物品图片" class="img-thumbnail" style="max-width:150px;">
+            </div>
+          {% endif %}
+          {% if it.notes %}
+            <div><small class="text-muted">备注：{{ it.notes|truncate(50) }}</small></div>
           {% endif %}
           {% if it.notes %}
             <div><small class="text-muted">备注：{{ it.notes|truncate(50) }}</small></div>

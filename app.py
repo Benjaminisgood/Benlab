@@ -7,7 +7,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from collections import Counter
 from sqlalchemy.orm import selectinload
-
+from flask_migrate import Migrate
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'supersecretkey'  # 为安全起见，部署时请使用更复杂的随机值
@@ -17,6 +17,7 @@ app.config['UPLOAD_FOLDER'] = os.path.join('static', 'images')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 限制上传16MB以内的文件
 
 db = SQLAlchemy(app)
+migrate = Migrate(app, db)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
@@ -79,7 +80,7 @@ class Location(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)    # 位置名称
     parent_id = db.Column(db.Integer, db.ForeignKey('locations.id'))  # 父级位置
-    
+    clean_status = db.Column(db.String(20))
     children = db.relationship('Location',
                             backref=db.backref('parent', remote_side=[id]),
                             cascade='all, delete-orphan')
@@ -354,6 +355,7 @@ def add_location():
     if request.method == 'POST':
         # 获取并保存新的位置记录
         name = request.form.get('name')
+        clean_status = request.form.get('clean_status') or None
         parent_id = request.form.get('parent_id')
         responsible_id = request.form.get('responsible_id')
         notes = request.form.get('notes')
@@ -371,7 +373,8 @@ def add_location():
             parent_id=parent_id if parent_id else None,
             responsible_id=responsible_id if responsible_id else None,
             notes=notes,
-            image=image_filename
+            image=image_filename,
+            clean_status=clean_status
         )
         db.session.add(new_loc)
         db.session.commit()
@@ -397,6 +400,7 @@ def edit_location(loc_id):
         location.responsible_id = request.form.get('responsible_id')
         location.notes = request.form.get('notes')
         image_file = request.files.get('image')
+        location.clean_status = request.form.get('clean_status') or None
         if image_file and image_file.filename != '' and allowed_file(image_file.filename):
             os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
             filename = secure_filename(image_file.filename)
@@ -490,9 +494,23 @@ def members_list():
 @login_required
 def profile(member_id):
     member = Member.query.get_or_404(member_id)
-    # 该成员负责的物品和位置列表
-    items_resp = Item.query.filter_by(responsible_id=member.id).all()
-    locations_resp = Location.query.filter_by(responsible_id=member.id).all()
+
+    # 原始数据
+    all_items = Item.query.filter_by(responsible_id=member.id).all()
+    all_locations = Location.query.filter_by(responsible_id=member.id).all()
+
+    # 分开“告警”和“正常”
+    critical_items = [it for it in all_items if it.stock_status and '用完' in it.stock_status]
+    normal_items = [it for it in all_items if not (it.stock_status and '用完' in it.stock_status)]
+    items_resp = critical_items + normal_items  # 用完的置顶
+
+    critical_locs = [loc for loc in all_locations if loc.clean_status == '脏']
+    normal_locs = [loc for loc in all_locations if loc.clean_status != '脏']
+    locations_resp = critical_locs + normal_locs  # 脏的置顶
+
+    any_item_empty = any(it.stock_status and '用完' in it.stock_status for it in items_resp)
+    any_location_dirty = any(loc.clean_status == '脏' for loc in locations_resp)
+
     # 通知列表：他人对该成员负责的物品/位置的最近更新
     notifications = []
     if member.id == current_user.id:
@@ -507,7 +525,15 @@ def profile(member_id):
     user_logs = []
     if member.id == current_user.id:
         user_logs = Log.query.filter_by(user_id=member.id).order_by(Log.timestamp.desc()).limit(5).all()
-    return render_template('profile.html', profile_user=member, items_resp=items_resp, locations_resp=locations_resp, notifications=notifications, messages=messages, user_logs=user_logs)
+    return render_template('profile.html', 
+                           profile_user=member, 
+                           items_resp=items_resp, 
+                           locations_resp=locations_resp, 
+                           notifications=notifications, 
+                           messages=messages, 
+                           user_logs=user_logs,
+                           any_item_empty=any_item_empty,
+                           any_location_dirty=any_location_dirty)
 
 @app.route('/member/<int:member_id>/edit', methods=['GET', 'POST'])
 @login_required

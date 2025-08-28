@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block content %}
+<h4 class="mb-3">物品详情</h4>
+<div class="row">
+  <div class="col-md-6">
+    <ul class="list-group mb-3">
+      <li class="list-group-item"><strong>名称:</strong> {{ item.name }}</li>
+      <li class="list-group-item"><strong>类别:</strong> {{ item.category or '未分类' }}</li>
+      <li class="list-group-item"><strong>CAS号:</strong> {{ item.cas_no or '未指定' }}</li>
+      
+      <li class="list-group-item"><strong>库存状态:</strong> {{ item.stock_status or '未指定' }}</li>
+      <li class="list-group-item"><strong>物品特性:</strong> {{ item.features or '未指定' }}</li>
+      <li class="list-group-item"><strong>价值:</strong> {{ item.value if item.value is not none else '未指定' }}</li>
+      <li class="list-group-item"><strong>数量:</strong> 
+        {% if item.quantity is not none and item.unit %}
+          {{ item.quantity }} {{ item.unit }}
+        {% else %}
+          未指定
+        {% endif %}
+      </li>
+      <li class="list-group-item"><strong>购入时间:</strong> 
+        {{ item.purchase_date.strftime('%Y-%m-%d') if item.purchase_date else '未指定' }}
+      </li>
+
+      <li class="list-group-item"><strong>负责人:</strong>
+        {% if item.responsible_member %}
+          <a href="{{ url_for('profile', member_id=item.responsible_member.id) }}">{{ item.responsible_member.name }}</a>
+        {% else %} 无 {% endif %}
+      </li>
+      <li class="list-group-item"><strong>存放位置:</strong>
+        {% if item.locations and item.locations|length > 0 %}
+          {% for loc in item.locations %}
+            <a href="{{ url_for('view_location', loc_id=loc.id) }}">{{ loc.name }}</a>{% if not loop.last %}, {% endif %}
+          {% endfor %}
+        {% else %} 未指定 {% endif %}
+      </li>
+      <li class="list-group-item"><strong>最近更新时间:</strong> 
+        {{ item.last_modified.strftime("%Y-%m-%d %H:%M:%S") if item.last_modified else '' }}
+      </li>
+      
+      {% if item.purchase_link %}
+      <li class="list-group-item"><strong>购买链接:</strong> 
+        <a href="{{ item.purchase_link }}" target="_blank">点击打开</a>
+      </li>
+      {% endif %}
+      
+      {% if item.notes %}
+      <li class="list-group-item"><strong>备注:</strong><br>{{ item.notes }}</li>
+      {% endif %}
+    </ul>
+
+    <a href="{{ url_for('edit_item', item_id=item.id) }}" class="btn btn-primary">编辑</a>
+    <form action="{{ url_for('delete_item', item_id=item.id) }}" method="post" class="d-inline" onsubmit="return confirm('确定删除该物品吗？');">
+      <button type="submit" class="btn btn-danger">删除</button>
+    </form>
+    <a href="{{ url_for('items') }}" class="btn btn-secondary">返回列表</a>
+  </div>
+
+  <div class="col-md-6">
+    {% if item.image %}
+      <img src="{{ url_for('static', filename='images/' + item.image) }}" alt="物品图片" class="img-fluid img-thumbnail">
+    {% else %}
+      <p class="text-muted">无图片</p>
+    {% endif %}
+    <hr class="my-3">
+    <div>
+      <h6 class="mb-2">二维码（手机扫码打开本页）</h6>
+      <div id="itemQrBox" class="p-2 border rounded d-inline-block"></div>
+      <div class="mt-2">
+        <input type="text" id="itemPermalink" class="form-control form-control-sm" readonly
+              value="{{ request.url }}">
+        <button type="button" class="btn btn-sm btn-outline-secondary mt-2" id="copyItemLinkBtn">复制链接</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<script>
+(function () {
+  try {
+    var url = document.getElementById('itemPermalink').value || window.location.href;
+    var box = document.getElementById('itemQrBox');
+    if (box && window.QRCode) {
+      new QRCode(box, { text: url, width: 160, height: 160 });
+    }
+  } catch (e) { console.warn('QR init failed', e); }
+  var copyBtn = document.getElementById('copyItemLinkBtn');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', function () {
+      var inp = document.getElementById('itemPermalink');
+      inp.select();
+      inp.setSelectionRange(0, 99999);
+      document.execCommand('copy');
+      copyBtn.textContent = '已复制';
+      setTimeout(function(){ copyBtn.textContent = '复制链接'; }, 1200);
+    });
+  }
+})();
+</script>
+{% endblock %}

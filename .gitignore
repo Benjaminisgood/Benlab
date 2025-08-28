@@ -1,0 +1,10 @@
+venv/
+instance/**/*
+__pycache__/
+static/**/*
+*.pyc
+*.sqlite3
+instance/
+*.db
+migrations/versions/
+migrations/

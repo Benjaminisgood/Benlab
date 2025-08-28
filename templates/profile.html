@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="mb-4">
+  <div class="row">
+    <div class="col-auto">
+      {% if profile_user.photo %}
+      <img src="{{ url_for('static', filename='images/' + profile_user.photo) }}" alt="头像" class="img-thumbnail" style="width:100px; height:100px; object-fit: cover;">
+      {% else %}
+      <div class="bg-secondary text-white d-flex align-items-center justify-content-center rounded" style="width:100px; height:100px;">
+        <span style="font-size:50px;">&#128100;</span>
+      </div>
+      {% endif %}
+    </div>
+    <div class="col">
+      <h4>{{ profile_user.name }}</h4>
+      <p>
+        {% if profile_user.contact %}📞 {{ profile_user.contact }}<br>{% endif %}
+        {% if profile_user.notes %}<small class="text-muted">{{ profile_user.notes }}</small>{% endif %}
+      </p>
+    </div>
+  </div>
+</div>
+{% if any_item_empty %}
+  <div class="alert alert-danger">你有库存用完的物品，请尽快处理！</div>
+{% endif %}
+{% if any_location_dirty %}
+  <div class="alert alert-danger">你有卫生差的位置，请尽快清洁！</div>
+{% endif %}
+<div class="row">
+  <div class="col-md-6">
+    <h5>负责的物品</h5>
+    <ul class="list-group mb-4">
+      {% for it in items_resp %}
+      <li class="list-group-item d-flex justify-content-between align-items-center">
+        <div>
+          <div>
+            <a href="{{ url_for('item_detail', item_id=it.id) }}">{{ it.name }}</a>
+            {% if it.cas_no %}
+              <small class="text-muted ms-2">CAS: {{ it.cas_no }}</small>
+            {% endif %}
+            {% if it.stock_status %}
+              <span class="badge bg-secondary ms-2">{{ it.stock_status }}</span>
+            {% endif %}
+          </div>
+          <div class="mt-1">
+            {% if it.locations and it.locations|length > 0 %}
+              <small class="text-muted">位置：</small>
+              {% for loc in it.locations %}
+                <a href="{{ url_for('view_location', loc_id=loc.id) }}" class="badge bg-light text-dark border me-1">{{ loc.name }}</a>
+              {% endfor %}
+            {% else %}
+              <small class="text-muted">位置：未指定</small>
+            {% endif %}
+          </div>
+        </div>
+        {% if it.stock_status and '用完' in it.stock_status %}
+          <span class="badge bg-danger">⚠ 用完</span>
+          <a href="{{ url_for('edit_item', item_id=it.id) }}" class="btn btn-sm btn-outline-primary">去购买</a>
+        {% endif %}
+      </li>
+      {% else %}
+      <li class="list-group-item text-muted">无负责物品</li>
+      {% endfor %}
+    </ul>
+  </div>
+
+  <div class="col-md-6">
+    <h5>负责的位置</h5>
+    <ul class="list-group mb-4">
+      {% for loc in locations_resp %}
+      <li class="list-group-item d-flex justify-content-between align-items-center">
+        <div>
+          <a href="{{ url_for('view_location', loc_id=loc.id) }}">{{ loc.name }}</a>
+          {% if loc.clean_status %}
+            <span class="badge bg-secondary">{{ loc.clean_status }}</span>
+          {% endif %}
+        </div>
+        {% if loc.clean_status == '脏' %}
+          <span class="badge bg-danger">⚠ 卫生差</span>
+          <a href="{{ url_for('edit_location', loc_id=loc.id) }}" class="btn btn-sm btn-outline-primary">去打扫</a>
+        {% endif %}
+      </li>
+      {% else %}
+      <li class="list-group-item text-muted">无负责位置</li>
+      {% endfor %}
+    </ul>
+  </div>
+</div>
+
+{% if current_user.id == profile_user.id %}
+<div class="mb-4">
+  <h5>通知</h5>
+  <ul class="list-group">
+    {% for log in notifications %}
+    {% set verb = '进行了操作' %}
+    {% if '新增' in log.action_type %}{% set verb = '添加了' %}{% elif '修改' in log.action_type %}{% set verb = '修改了' %}{% elif '删除' in log.action_type %}{% set verb = '删除了' %}{% endif %}
+    <li class="list-group-item">
+      你的{% if log.item_id %}物品{% elif log.location_id %}位置{% endif %}
+      <strong>
+      {% if log.item_id %}<a href="{{ url_for('item_detail', item_id=log.item.id) }}">{{ log.item.name }}</a>
+      {% elif log.location_id %}<a href="{{ url_for('view_location', loc_id=log.location.id) }}">{{ log.location.name }}</a>
+      {% endif %}
+      </strong>
+      被 {{ log.user.name if log.user else '某人' }} {{ verb }}
+      <small class="text-muted">({{ log.timestamp.strftime("%Y-%m-%d %H:%M") }})</small>
+    </li>
+    {% else %}
+    <li class="list-group-item text-muted">暂无通知</li>
+    {% endfor %}
+  </ul>
+</div>
+<div class="mb-4">
+  <h5>我的操作记录</h5>
+  <ul class="list-group">
+    {% for log in user_logs %}
+    <li class="list-group-item">
+      <small class="text-muted">{{ log.timestamp.strftime("%Y-%m-%d %H:%M") }}</small>
+      {% if log.item %}
+        - {{ log.action_type }}: <a href="{{ url_for('item_detail', item_id=log.item.id) }}">{{ log.item.name }}</a>
+      {% elif log.location %}
+        - {{ log.action_type }}: <a href="{{ url_for('view_location', loc_id=log.location.id) }}">{{ log.location.name }}</a>
+      {% else %}
+        - {{ log.action_type }}
+      {% endif %}
+    </li>
+    {% else %}
+    <li class="list-group-item text-muted">暂无操作记录</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+<div class="mb-4">
+  <h5>留言板</h5>
+  <ul class="list-group mb-3">
+    {% for msg in messages %}
+    <li class="list-group-item">
+      <strong>{{ msg.sender.name if msg.sender else '匿名' }}:</strong> {{ msg.content }}
+      <br><small class="text-muted">{{ msg.timestamp.strftime("%Y-%m-%d %H:%M") }}</small>
+    </li>
+    {% else %}
+    <li class="list-group-item text-muted">暂无留言</li>
+    {% endfor %}
+  </ul>
+  <form method="post" action="{{ url_for('post_message', member_id=profile_user.id) }}">
+    <div class="mb-3">
+      <label for="newMessage" class="form-label">留言:</label>
+      <textarea id="newMessage" name="content" class="form-control" rows="2" required></textarea>
+    </div>
+    <button type="submit" class="btn btn-primary">发布留言</button>
+  </form>
+</div>
+{% endblock %}

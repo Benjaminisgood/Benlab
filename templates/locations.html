@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block content %}
+
+{% macro render_location(loc, level=0) %}
+<tr class="{% if level == 0 %}table-primary{% else %}table-light{% endif %} indent-{{ level }}">
+  <td>
+    {% if level > 0 %}↳ {% endif %}
+    <a href="{{ url_for('view_location', loc_id=loc.id) }}">{{ loc.name }}</a>
+  </td>
+  <td>
+    {% if loc.responsible_member %}
+      <a href="{{ url_for('profile', member_id=loc.responsible_member.id) }}">{{ loc.responsible_member.name }}</a>
+    {% else %} - {% endif %}
+  </td>
+  <td>{{ loc.items|length }}</td>
+  <td>
+    <a href="{{ url_for('edit_location', loc_id=loc.id) }}" class="btn btn-sm btn-outline-primary">编辑</a>
+    <form action="{{ url_for('delete_location', loc_id=loc.id) }}" method="post" class="d-inline" onsubmit="return confirm('确定删除该位置吗？');">
+      <button type="submit" class="btn btn-sm btn-outline-danger">删除</button>
+    </form>
+  </td>
+</tr>
+
+{# 递归渲染所有子节点 #}
+{% for child in loc.children|sort(attribute='name') %}
+  {{ render_location(child, level + 1) }}
+{% endfor %}
+{% endmacro %}
+
+<h3 class="mb-3">实验室位置列表</h3>
+<a href="{{ url_for('add_location') }}" class="btn btn-primary mb-3">新增位置</a>
+
+<table class="table table-hover">
+  <thead class="table-light">
+    <tr>
+      <th>名称</th>
+      <th>负责人</th>
+      <th>包含物品数量</th>
+      <th>操作</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for loc in locations if not loc.parent_id %}
+      {{ render_location(loc) }}
+    {% endfor %}
+    {% if locations|length == 0 %}
+    <tr>
+      <td colspan="4" class="text-center text-muted">暂无位置记录</td>
+    </tr>
+    {% endif %}
+  </tbody>
+</table>
+
+<style>
+  .indent-1 td { padding-left: 2rem; background-color: #f8f9fa; }
+  .indent-2 td { padding-left: 3rem; background-color: #f1f3f5; }
+  .indent-3 td { padding-left: 4rem; background-color: #e9ecef; }
+  .indent-4 td { padding-left: 5rem; background-color: #dee2e6; }
+  .indent-5 td { padding-left: 6rem; background-color: #ced4da; }
+</style>
+
+{% endblock %}

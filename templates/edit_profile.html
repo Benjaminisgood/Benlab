@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+<h4 class="mb-3">编辑个人信息</h4>
+<form method="post" enctype="multipart/form-data" action="{{ url_for('edit_profile', member_id=member.id) }}">
+  <div class="mb-3">
+    <label for="name" class="form-label">姓名</label>
+    <input type="text" class="form-control" id="name" name="name" value="{{ member.name }}" required>
+  </div>
+  <div class="mb-3">
+    <label for="contact" class="form-label">联系方式</label>
+    <input type="text" class="form-control" id="contact" name="contact" value="{{ member.contact or '' }}">
+  </div>
+  <div class="mb-3">
+    <label for="notes" class="form-label">个人展示/备注</label>
+    <textarea class="form-control" id="notes" name="notes" rows="3">{{ member.notes or '' }}</textarea>
+  </div>
+  <div class="mb-3">
+    <label for="password" class="form-label">新密码 (留空则不修改)</label>
+    <input type="password" class="form-control" id="password" name="password">
+  </div>
+  <div class="mb-3">
+    <label for="photoInput" class="form-label">头像 (可选)</label>
+    {% if member.photo %}
+    <div class="mb-2">
+      <img src="{{ url_for('static', filename='images/' + member.photo) }}" alt="头像" class="img-thumbnail" style="max-width:100px;">
+    </div>
+    {% endif %}
+    <input type="file" id="photoInput" name="photo" accept="image/*" capture="user" class="form-control">
+    <img id="photoPreview" src="#" alt="预览" style="max-width: 100px; display: none; margin-top: 5px;">
+  </div>
+  <button type="submit" class="btn btn-success">保存</button>
+  <a href="{{ url_for('profile', member_id=member.id) }}" class="btn btn-secondary">取消</a>
+</form>
+<script>
+  // 头像预览脚本
+  const photoInput = document.getElementById('photoInput');
+  const photoPreview = document.getElementById('photoPreview');
+  if(photoInput && photoPreview) {
+    photoInput.addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if(file) {
+        photoPreview.src = URL.createObjectURL(file);
+        photoPreview.style.display = 'block';
+      } else {
+        photoPreview.style.display = 'none';
+      }
+    });
+  }
+</script>
+{% endblock %}

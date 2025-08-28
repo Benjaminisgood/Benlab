@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block content %}
+<h4 class="mb-3">{{ item and item.id and '编辑物品' or '新增物品' }}</h4>
+<form method="post" enctype="multipart/form-data" action="{% if item %}{{ url_for('edit_item', item_id=item.id) }}{% else %}{{ url_for('add_item') }}{% endif %}">
+  <div class="mb-3">
+    <label for="name" class="form-label">物品名称</label>
+    <input type="text" class="form-control" id="name" name="name" value="{{ item.name if item else '' }}" required>
+  </div>
+  <div class="mb-3">
+    <label for="cas_no" class="form-label">CAS 号（可选）</label>
+    <input type="text" class="form-control" id="cas_no" name="cas_no"
+           value="{{ item.cas_no if item and item.cas_no else '' }}"
+           placeholder="如：50-00-0">
+  </div>
+  <div class="mb-3">
+    <label for="category" class="form-label">类别</label>
+    <input type="text" class="form-control" id="category" name="category" value="{{ item.category if item else '' }}">
+  </div>
+  <div class="mb-3">
+    <label for="stock_status">库存状态</label>
+    <select name="stock_status" class="form-select">
+      {% for opt in ['充足','少量','用完','舍弃'] %}
+      <option value="{{ opt }}" {% if item and item.stock_status == opt %}selected{% endif %}>{{ opt }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="mb-3">
+    <label for="features" class="form-label">物品特性</label>
+    <select name="features" class="form-select">
+      <option value="">-- 请选择 --</option>
+      {% for opt in ['安全','注意','危险'] %}
+      <option value="{{ opt }}" {% if item and item.features == opt %}selected{% endif %}>{{ opt }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="mb-3">
+    <label for="value">价值（￥）</label>
+    <input type="number" step="0.01" class="form-control" name="value" value="{{ item.value if item else '' }}">
+  </div>
+
+  <div class="mb-3">
+    <label for="quantity">数量</label>
+    <div class="input-group">
+      <input type="number" step="0.01" class="form-control" name="quantity" value="{{ item.quantity if item else '' }}">
+      <select class="form-select" name="unit">
+        {% for u in ['瓶','个','包','支','盒','ml','g'] %}
+          <option value="{{ u }}" {% if item and item.unit == u %}selected{% endif %}>{{ u }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
+  <div class="mb-3">
+    <label for="purchase_date">购入时间</label>
+    <input type="date" name="purchase_date" class="form-control"
+           value="{{ item.purchase_date.strftime('%Y-%m-%d') if item and item.purchase_date else '' }}">
+  </div>
+  <div class="mb-3">
+    <label for="responsible" class="form-label">负责人</label>
+    <select id="responsible" name="responsible_id" class="form-select">
+      <option value="">(未指定)</option>
+      {% for m in members %}
+      <option value="{{ m.id }}" {% if item and item.responsible_id == m.id %}selected{% endif %}>{{ m.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="mb-3">
+    <label for="locations" class="form-label">存放位置（可多选）</label>
+    <select id="locations" name="location_ids" class="form-select" multiple size="6">
+      {% for loc in locations %}
+        <option value="{{ loc.id }}"
+          {% if item and item.locations and (loc in item.locations) %}selected{% endif %}>
+          {{ loc.name }}
+        </option>
+      {% endfor %}
+    </select>
+    <div class="form-text">按住 Ctrl/Cmd 或 Shift 可多选；留空表示暂未指定。</div>
+  </div>
+  <div class="mb-3">
+    <label for="purchase_link" class="form-label">购买链接</label>
+    <input type="url" class="form-control" id="purchase_link" name="purchase_link" value="{{ item.purchase_link if item else '' }}">
+  </div>
+  <div class="mb-3">
+    <label for="imageInput" class="form-label">物品图片 (可选)</label>
+    {% if item and item.image %}
+    <div class="mb-2">
+      <img src="{{ url_for('static', filename='images/' + item.image) }}" alt="物品图片" class="img-thumbnail" style="max-width:150px;">
+    </div>
+    {% endif %}
+    <input type="file" id="imageInput" name="image" accept="image/*" capture="environment" class="form-control">
+    <img id="imgPreview" src="#" alt="预览" style="max-width: 120px; display: none; margin-top: 5px;">
+  </div>
+  <div class="mb-3">
+    <label for="notes" class="form-label">备注</label>
+    <textarea class="form-control" id="notes" name="notes" rows="3">{{ item.notes if item else '' }}</textarea>
+  </div>
+  <button type="submit" class="btn btn-success">{{ item and '保存修改' or '添加物品' }}</button>
+  <a href="{{ url_for('items') }}" class="btn btn-secondary">取消</a>
+</form>
+<script>
+  // 图片预览脚本
+  const fileInput = document.getElementById('imageInput');
+  const previewImg = document.getElementById('imgPreview');
+  if(fileInput && previewImg) {
+    fileInput.addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if(file) {
+        previewImg.src = URL.createObjectURL(file);
+        previewImg.style.display = 'block';
+      } else {
+        previewImg.style.display = 'none';
+      }
+    });
+  }
+  // 位置多选：显示选中数量（可选增强）
+  const locSelect = document.getElementById('locations');
+  if (locSelect) {
+    const updateCount = () => {
+      const count = Array.from(locSelect.options).filter(o => o.selected).length;
+      locSelect.title = count > 0 ? `已选择 ${count} 个位置` : '未选择位置';
+    };
+    locSelect.addEventListener('change', updateCount);
+    updateCount();
+  }
+</script>
+{% endblock %}

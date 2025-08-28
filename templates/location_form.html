@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block content %}
+<h4 class="mb-3">{{ location and '编辑位置' or '新增位置' }}</h4>
+<form method="post" enctype="multipart/form-data" action="{% if location %}{{ url_for('edit_location', loc_id=location.id) }}{% else %}{{ url_for('add_location') }}{% endif %}">
+  <div class="mb-3">
+    <label for="name" class="form-label">位置名称</label>
+    <input type="text" class="form-control" id="name" name="name" value="{{ location.name if location else '' }}" required>
+  </div>
+  <div class="mb-3">
+    <label for="responsible" class="form-label">负责人</label>
+    <select id="responsible" name="responsible_id" class="form-select">
+      <option value="">(未指定)</option>
+      {% for m in members %}
+      <option value="{{ m.id }}" {% if location and location.responsible_id == m.id %}selected{% endif %}>{{ m.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="form-text">父位置用于层级组织，留空表示顶层位置。</div>
+  <div class="mb-3">
+    <label for="parent_id" class="form-label">父位置（可选）</label>
+    <select name="parent_id" id="parent_id" class="form-select">
+      <option value="">无</option>
+      {% for parent in parents %}
+        {% if not (location and parent.id == location.id) %}
+          <option value="{{ parent.id }}"
+            {% if location and location.parent_id == parent.id %}selected{% endif %}>
+            {{ parent.name }}
+          </option>
+        {% endif %}
+      {% endfor %}
+    </select>
+  </div>
+  <div class="mb-3">
+    <label for="clean_status" class="form-label">卫生状态</label>
+    <select name="clean_status" class="form-select">
+      <option value="">-- 请选择 --</option>
+      {% for opt in ['干净', '一般', '脏'] %}
+        <option value="{{ opt }}" {% if location and location.clean_status == opt %}selected{% endif %}>{{ opt }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="mb-3">
+    <label for="imageInput" class="form-label">位置图片 (可选)</label>
+    {% if location and location.image %}
+    <div class="mb-2">
+      <img src="{{ url_for('static', filename='images/' + location.image) }}" alt="位置图片" class="img-thumbnail" style="max-width:150px;">
+    </div>
+    {% endif %}
+    <input type="file" id="imageInput" name="image" accept="image/*" capture="environment" class="form-control">
+    <img id="imgPreview" src="#" alt="预览" style="max-width: 120px; display: none; margin-top: 5px;">
+  </div>
+  <div class="mb-3">
+    <label for="notes" class="form-label">备注</label>
+    <textarea class="form-control" id="notes" name="notes" rows="3">{{ location.notes if location else '' }}</textarea>
+  </div>
+  <button type="submit" class="btn btn-success">{{ location and '保存修改' or '添加位置' }}</button>
+  <a href="{{ url_for('locations_list') }}" class="btn btn-secondary">取消</a>
+</form>
+<script>
+  // 图片预览脚本
+  const fileInput2 = document.getElementById('imageInput');
+  const previewImg2 = document.getElementById('imgPreview');
+  if(fileInput2 && previewImg2) {
+    fileInput2.addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if(file) {
+        previewImg2.src = URL.createObjectURL(file);
+        previewImg2.style.display = 'block';
+      } else {
+        previewImg2.style.display = 'none';
+      }
+    });
+  }
+</script>
+{% endblock %}

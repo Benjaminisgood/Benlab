@@ -46,10 +46,11 @@ python app.py
 
 flask run --host=0.0.0.0 --port=5000
 
-gunicorn -w 3 -b 0.0.0.0:5000 app:app
+gunicorn -w 3 -b 0.0.0.0:8000 app:app
 
 gunicorn -w 2 -k gthread --threads 6 -b 0.0.0.0:8000 app:app \
   --timeout 120 --access-logfile - --error-logfile -
+
 ⸻
 
 🔒 其他建议
@@ -138,7 +139,7 @@ git push
 
 ⸻
 
-🧪 Flask-Migrate 数据库迁移流程
+# 🧪 Flask-Migrate 数据库迁移流程
 
 ✅ 步骤 1：安装依赖
 
@@ -154,7 +155,8 @@ pip install flask-migrate
 
 from flask_migrate import Migrate
 
-# 在 db 初始化之后加
+在 db 初始化之后加  
+
 migrate = Migrate(app, db)
 
 
@@ -165,7 +167,7 @@ migrate = Migrate(app, db)
 在项目根目录执行：
 
 export FLASK_APP=app.py  # Mac/Linux
-# set FLASK_APP=app.py  # Windows
+set FLASK_APP=app.py  # Windows
 
 flask db init
 
@@ -199,6 +201,7 @@ flask db upgrade
 
 flask db stamp head
 
+# 补充
 cd /Users/benserver/Desktop/Benlab
 gunicorn -w 4 -k gevent --worker-connections 1000 \
   -b 0.0.0.0:8000 "app:app" \
@@ -209,16 +212,16 @@ gunicorn -w 2 -k gthread --threads 6 -b 0.0.0.0:8000 app:app \
   --timeout 120 --access-logfile - --error-logfile -
 
 
-# 1) 安装
+1) 安装
 pip install "gunicorn>=21" "gevent>=24"
 
-# 2) 安全变量
+2) 安全变量
 export FLASK_SECRET_KEY="$(python - <<'PY'
 import secrets; print(secrets.token_urlsafe(32))
 PY
 )"
 
-# 3) 启动（本机服务器）
+3) 启动（本机服务器）
 cd /Users/benserver/Desktop/Benlab
 gunicorn -w 4 -k gevent --worker-connections 1000 \
   -b 0.0.0.0:8000 "app:app" \

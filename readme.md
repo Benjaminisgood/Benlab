@@ -1,30 +1,4 @@
-cd /Users/benserver/Desktop/Benlab
-gunicorn -w 4 -k gevent --worker-connections 1000 \
-  -b 0.0.0.0:8000 "app:app" \
-  --timeout 120 --access-logfile - --error-logfile -
-
-
-gunicorn -w 2 -k gthread --threads 6 -b 0.0.0.0:8000 app:app \
-  --timeout 120 --access-logfile - --error-logfile -
-
-
-# 1) 安装
-pip install "gunicorn>=21" "gevent>=24"
-
-# 2) 安全变量
-export FLASK_SECRET_KEY="$(python - <<'PY'
-import secrets; print(secrets.token_urlsafe(32))
-PY
-)"
-
-# 3) 启动（本机服务器）
-cd /Users/benserver/Desktop/Benlab
-gunicorn -w 4 -k gevent --worker-connections 1000 \
-  -b 0.0.0.0:8000 "app:app" \
-  --timeout 120 --access-logfile - --error-logfile -
-
-
-✅ macOS 环境下运行指令（推荐使用虚拟环境）
+# ✅ macOS 环境下运行指令
 
 🔹 1. 创建项目目录（例如放在桌面）
 
@@ -74,6 +48,8 @@ flask run --host=0.0.0.0 --port=5000
 
 gunicorn -w 3 -b 0.0.0.0:5000 app:app
 
+gunicorn -w 2 -k gthread --threads 6 -b 0.0.0.0:8000 app:app \
+  --timeout 120 --access-logfile - --error-logfile -
 ⸻
 
 🔒 其他建议
@@ -87,7 +63,7 @@ gunicorn -w 3 -b 0.0.0.0:5000 app:app
 
 ⸻
 
-✅ 一键上传项目到 GitHub 的完整步骤
+# ✅ 一键上传项目到 GitHub 的完整步骤
 
 你已经在本地有了项目目录，比如：~/Desktop/Benlab
 并且你已在该路径运行过 Flask 项目（例如包含 app.py、templates/ 等）。
@@ -222,6 +198,32 @@ flask db upgrade
 	•	如果报错 “target database is not up to date”，可以用：
 
 flask db stamp head
+
+cd /Users/benserver/Desktop/Benlab
+gunicorn -w 4 -k gevent --worker-connections 1000 \
+  -b 0.0.0.0:8000 "app:app" \
+  --timeout 120 --access-logfile - --error-logfile -
+
+
+gunicorn -w 2 -k gthread --threads 6 -b 0.0.0.0:8000 app:app \
+  --timeout 120 --access-logfile - --error-logfile -
+
+
+# 1) 安装
+pip install "gunicorn>=21" "gevent>=24"
+
+# 2) 安全变量
+export FLASK_SECRET_KEY="$(python - <<'PY'
+import secrets; print(secrets.token_urlsafe(32))
+PY
+)"
+
+# 3) 启动（本机服务器）
+cd /Users/benserver/Desktop/Benlab
+gunicorn -w 4 -k gevent --worker-connections 1000 \
+  -b 0.0.0.0:8000 "app:app" \
+  --timeout 120 --access-logfile - --error-logfile -
+
 
 
 

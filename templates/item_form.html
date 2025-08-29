@@ -71,7 +71,11 @@
     <select id="locations" name="location_ids" class="form-select" multiple size="6">
       {% for loc in locations %}
         <option value="{{ loc.id }}"
-          {% if item and item.locations and (loc in item.locations) %}selected{% endif %}>
+          {% if item and item.locations and (loc in item.locations) %}
+            selected
+          {% elif not item and default_loc_id and loc.id == default_loc_id %}
+            selected
+          {% endif %}>
           {{ loc.name }}
         </option>
       {% endfor %}

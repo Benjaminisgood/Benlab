@@ -14,7 +14,7 @@
     <div class="col">
       <h4>{{ profile_user.name }}</h4>
       <p>
-        {% if profile_user.contact %}📞 {{ profile_user.contact }}<br>{% endif %}
+        {% if profile_user.contact %}📞 <a href="tel:{{ profile_user.contact|replace(' ', '') }}">{{ profile_user.contact }}</a><br>{% endif %}
         {% if profile_user.notes %}<small class="text-muted">{{ profile_user.notes }}</small>{% endif %}
       </p>
     </div>
@@ -90,8 +90,9 @@
 {% if current_user.id == profile_user.id %}
 <div class="mb-4">
   <h5>通知</h5>
+  {% set notif_total = notifications|length %}
   <ul class="list-group">
-    {% for log in notifications %}
+    {% for log in notifications[:5] %}
     {% set verb = '进行了操作' %}
     {% if '新增' in log.action_type %}{% set verb = '添加了' %}{% elif '修改' in log.action_type %}{% set verb = '修改了' %}{% elif '删除' in log.action_type %}{% set verb = '删除了' %}{% endif %}
     <li class="list-group-item">
@@ -108,11 +109,35 @@
     <li class="list-group-item text-muted">暂无通知</li>
     {% endfor %}
   </ul>
+  {% if notif_total > 5 %}
+  <button class="btn btn-sm btn-outline-secondary mt-2" type="button" data-bs-toggle="collapse" data-bs-target="#notifMore" aria-expanded="false" aria-controls="notifMore">
+    展开剩余 {{ notif_total - 5 }} 条
+  </button>
+  <div class="collapse mt-2" id="notifMore">
+    <ul class="list-group">
+      {% for log in notifications[5:] %}
+      {% set verb = '进行了操作' %}
+      {% if '新增' in log.action_type %}{% set verb = '添加了' %}{% elif '修改' in log.action_type %}{% set verb = '修改了' %}{% elif '删除' in log.action_type %}{% set verb = '删除了' %}{% endif %}
+      <li class="list-group-item">
+        你的{% if log.item_id %}物品{% elif log.location_id %}位置{% endif %}
+        <strong>
+        {% if log.item_id %}<a href="{{ url_for('item_detail', item_id=log.item.id) }}">{{ log.item.name }}</a>
+        {% elif log.location_id %}<a href="{{ url_for('view_location', loc_id=log.location.id) }}">{{ log.location.name }}</a>
+        {% endif %}
+        </strong>
+        被 {{ log.user.name if log.user else '某人' }} {{ verb }}
+        <small class="text-muted">({{ log.timestamp.strftime("%Y-%m-%d %H:%M") }})</small>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
 </div>
 <div class="mb-4">
   <h5>我的操作记录</h5>
+  {% set logs_total = user_logs|length %}
   <ul class="list-group">
-    {% for log in user_logs %}
+    {% for log in user_logs[:5] %}
     <li class="list-group-item">
       <small class="text-muted">{{ log.timestamp.strftime("%Y-%m-%d %H:%M") }}</small>
       {% if log.item %}
@@ -127,12 +152,34 @@
     <li class="list-group-item text-muted">暂无操作记录</li>
     {% endfor %}
   </ul>
+  {% if logs_total > 5 %}
+  <button class="btn btn-sm btn-outline-secondary mt-2" type="button" data-bs-toggle="collapse" data-bs-target="#logsMore" aria-expanded="false" aria-controls="logsMore">
+    展开剩余 {{ logs_total - 5 }} 条
+  </button>
+  <div class="collapse mt-2" id="logsMore">
+    <ul class="list-group">
+      {% for log in user_logs[5:] %}
+      <li class="list-group-item">
+        <small class="text-muted">{{ log.timestamp.strftime("%Y-%m-%d %H:%M") }}</small>
+        {% if log.item %}
+          - {{ log.action_type }}: <a href="{{ url_for('item_detail', item_id=log.item.id) }}">{{ log.item.name }}</a>
+        {% elif log.location %}
+          - {{ log.action_type }}: <a href="{{ url_for('view_location', loc_id=log.location.id) }}">{{ log.location.name }}</a>
+        {% else %}
+          - {{ log.action_type }}
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
 </div>
 {% endif %}
 <div class="mb-4">
   <h5>留言板</h5>
+  {% set msg_total = messages|length %}
   <ul class="list-group mb-3">
-    {% for msg in messages %}
+    {% for msg in messages[:5] %}
     <li class="list-group-item">
       <strong>{{ msg.sender.name if msg.sender else '匿名' }}:</strong> {{ msg.content }}
       <br><small class="text-muted">{{ msg.timestamp.strftime("%Y-%m-%d %H:%M") }}</small>
@@ -141,6 +188,21 @@
     <li class="list-group-item text-muted">暂无留言</li>
     {% endfor %}
   </ul>
+  {% if msg_total > 5 %}
+  <button class="btn btn-sm btn-outline-secondary mb-3" type="button" data-bs-toggle="collapse" data-bs-target="#msgMore" aria-expanded="false" aria-controls="msgMore">
+    展开剩余 {{ msg_total - 5 }} 条
+  </button>
+  <div class="collapse" id="msgMore">
+    <ul class="list-group mb-3">
+      {% for msg in messages[5:] %}
+      <li class="list-group-item">
+        <strong>{{ msg.sender.name if msg.sender else '匿名' }}:</strong> {{ msg.content }}
+        <br><small class="text-muted">{{ msg.timestamp.strftime("%Y-%m-%d %H:%M") }}</small>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
   <form method="post" action="{{ url_for('post_message', member_id=profile_user.id) }}">
     <div class="mb-3">
       <label for="newMessage" class="form-label">留言:</label>

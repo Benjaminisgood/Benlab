@@ -1,83 +1,91 @@
 {% extends "base.html" %}
 {% block content %}
-<h4 class="mb-3">{{ location.name }}</h4>
-<p>负责人:
-  {% if location.responsible_member %}
-    <a href="{{ url_for('profile', member_id=location.responsible_member.id) }}">{{ location.responsible_member.name }}</a>
-  {% else %} 无 {% endif %}
-  {% if location.notes %}
-  <br><small class="text-muted">{{ location.notes }}</small>
-  {% endif %}
-</p>
-
-<p>最近修改：{{ location.last_modified.strftime('%Y-%m-%d %H:%M') if location.last_modified else '未知' }}</p>
-{% macro render_children(parent) %}
-<ul class="list-group mb-2 ms-3">
-  {% for child in parent.children %}
-    <li class="list-group-item">
-      <a href="{{ url_for('view_location', loc_id=child.id) }}">{{ child.name }}</a>
-      {% if child.children %}
-        {{ render_children(child) }}
+<div class="row">
+  <div class="col-md-6">
+    <ul class="list-group mb-3">
+      <li class="list-group-item"><strong>名称：</strong> {{ location.name }}</li>
+      <li class="list-group-item">
+        <strong>负责人：</strong>
+        {% if location.responsible_member %}
+          <a href="{{ url_for('profile', member_id=location.responsible_member.id) }}">{{ location.responsible_member.name }}</a>
+        {% else %}
+          无
+        {% endif %}
+      </li>
+      {% if location.children %}
+      <li class="list-group-item">
+        <strong>子区域：</strong>
+        <ul class="mb-0 ps-3">
+          {% for child in location.children %}
+            <li><a href="{{ url_for('view_location', loc_id=child.id) }}">{{ child.name }}</a></li>
+          {% endfor %}
+        </ul>
+      </li>
       {% endif %}
-    </li>
-  {% endfor %}
-</ul>
-{% endmacro %}
-
-{% if location.children %}
-  <h5 class="mt-4">子区域</h5>
-  {{ render_children(location) }}
-{% endif %}
-{% if location.clean_status %}
-<p>卫生状态：
-  <span class="badge 
-      {% if location.clean_status == '干净' %}bg-success
-      {% elif location.clean_status == '一般' %}bg-warning text-dark
-      {% elif location.clean_status == '脏' %}bg-danger
-      {% else %}bg-secondary
+      {% if location.clean_status %}
+      <li class="list-group-item">
+        <strong>卫生状态：</strong>
+        <span class="badge 
+          {% if location.clean_status == '干净' %}bg-success
+          {% elif location.clean_status == '一般' %}bg-warning text-dark
+          {% elif location.clean_status == '脏' %}bg-danger
+          {% else %}bg-secondary
+          {% endif %}
+          ">
+          {{ location.clean_status }}
+        </span>
+      </li>
       {% endif %}
-    ">
-    {{ location.clean_status }}
-  </span>
-</p>
-{% endif %}
-<h5 class="mt-4">物品统计</h5>
-<ul class="list-group mb-3">
-  <li class="list-group-item">总数：<strong>{{ items|length }}</strong></li>
-  {% for label, count in status_counter.items() %}
-    <li class="list-group-item">{{ label }}：<span class="badge bg-info">{{ count }}</span></li>
-  {% endfor %}
-</ul>
-
-<div class="mb-3">
-  <h6 class="mb-2">二维码（手机扫码打开本页）</h6>
-  <div id="locQrBox" class="p-2 border rounded d-inline-block"></div>
-  <div class="mt-2">
-    <input type="text" id="locPermalink" class="form-control form-control-sm" readonly
-           value="{{ request.url }}">
-    <button type="button" class="btn btn-sm btn-outline-secondary mt-2" id="copyLocLinkBtn">复制链接</button>
+      {% if location.notes %}
+      <li class="list-group-item"><strong>备注：</strong> {{ location.notes }}</li>
+      {% endif %}
+      <li class="list-group-item"><strong>最近修改：</strong> {{ location.last_modified.strftime('%Y-%m-%d %H:%M') if location.last_modified else '未知' }}</li>
+      <li class="list-group-item">
+        <strong>物品统计：</strong>
+        <ul class="mb-0 ps-3">
+          <li>总数：<strong>{{ items|length }}</strong></li>
+          {% for label, count in status_counter.items() %}
+            <li>{{ label }}：<span class="badge bg-info">{{ count }}</span></li>
+          {% endfor %}
+        </ul>
+      </li>
+    </ul>
+    <a href="{{ url_for('add_item', loc_id=location.id) }}" class="btn btn-sm btn-success mb-3">
+      ➕ 在此位置添加物品
+    </a>
+  </div>
+  <div class="col-md-6">
+    {% if location.image %}
+    <div class="mb-3">
+      <img src="{{ url_for('static', filename='images/' + location.image) }}" alt="{{ location.name }}" class="img-fluid rounded border">
+    </div>
+    {% else %}
+    <p class="text-muted">无图片</p>
+    {% endif %}
+    <div class="mb-3">
+      <h6 class="mb-2">二维码（手机扫码打开本页）</h6>
+      <div id="locQrBox" class="p-2 border rounded d-inline-block"></div>
+      <div class="mt-2">
+        <input type="text" id="locPermalink" class="form-control form-control-sm" readonly value="{{ request.url }}">
+        <button type="button" class="btn btn-sm btn-outline-secondary mt-2" id="copyLocLinkBtn">复制链接</button>
+      </div>
+    </div>
   </div>
 </div>
-
-{% if location.image %}
-<div class="mb-3">
-  <img src="{{ url_for('static', filename='images/' + location.image) }}" alt="{{ location.name }}" class="img-fluid rounded border">
-</div>
-{% else %}
-<p class="text-muted">无图片</p>
-{% endif %}
 
 <h5 class="mt-4">包含的物品</h5>
 <ul class="list-group">
   {% for it in items %}
-    <li class="list-group-item">
+    <li class="list-group-item d-flex justify-content-between align-items-center">
       <a href="{{ url_for('item_detail', item_id=it.id) }}">{{ it.name }}</a>
-      {% if it.stock_status %}
-        <span class="badge bg-secondary">{{ it.stock_status }}</span>
-      {% endif %}
-      {% if it.responsible_member %}
-        <small class="text-muted"> - {{ it.responsible_member.name }}</small>
-      {% endif %}
+      <div>
+        {% if it.stock_status %}
+          <span class="badge bg-secondary me-2">{{ it.stock_status }}</span>
+        {% endif %}
+        {% if it.responsible_member %}
+          <small class="text-muted">{{ it.responsible_member.name }}</small>
+        {% endif %}
+      </div>
     </li>
   {% else %}
     <li class="list-group-item text-muted">（此位置暂无物品）</li>

@@ -1,5 +1,6 @@
 import os
 from datetime import datetime
+import re
 from flask import Flask, render_template, request, redirect, url_for, flash, send_file
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
@@ -7,6 +8,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from collections import Counter
 from sqlalchemy.orm import selectinload
+from sqlalchemy import or_, func
 from flask_migrate import Migrate
 
 
@@ -234,7 +236,21 @@ def items():
     category_filter = request.args.get('category', '')
     items_query = Item.query
     if search:
-        items_query = items_query.filter(Item.name.contains(search) | Item.notes.contains(search))
+        s = search.strip()
+        # 去除非数字字符，便于做“无连字符”的模糊匹配（输入 '6' 也能匹配）
+        s_digits = re.sub(r'[^0-9]', '', s)
+        cas_col = func.coalesce(Item.cas_no, '')
+        cas_no_hyphenless = func.replace(cas_col, '-', '')
+        like_s = f"%{s}%"
+        items_conds = [
+            Item.name.ilike(like_s),
+            Item.notes.ilike(like_s),
+            Item.cas_no.ilike(like_s),
+        ]
+        if s_digits:
+            like_digits = f"%{s_digits}%"
+            items_conds.append(cas_no_hyphenless.like(like_digits))
+        items_query = items_query.filter(or_(*items_conds))
     if category_filter:
         items_query = items_query.filter_by(category=category_filter)
     items_list = items_query.order_by(Item.name).all()
@@ -252,10 +268,12 @@ def item_detail(item_id):
 @app.route('/items/add', methods=['GET', 'POST'])
 @login_required
 def add_item():
+    default_loc_id = request.args.get('loc_id', type=int)
     if request.method == 'POST':
         # 获取表单数据
         name = request.form.get('name')
         category = request.form.get('category')
+        cas_no = request.form.get('cas_no')
 
         stock_status = request.form.get('stock_status')  # ✅ 单选字段
         features_str = request.form.get('features')  # 返回单个字符串
@@ -289,6 +307,7 @@ def add_item():
         # ✅ 创建新的 Item 实例（已更新字段）
         new_item = Item(
             name=name,
+            cas_no=cas_no or None,
             category=category,
             stock_status=stock_status,
             features=features_str,
@@ -296,13 +315,15 @@ def add_item():
             quantity=quantity,
             unit=unit,
             purchase_date=purchase_date,
-            responsible_id=responsible_id if responsible_id else None,
+            responsible_id=responsible_id if responsible_id else current_user.id,
             notes=notes,
             purchase_link=purchase_link,
             image=image_filename
         )
         # 绑定多个位置（若前端未选择则为空列表）
         loc_ids = [int(x) for x in location_ids] if location_ids else []
+        if not loc_ids and default_loc_id:
+            loc_ids = [default_loc_id]
         if loc_ids:
             new_item.locations = Location.query.filter(Location.id.in_(loc_ids)).all()
         db.session.add(new_item)
@@ -324,7 +345,7 @@ def add_item():
     # GET 请求
     members = Member.query.all()
     locations = Location.query.all()
-    return render_template('item_form.html', members=members, locations=locations, item=None)
+    return render_template('item_form.html', members=members, locations=locations, item=None, default_loc_id=default_loc_id)
 
 @app.route('/items/<int:item_id>/edit', methods=['GET', 'POST'])
 @login_required
@@ -334,6 +355,7 @@ def edit_item(item_id):
         # 更新物品信息
         item.name = request.form.get('name')
         item.category = request.form.get('category')
+        item.cas_no = request.form.get('cas_no') or None
         
         item.stock_status = request.form.get('stock_status')  # 单选库存状态
         item.features = request.form.get('features')          # 单选物品特性
@@ -423,7 +445,7 @@ def add_location():
         new_loc = Location(
             name=name,
             parent_id=parent_id if parent_id else None,
-            responsible_id=responsible_id if responsible_id else None,
+            responsible_id=responsible_id if responsible_id else current_user.id,
             notes=notes,
             image=image_filename,
             clean_status=clean_status
@@ -539,8 +561,9 @@ def profile(member_id):
                         .filter(or_(Item.responsible_id == member.id, Location.responsible_id == member.id), Log.user_id != member.id) \
                         .order_by(Log.timestamp.desc()).limit(5).all()
     # 留言板消息列表（发送给该成员的留言）
-    messages = Message.query.filter_by(receiver_id=member.id).order_by(Message.timestamp.desc()).all()
+    messages = Message.query.filter_by(receiver_id=member.id).order_by(Message.timestamp.desc()).limit(10).all()
     # 当前用户自己的操作记录（仅查看自己的主页时显示）
+    # 这里的限制数字都是可以改的，不过前端也有折叠的逻辑，不用担心页面太丑
     user_logs = []
     if member.id == current_user.id:
         user_logs = Log.query.filter_by(user_id=member.id).order_by(Log.timestamp.desc()).limit(5).all()

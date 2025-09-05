@@ -1875,7 +1875,7 @@ flask db stamp head
   <span class="badge 
       {% if location.clean_status == '干净' %}bg-success
       {% elif location.clean_status == '一般' %}bg-warning text-dark
-      {% elif location.clean_status == '脏' %}bg-danger
+      {% elif location.clean_status == '脏/报修' %}bg-danger
       {% else %}bg-secondary
       {% endif %}
     ">
@@ -1914,7 +1914,7 @@ flask db stamp head
             <span class="badge 
                 {% if location.clean_status == '干净' %}bg-success
                 {% elif location.clean_status == '一般' %}bg-warning text-dark
-                {% elif location.clean_status == '脏' %}bg-danger
+                {% elif location.clean_status == '脏/报修' %}bg-danger
                 {% endif %}
               ">
                 {{ location.clean_status }}

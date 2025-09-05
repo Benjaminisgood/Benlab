@@ -8,12 +8,15 @@
   </div>
   <div class="mb-3">
     <label for="responsible" class="form-label">负责人</label>
-    <select id="responsible" name="responsible_id" class="form-select">
-      <option value="">(未指定)</option>
+    <select id="responsible" name="responsible_ids" class="form-select" multiple>
       {% for m in members %}
-      <option value="{{ m.id }}" {% if location and location.responsible_id == m.id %}selected{% endif %}>{{ m.name }}</option>
+        <option value="{{ m.id }}"
+          {% if location and m in location.responsible_members %}selected{% endif %}>
+          {{ m.name }}
+        </option>
       {% endfor %}
     </select>
+    <div class="form-text">可多选负责人，按住 Ctrl (Windows) 或 Cmd (Mac) 选择多个人。</div>
   </div>
   <div class="form-text">父位置用于层级组织，留空表示顶层位置。</div>
   <div class="mb-3">
@@ -34,10 +37,16 @@
     <label for="clean_status" class="form-label">卫生状态</label>
     <select name="clean_status" class="form-select">
       <option value="">-- 请选择 --</option>
-      {% for opt in ['干净', '一般', '脏'] %}
+      {% for opt in ['干净', '一般', '脏/报修'] %}
         <option value="{{ opt }}" {% if location and location.clean_status == opt %}selected{% endif %}>{{ opt }}</option>
       {% endfor %}
     </select>
+  </div>
+  <div class="mb-3">
+    <label for="detail_link" class="form-label">详情链接</label>
+    <input type="url" class="form-control" id="detail_link" name="detail_link"
+          value="{{ location.detail_link if location else '' }}" placeholder="https://example.com">
+    <div class="form-text">可填写位置的相关详情链接（可选）</div>
   </div>
   <div class="mb-3">
     <label for="imageInput" class="form-label">位置图片 (可选)</label>

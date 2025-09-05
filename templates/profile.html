@@ -24,7 +24,7 @@
   <div class="alert alert-danger">你有库存用完的物品，请尽快处理！</div>
 {% endif %}
 {% if any_location_dirty %}
-  <div class="alert alert-danger">你有卫生差的位置，请尽快清洁！</div>
+  <div class="alert alert-danger">你有卫生差或需维修的位置，请尽快处理！</div>
 {% endif %}
 <div class="row">
   <div class="col-md-6">
@@ -75,9 +75,9 @@
             <span class="badge bg-secondary">{{ loc.clean_status }}</span>
           {% endif %}
         </div>
-        {% if loc.clean_status == '脏' %}
-          <span class="badge bg-danger">⚠ 卫生差</span>
-          <a href="{{ url_for('edit_location', loc_id=loc.id) }}" class="btn btn-sm btn-outline-primary">去打扫</a>
+        {% if loc.clean_status == '脏/报修' %}
+          <span class="badge bg-danger">⚠ 卫生差/损坏</span>
+          <a href="{{ url_for('edit_location', loc_id=loc.id) }}" class="btn btn-sm btn-outline-primary">去处理</a>
         {% endif %}
       </li>
       {% else %}

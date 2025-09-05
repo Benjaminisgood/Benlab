@@ -6,8 +6,10 @@
       <li class="list-group-item"><strong>名称：</strong> {{ location.name }}</li>
       <li class="list-group-item">
         <strong>负责人：</strong>
-        {% if location.responsible_member %}
-          <a href="{{ url_for('profile', member_id=location.responsible_member.id) }}">{{ location.responsible_member.name }}</a>
+        {% if location.responsible_members %}
+          {% for member in location.responsible_members %}
+            <a href="{{ url_for('profile', member_id=member.id) }}">{{ member.name }}</a>{% if not loop.last %}，{% endif %}
+          {% endfor %}
         {% else %}
           无
         {% endif %}
@@ -28,7 +30,7 @@
         <span class="badge 
           {% if location.clean_status == '干净' %}bg-success
           {% elif location.clean_status == '一般' %}bg-warning text-dark
-          {% elif location.clean_status == '脏' %}bg-danger
+          {% elif location.clean_status == '脏/报修' %}bg-danger
           {% else %}bg-secondary
           {% endif %}
           ">
@@ -117,3 +119,9 @@
 </script>
 
 {% endblock %}
+      {% if location.detail_link %}
+      <li class="list-group-item">
+        <strong>详情链接：</strong>
+        <a href="{{ location.detail_link }}" target="_blank">{{ location.detail_link }}</a>
+      </li>
+      {% endif %}

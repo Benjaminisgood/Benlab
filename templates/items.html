@@ -4,8 +4,7 @@
 
 <form class="row g-3 mb-3" method="get" action="{{ url_for('items') }}">
   <div class="col-auto">
-    <input type="text" name="search" value="{{ search }}" class="form-control" placeholder="搜索名称 / 备注 / CAS号（如 50-00-0 或 50000）">
-    <div class="form-text">支持按 CAS 号搜索（不带连字符也可匹配）。</div>
+    <input type="text" name="search" value="{{ search }}" class="form-control" placeholder="搜索名称 / 备注 / CAS号">
   </div>
   <div class="col-auto">
     <select name="category" class="form-select">

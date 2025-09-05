@@ -8,9 +8,13 @@
     <a href="{{ url_for('view_location', loc_id=loc.id) }}">{{ loc.name }}</a>
   </td>
   <td>
-    {% if loc.responsible_member %}
-      <a href="{{ url_for('profile', member_id=loc.responsible_member.id) }}">{{ loc.responsible_member.name }}</a>
-    {% else %} - {% endif %}
+    {% if loc.responsible_members and loc.responsible_members|length > 0 %}
+      {%- for member in loc.responsible_members %}
+        <a href="{{ url_for('profile', member_id=member.id) }}">{{ member.name }}</a>{% if not loop.last %}，{% endif %}
+      {%- endfor %}
+    {% else %}
+      -
+    {% endif %}
   </td>
   <td>{{ loc.items|length }}</td>
   <td>
@@ -28,9 +32,13 @@
 {% endmacro %}
 
 <h3 class="mb-3">实验室位置列表</h3>
-<a href="{{ url_for('add_location') }}" class="btn btn-primary mb-3">新增位置</a>
-
-<table class="table table-hover">
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <input type="text" id="filterInput" class="form-control" placeholder="按位置名称筛选">
+  </div>
+  <a href="{{ url_for('add_location') }}" class="btn btn-primary">新增位置</a>
+</div>
+<table class="table table-hover" id="locationsTable">
   <thead class="table-light">
     <tr>
       <th>名称</th>
@@ -58,5 +66,19 @@
   .indent-4 td { padding-left: 5rem; background-color: #dee2e6; }
   .indent-5 td { padding-left: 6rem; background-color: #ced4da; }
 </style>
+
+<script>
+  document.getElementById('filterInput').addEventListener('input', function() {
+    const filter = this.value.toLowerCase();
+    const rows = document.querySelectorAll('#locationsTable tbody tr');
+    rows.forEach(row => {
+      const nameCell = row.querySelector('td:first-child a');
+      if (nameCell) {
+        const text = nameCell.textContent.toLowerCase();
+        row.style.display = text.includes(filter) ? '' : 'none';
+      }
+    });
+  });
+</script>
 
 {% endblock %}

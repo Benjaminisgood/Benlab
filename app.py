@@ -81,9 +81,15 @@ class Member(UserMixin, db.Model):
     photo = db.Column(db.String(200))                            # 头像图片路径
     notes = db.Column(db.Text)                                   # 备注/个人展示板
     last_modified = db.Column(db.DateTime, default=datetime.utcnow)  # 最后修改时间
-    # 关系：成员负责的物品和位置，以及发送/收到的消息和日志
+    # 关系：成员负责的物品，以及发送/收到的消息和日志
     items = db.relationship('Item', backref='responsible_member', lazy=True, foreign_keys='Item.responsible_id')
-    locations = db.relationship('Location', backref='responsible_member', lazy=True, foreign_keys='Location.responsible_id')
+    # 负责的位置：多对多 responsible_locations
+    responsible_locations = db.relationship(
+        'Location',
+        secondary='location_members',
+        backref=db.backref('responsible_members', lazy='select'),
+        lazy='select'
+    )
     sent_messages = db.relationship('Message', backref='sender', lazy=True, foreign_keys='Message.sender_id')
     received_messages = db.relationship('Message', backref='receiver', lazy=True, foreign_keys='Message.receiver_id')
     logs = db.relationship('Log', backref='user', lazy=True)
@@ -133,14 +139,22 @@ class Location(db.Model):
     children = db.relationship('Location',
                             backref=db.backref('parent', remote_side=[id]),
                             cascade='all, delete-orphan')
-    responsible_id = db.Column(db.Integer, db.ForeignKey('members.id'))  # 负责人（成员ID）
+    # 多对多负责人
+    # responsible_members 关系由 Member.responsible_locations 的 backref 提供
     image = db.Column(db.String(200))                   # 位置图片文件名
     notes = db.Column(db.Text)                          # 备注
     last_modified = db.Column(db.DateTime, default=datetime.utcnow)  # 最后修改时间
     logs = db.relationship('Log', backref='location', lazy=True)     # 操作日志
+    detail_link = db.Column(db.String(200))
 
     def __repr__(self):
         return f'<Location {self.name}>'
+# 多对多：位置-成员负责人表
+location_members = db.Table(
+    'location_members',
+    db.Column('location_id', db.Integer, db.ForeignKey('locations.id'), primary_key=True),
+    db.Column('member_id', db.Integer, db.ForeignKey('members.id'), primary_key=True)
+)
 
 class Log(db.Model):
     __tablename__ = 'logs'
@@ -180,9 +194,9 @@ def load_user(user_id):
 # 路由定义
 @app.route('/')
 def index():
-    # 未登录则跳转到登录页，已登录则进入个人主页
+    # 未登录则跳转到登录页，已登录则进入管理员主页（固定 member_id=1）
     if current_user.is_authenticated:
-        return redirect(url_for('profile', member_id=current_user.id))
+        return redirect(url_for('profile', member_id=1))
     else:
         return redirect(url_for('login'))
 
@@ -431,8 +445,9 @@ def add_location():
         name = request.form.get('name')
         clean_status = request.form.get('clean_status') or None
         parent_id = request.form.get('parent_id')
-        responsible_id = request.form.get('responsible_id')
+        responsible_ids = request.form.getlist('responsible_ids')
         notes = request.form.get('notes')
+        detail_link = request.form.get('detail_link')
         image_file = request.files.get('image')
         image_filename = None
         if image_file and image_file.filename != '' and allowed_file(image_file.filename):
@@ -442,15 +457,24 @@ def add_location():
             image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             image_file.save(image_path)
             image_filename = filename
+        # 先创建 Location
         new_loc = Location(
             name=name,
             parent_id=parent_id if parent_id else None,
-            responsible_id=responsible_id if responsible_id else current_user.id,
             notes=notes,
             image=image_filename,
-            clean_status=clean_status
+            clean_status=clean_status,
+            detail_link=detail_link
         )
         db.session.add(new_loc)
+        db.session.commit()
+        # 多负责人
+        member_objs = []
+        if responsible_ids:
+            member_objs = Member.query.filter(Member.id.in_([int(mid) for mid in responsible_ids])).all()
+        if not member_objs:
+            member_objs = [current_user]
+        new_loc.responsible_members = member_objs
         db.session.commit()
         # 记录日志
         log = Log(user_id=current_user.id, location_id=new_loc.id, action_type="新增位置", details=f"Added location {new_loc.name}")
@@ -471,8 +495,9 @@ def edit_location(loc_id):
     if request.method == 'POST':
         # 更新位置信息
         location.name = request.form.get('name')
-        location.responsible_id = request.form.get('responsible_id')
-        location.notes = request.form.get('notes')
+        responsible_ids = request.form.getlist('responsible_ids')
+        notes = request.form.get('notes')
+        detail_link = request.form.get('detail_link')
         image_file = request.files.get('image')
         location.clean_status = request.form.get('clean_status') or None
         if image_file and image_file.filename != '' and allowed_file(image_file.filename):
@@ -482,6 +507,15 @@ def edit_location(loc_id):
             image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             image_file.save(image_path)
             location.image = filename
+        # 多负责人
+        member_objs = []
+        if responsible_ids:
+            member_objs = Member.query.filter(Member.id.in_([int(mid) for mid in responsible_ids])).all()
+        if not member_objs:
+            member_objs = [current_user]
+        location.responsible_members = member_objs
+        location.notes = notes
+        location.detail_link = detail_link
         location.last_modified = datetime.utcnow()
         db.session.commit()
         # 记录日志
@@ -536,34 +570,42 @@ def members_list():
 def profile(member_id):
     member = Member.query.get_or_404(member_id)
 
-    # 原始数据
+    # 负责的物品
     all_items = Item.query.filter_by(responsible_id=member.id).all()
-    all_locations = Location.query.filter_by(responsible_id=member.id).all()
+    # 负责的位置（多对多）
+    all_locations = list(member.responsible_locations)
 
     # 分开“告警”和“正常”
     critical_items = [it for it in all_items if it.stock_status and '用完' in it.stock_status]
     normal_items = [it for it in all_items if not (it.stock_status and '用完' in it.stock_status)]
     items_resp = critical_items + normal_items  # 用完的置顶
 
-    critical_locs = [loc for loc in all_locations if loc.clean_status == '脏']
-    normal_locs = [loc for loc in all_locations if loc.clean_status != '脏']
-    locations_resp = critical_locs + normal_locs  # 脏的置顶
+    critical_locs = [loc for loc in all_locations if loc.clean_status == '脏/报修']
+    normal_locs = [loc for loc in all_locations if loc.clean_status != '脏/报修']
+    locations_resp = critical_locs + normal_locs  # 脏/报修的置顶
 
     any_item_empty = any(it.stock_status and '用完' in it.stock_status for it in items_resp)
-    any_location_dirty = any(loc.clean_status == '脏' for loc in locations_resp)
+    any_location_dirty = any(loc.clean_status == '脏/报修' for loc in locations_resp)
 
     # 通知列表：他人对该成员负责的物品/位置的最近更新
     notifications = []
     if member.id == current_user.id:
         from sqlalchemy import or_
+        # 只查找该成员负责的物品和位置的日志（物品表的responsible_id，位置表通过多对多）
+        location_ids = [loc.id for loc in member.responsible_locations]
         notifications = Log.query.join(Item, Log.item_id == Item.id, isouter=True) \
                         .join(Location, Log.location_id == Location.id, isouter=True) \
-                        .filter(or_(Item.responsible_id == member.id, Location.responsible_id == member.id), Log.user_id != member.id) \
+                        .filter(
+                            or_(
+                                Item.responsible_id == member.id,
+                                Location.id.in_(location_ids) if location_ids else False
+                            ),
+                            Log.user_id != member.id
+                        ) \
                         .order_by(Log.timestamp.desc()).limit(5).all()
     # 留言板消息列表（发送给该成员的留言）
     messages = Message.query.filter_by(receiver_id=member.id).order_by(Message.timestamp.desc()).limit(10).all()
     # 当前用户自己的操作记录（仅查看自己的主页时显示）
-    # 这里的限制数字都是可以改的，不过前端也有折叠的逻辑，不用担心页面太丑
     user_logs = []
     if member.id == current_user.id:
         user_logs = Log.query.filter_by(user_id=member.id).order_by(Log.timestamp.desc()).limit(5).all()

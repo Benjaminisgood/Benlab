@@ -29,7 +29,8 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 # 使用绝对路径，避免工作目录变化导致保存失败
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-app.config['UPLOAD_FOLDER'] = os.path.join(BASE_DIR, 'static', 'images')
+# app.config['UPLOAD_FOLDER'] = os.path.join(BASE_DIR, 'static', 'images')
+app.config['UPLOAD_FOLDER'] = os.path.join(BASE_DIR, 'images')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 限制上传16MB以内的文件
 
 # ---- SQLite 并发优化（仅在使用 sqlite 时启用）----

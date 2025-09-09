@@ -8,5 +8,5 @@ instance/
 *.db
 migrations/versions/
 migrations/
-#images/
-#images/**/*
+images/
+images/**/*

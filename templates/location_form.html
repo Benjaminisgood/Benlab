@@ -49,13 +49,34 @@
     <div class="form-text">可填写位置的相关详情链接（可选）</div>
   </div>
   <div class="mb-3">
-    <label for="imageInput" class="form-label">位置图片 (可选)</label>
-    {% if location and location.image %}
-    <div class="mb-2">
-      <img src="{{ url_for('static', filename='images/' + location.image) }}" alt="位置图片" class="img-thumbnail" style="max-width:150px;">
+    <label for="imageInput" class="form-label">位置图片 (可选，可多选)</label>
+    {% if location %}
+    <div class="d-flex flex-wrap gap-3 mb-2">
+      {% set legacy_only = location.image and (location.images | selectattr('filename', 'equalto', location.image) | list | length == 0) %}
+      {% if legacy_only %}
+      <div class="text-center">
+        <img src="{{ uploaded_image_url(location.image) }}" alt="位置图片" class="img-thumbnail" style="max-width:150px;">
+        <div class="form-check mt-2">
+          <input class="form-check-input" type="checkbox" name="remove_primary_image" value="1" id="removePrimaryLocationImage">
+          <label class="form-check-label" for="removePrimaryLocationImage">删除此图</label>
+        </div>
+      </div>
+      {% endif %}
+      {% for gallery_image in location.images %}
+      <div class="text-center">
+        <img src="{{ uploaded_image_url(gallery_image.filename) }}" alt="位置图片" class="img-thumbnail" style="max-width:150px;">
+        <div class="form-check mt-2">
+          <input class="form-check-input" type="checkbox" name="remove_image_ids" value="{{ gallery_image.id }}" id="removeLocationImage{{ gallery_image.id }}">
+          <label class="form-check-label" for="removeLocationImage{{ gallery_image.id }}">删除此图</label>
+        </div>
+      </div>
+      {% endfor %}
+      {% if not (legacy_only or location.images) %}
+      <p class="text-muted mb-0">暂无已上传图片</p>
+      {% endif %}
     </div>
     {% endif %}
-    <input type="file" id="imageInput" name="image" accept="image/*" capture="environment" class="form-control">
+    <input type="file" id="imageInput" name="images" accept="image/*" capture="environment" class="form-control" multiple>
     <img id="imgPreview" src="#" alt="预览" style="max-width: 120px; display: none; margin-top: 5px;">
   </div>
   <div class="mb-3">

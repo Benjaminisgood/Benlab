@@ -22,7 +22,7 @@
     <label for="photoInput" class="form-label">头像 (可选)</label>
     {% if member.photo %}
     <div class="mb-2">
-      <img src="{{ url_for('static', filename='images/' + member.photo) }}" alt="头像" class="img-thumbnail" style="max-width:100px;">
+      <img src="{{ uploaded_image_url(member.photo) }}" alt="头像" class="img-thumbnail" style="max-width:100px;">
     </div>
     {% endif %}
     <input type="file" id="photoInput" name="photo" accept="image/*" capture="user" class="form-control">

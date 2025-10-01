@@ -57,8 +57,18 @@
   </div>
 
   <div class="col-md-6">
-    {% if item.image %}
-      <img src="{{ url_for('static', filename='images/' + item.image) }}" alt="物品图片" class="img-fluid img-thumbnail">
+    {% set image_urls = item_image_urls(item) %}
+    {% if image_urls %}
+      <div class="text-center">
+        <img src="{{ image_urls[0] }}" alt="物品图片" class="img-fluid img-thumbnail" id="itemGalleryImage">
+      </div>
+      {% if image_urls|length > 1 %}
+      <div class="d-flex justify-content-between align-items-center mt-2">
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="prevItemImage">上一张</button>
+        <small id="itemGalleryStatus">1 / {{ image_urls|length }}</small>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="nextItemImage">下一张</button>
+      </div>
+      {% endif %}
     {% else %}
       <p class="text-muted">无图片</p>
     {% endif %}
@@ -96,6 +106,33 @@
       copyBtn.textContent = '已复制';
       setTimeout(function(){ copyBtn.textContent = '复制链接'; }, 1200);
     });
+  }
+
+  var itemImages = {{ item_image_urls(item)|tojson }};
+  var galleryImg = document.getElementById('itemGalleryImage');
+  if (galleryImg && itemImages.length > 1) {
+    var statusEl = document.getElementById('itemGalleryStatus');
+    var prevBtn = document.getElementById('prevItemImage');
+    var nextBtn = document.getElementById('nextItemImage');
+    var index = 0;
+    var updateGallery = function () {
+      galleryImg.src = itemImages[index];
+      if (statusEl) {
+        statusEl.textContent = (index + 1) + ' / ' + itemImages.length;
+      }
+    };
+    if (prevBtn) {
+      prevBtn.addEventListener('click', function () {
+        index = (index - 1 + itemImages.length) % itemImages.length;
+        updateGallery();
+      });
+    }
+    if (nextBtn) {
+      nextBtn.addEventListener('click', function () {
+        index = (index + 1) % itemImages.length;
+        updateGallery();
+      });
+    }
   }
 })();
 </script>

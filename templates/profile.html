@@ -4,7 +4,7 @@
   <div class="row">
     <div class="col-auto">
       {% if profile_user.photo %}
-      <img src="{{ url_for('static', filename='images/' + profile_user.photo) }}" alt="头像" class="img-thumbnail" style="width:100px; height:100px; object-fit: cover;">
+      <img src="{{ uploaded_image_url(profile_user.photo) }}" alt="头像" class="img-thumbnail" style="width:100px; height:100px; object-fit: cover;">
       {% else %}
       <div class="bg-secondary text-white d-flex align-items-center justify-content-center rounded" style="width:100px; height:100px;">
         <span style="font-size:50px;">&#128100;</span>

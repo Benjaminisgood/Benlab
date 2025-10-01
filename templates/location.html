@@ -41,6 +41,12 @@
       {% if location.notes %}
       <li class="list-group-item"><strong>备注：</strong> {{ location.notes }}</li>
       {% endif %}
+      {% if location.detail_link %}
+      <li class="list-group-item">
+        <strong>详情链接：</strong>
+        <a href="{{ location.detail_link }}" target="_blank">{{ location.detail_link }}</a>
+      </li>
+      {% endif %}
       <li class="list-group-item"><strong>最近修改：</strong> {{ location.last_modified.strftime('%Y-%m-%d %H:%M') if location.last_modified else '未知' }}</li>
       <li class="list-group-item">
         <strong>物品统计：</strong>
@@ -57,10 +63,18 @@
     </a>
   </div>
   <div class="col-md-6">
-    {% if location.image %}
-    <div class="mb-3">
-      <img src="{{ url_for('static', filename='images/' + location.image) }}" alt="{{ location.name }}" class="img-fluid rounded border">
+    {% set image_urls = location_image_urls(location) %}
+    {% if image_urls %}
+    <div class="mb-3 text-center">
+      <img src="{{ image_urls[0] }}" alt="{{ location.name }}" class="img-fluid rounded border" id="locationGalleryImage">
     </div>
+    {% if image_urls|length > 1 %}
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <button type="button" class="btn btn-sm btn-outline-secondary" id="prevLocationImage">上一张</button>
+      <small id="locationGalleryStatus">1 / {{ image_urls|length }}</small>
+      <button type="button" class="btn btn-sm btn-outline-secondary" id="nextLocationImage">下一张</button>
+    </div>
+    {% endif %}
     {% else %}
     <p class="text-muted">无图片</p>
     {% endif %}
@@ -115,13 +129,33 @@
       setTimeout(function(){ copyBtn.textContent = '复制链接'; }, 1200);
     });
   }
+  var locImages = {{ location_image_urls(location)|tojson }};
+  var galleryImg = document.getElementById('locationGalleryImage');
+  if (galleryImg && locImages.length > 1) {
+    var statusEl = document.getElementById('locationGalleryStatus');
+    var prevBtn = document.getElementById('prevLocationImage');
+    var nextBtn = document.getElementById('nextLocationImage');
+    var index = 0;
+    var updateGallery = function () {
+      galleryImg.src = locImages[index];
+      if (statusEl) {
+        statusEl.textContent = (index + 1) + ' / ' + locImages.length;
+      }
+    };
+    if (prevBtn) {
+      prevBtn.addEventListener('click', function () {
+        index = (index - 1 + locImages.length) % locImages.length;
+        updateGallery();
+      });
+    }
+    if (nextBtn) {
+      nextBtn.addEventListener('click', function () {
+        index = (index + 1) % locImages.length;
+        updateGallery();
+      });
+    }
+  }
 })();
 </script>
 
 {% endblock %}
-      {% if location.detail_link %}
-      <li class="list-group-item">
-        <strong>详情链接：</strong>
-        <a href="{{ location.detail_link }}" target="_blank">{{ location.detail_link }}</a>
-      </li>
-      {% endif %}

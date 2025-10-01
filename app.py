@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 import re
-from flask import Flask, render_template, request, redirect, url_for, flash, send_file
+from flask import Flask, render_template, request, redirect, url_for, flash, send_file, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -71,6 +71,33 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+
+def save_uploaded_image(file_storage):
+    """Persist an uploaded image and return the stored filename."""
+    if not file_storage or file_storage.filename == '':
+        return None
+    if not allowed_file(file_storage.filename):
+        return None
+    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+    filename = secure_filename(file_storage.filename)
+    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
+    stored_name = f"{timestamp}_{filename}"
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], stored_name)
+    file_storage.save(filepath)
+    return stored_name
+
+
+def remove_uploaded_file(filename):
+    """Delete a previously saved image file if it still exists."""
+    if not filename:
+        return
+    path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
+
 # 数据模型定义
 class Member(UserMixin, db.Model):
     __tablename__ = 'members'
@@ -128,6 +155,26 @@ class Item(db.Model):
     )
     logs = db.relationship('Log', backref='item', lazy=True)  # 操作日志
 
+    images = db.relationship(
+        'ItemImage',
+        backref='item',
+        lazy='select',
+        cascade='all, delete-orphan',
+        order_by='ItemImage.created_at'
+    )
+
+    @property
+    def image_filenames(self):
+        filenames = []
+        seen = set()
+        for img in self.images:
+            if img.filename and img.filename not in seen:
+                filenames.append(img.filename)
+                seen.add(img.filename)
+        if self.image and self.image not in seen:
+            filenames.insert(0, self.image)
+        return filenames
+
     def __repr__(self):
         return f'<Item {self.name}>'
 
@@ -147,6 +194,26 @@ class Location(db.Model):
     last_modified = db.Column(db.DateTime, default=datetime.utcnow)  # 最后修改时间
     logs = db.relationship('Log', backref='location', lazy=True)     # 操作日志
     detail_link = db.Column(db.String(200))
+
+    images = db.relationship(
+        'LocationImage',
+        backref='location',
+        lazy='select',
+        cascade='all, delete-orphan',
+        order_by='LocationImage.created_at'
+    )
+
+    @property
+    def image_filenames(self):
+        filenames = []
+        seen = set()
+        for img in self.images:
+            if img.filename and img.filename not in seen:
+                filenames.append(img.filename)
+                seen.add(img.filename)
+        if self.image and self.image not in seen:
+            filenames.insert(0, self.image)
+        return filenames
 
     def __repr__(self):
         return f'<Location {self.name}>'
@@ -178,6 +245,28 @@ class Message(db.Model):
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)  # 留言时间
     def __repr__(self):
         return f'<Message from {self.sender_id} to {self.receiver_id}>'
+
+
+class ItemImage(db.Model):
+    __tablename__ = 'item_images'
+    id = db.Column(db.Integer, primary_key=True)
+    item_id = db.Column(db.Integer, db.ForeignKey('items.id'), nullable=False, index=True)
+    filename = db.Column(db.String(255), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<ItemImage {self.filename}>'
+
+
+class LocationImage(db.Model):
+    __tablename__ = 'location_images'
+    id = db.Column(db.Integer, primary_key=True)
+    location_id = db.Column(db.Integer, db.ForeignKey('locations.id'), nullable=False, index=True)
+    filename = db.Column(db.String(255), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<LocationImage {self.filename}>'
 
 # 初始化数据库并创建默认用户
 with app.app_context():
@@ -221,6 +310,11 @@ def login():
 def logout():
     logout_user()
     return redirect(url_for('login'))
+
+
+@app.route('/uploads/<path:filename>')
+def uploaded_file(filename):
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
@@ -308,16 +402,17 @@ def add_item():
         notes = request.form.get('notes')
         purchase_link = request.form.get('purchase_link')
 
-        # 图片处理
-        image_file = request.files.get('image')
-        image_filename = None
-        if image_file and image_file.filename != '' and allowed_file(image_file.filename):
-            os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-            filename = secure_filename(image_file.filename)
-            filename = datetime.now().strftime("%Y%m%d%H%M%S_") + filename
-            image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            image_file.save(image_path)
-            image_filename = filename
+        # 图片处理（支持多张）
+        uploaded_files = request.files.getlist('images')
+        if not uploaded_files:
+            fallback_file = request.files.get('image')
+            uploaded_files = [fallback_file] if fallback_file else []
+
+        saved_filenames = []
+        for image_file in uploaded_files:
+            stored_name = save_uploaded_image(image_file)
+            if stored_name:
+                saved_filenames.append(stored_name)
 
         # ✅ 创建新的 Item 实例（已更新字段）
         new_item = Item(
@@ -333,7 +428,7 @@ def add_item():
             responsible_id=responsible_id if responsible_id else current_user.id,
             notes=notes,
             purchase_link=purchase_link,
-            image=image_filename
+            image=saved_filenames[0] if saved_filenames else None
         )
         # 绑定多个位置（若前端未选择则为空列表）
         loc_ids = [int(x) for x in location_ids] if location_ids else []
@@ -342,6 +437,8 @@ def add_item():
         if loc_ids:
             new_item.locations = Location.query.filter(Location.id.in_(loc_ids)).all()
         db.session.add(new_item)
+        for fname in saved_filenames:
+            new_item.images.append(ItemImage(filename=fname))
         db.session.commit()
 
         # ✅ 写入日志
@@ -391,15 +488,39 @@ def edit_item(item_id):
         item.notes = request.form.get('notes')
         item.purchase_link = request.form.get('purchase_link')
 
-        # 处理图片更新（如果有新上传）
-        image_file = request.files.get('image')
-        if image_file and image_file.filename != '' and allowed_file(image_file.filename):
-            os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-            filename = secure_filename(image_file.filename)
-            filename = datetime.now().strftime("%Y%m%d%H%M%S_") + filename
-            image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            image_file.save(image_path)
-            item.image = filename  # 更新图片路径
+        if item.image and not any(img.filename == item.image for img in item.images):
+            item.images.append(ItemImage(filename=item.image))
+
+        # 删除勾选的旧图片
+        remove_image_ids_raw = request.form.getlist('remove_image_ids')
+        remove_image_ids = {int(x) for x in remove_image_ids_raw if x.isdigit()}
+        if remove_image_ids:
+            for img in list(item.images):
+                if img.id in remove_image_ids:
+                    remove_uploaded_file(img.filename)
+                    item.images.remove(img)
+                    db.session.delete(img)
+
+        remove_primary = request.form.get('remove_primary_image') in {'1', 'on', 'true'}
+        if remove_primary and item.image:
+            if not any(img.filename == item.image for img in item.images):
+                remove_uploaded_file(item.image)
+            item.image = None
+
+        # 处理新增上传（支持多张）
+        uploaded_files = request.files.getlist('images')
+        if not uploaded_files:
+            fallback_file = request.files.get('image')
+            uploaded_files = [fallback_file] if fallback_file else []
+        for image_file in uploaded_files:
+            stored_name = save_uploaded_image(image_file)
+            if stored_name:
+                item.images.append(ItemImage(filename=stored_name))
+
+        if item.images:
+            item.image = item.images[0].filename
+        elif remove_primary:
+            item.image = None
 
         item.last_modified = datetime.utcnow()
         db.session.commit()
@@ -420,6 +541,8 @@ def edit_item(item_id):
 @login_required
 def delete_item(item_id):
     item = Item.query.get_or_404(item_id)
+    for fname in set(item.image_filenames):
+        remove_uploaded_file(fname)
     db.session.delete(item)
     db.session.commit()
     # 记录日志
@@ -449,26 +572,29 @@ def add_location():
         responsible_ids = request.form.getlist('responsible_ids')
         notes = request.form.get('notes')
         detail_link = request.form.get('detail_link')
-        image_file = request.files.get('image')
-        image_filename = None
-        if image_file and image_file.filename != '' and allowed_file(image_file.filename):
-            os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-            filename = secure_filename(image_file.filename)
-            filename = datetime.now().strftime("%Y%m%d%H%M%S_") + filename
-            image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            image_file.save(image_path)
-            image_filename = filename
+
+        uploaded_files = request.files.getlist('images')
+        if not uploaded_files:
+            fallback_file = request.files.get('image')
+            uploaded_files = [fallback_file] if fallback_file else []
+
+        saved_filenames = []
+        for image_file in uploaded_files:
+            stored_name = save_uploaded_image(image_file)
+            if stored_name:
+                saved_filenames.append(stored_name)
         # 先创建 Location
         new_loc = Location(
             name=name,
             parent_id=parent_id if parent_id else None,
             notes=notes,
-            image=image_filename,
+            image=saved_filenames[0] if saved_filenames else None,
             clean_status=clean_status,
             detail_link=detail_link
         )
         db.session.add(new_loc)
-        db.session.commit()
+        for fname in saved_filenames:
+            new_loc.images.append(LocationImage(filename=fname))
         # 多负责人
         member_objs = []
         if responsible_ids:
@@ -499,15 +625,39 @@ def edit_location(loc_id):
         responsible_ids = request.form.getlist('responsible_ids')
         notes = request.form.get('notes')
         detail_link = request.form.get('detail_link')
-        image_file = request.files.get('image')
         location.clean_status = request.form.get('clean_status') or None
-        if image_file and image_file.filename != '' and allowed_file(image_file.filename):
-            os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-            filename = secure_filename(image_file.filename)
-            filename = datetime.now().strftime("%Y%m%d%H%M%S_") + filename
-            image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            image_file.save(image_path)
-            location.image = filename
+
+        if location.image and not any(img.filename == location.image for img in location.images):
+            location.images.append(LocationImage(filename=location.image))
+
+        remove_image_ids_raw = request.form.getlist('remove_image_ids')
+        remove_image_ids = {int(x) for x in remove_image_ids_raw if x.isdigit()}
+        if remove_image_ids:
+            for img in list(location.images):
+                if img.id in remove_image_ids:
+                    remove_uploaded_file(img.filename)
+                    location.images.remove(img)
+                    db.session.delete(img)
+
+        remove_primary = request.form.get('remove_primary_image') in {'1', 'on', 'true'}
+        if remove_primary and location.image:
+            if not any(img.filename == location.image for img in location.images):
+                remove_uploaded_file(location.image)
+            location.image = None
+
+        uploaded_files = request.files.getlist('images')
+        if not uploaded_files:
+            fallback_file = request.files.get('image')
+            uploaded_files = [fallback_file] if fallback_file else []
+        for image_file in uploaded_files:
+            stored_name = save_uploaded_image(image_file)
+            if stored_name:
+                location.images.append(LocationImage(filename=stored_name))
+
+        if location.images:
+            location.image = location.images[0].filename
+        elif remove_primary:
+            location.image = None
         # 多负责人
         member_objs = []
         if responsible_ids:
@@ -532,6 +682,8 @@ def edit_location(loc_id):
 @login_required
 def delete_location(loc_id):
     location = Location.query.get_or_404(loc_id)
+    for fname in set(location.image_filenames):
+        remove_uploaded_file(fname)
     db.session.delete(location)
     db.session.commit()
     # 记录日志
@@ -639,12 +791,10 @@ def edit_profile(member_id):
         # 更新头像
         image_file = request.files.get('photo')
         if image_file and image_file.filename != '' and allowed_file(image_file.filename):
-            os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-            filename = secure_filename(image_file.filename)
-            filename = datetime.now().strftime("%Y%m%d%H%M%S_") + filename
-            image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            image_file.save(image_path)
-            member.photo = filename
+            stored_name = save_uploaded_image(image_file)
+            if stored_name:
+                remove_uploaded_file(member.photo)
+                member.photo = stored_name
         member.last_modified = datetime.utcnow()
         db.session.commit()
         flash('个人信息已更新', 'success')
@@ -686,8 +836,36 @@ def export_data(datatype):
     df.to_csv(filename, index=False)
     return send_file(filename, as_attachment=True, mimetype='text/csv', download_name=filename)
 
-if __name__ == '__main__':
-    # 本地开发便捷启动；生产由 gunicorn/uvicorn 托管
-    debug = os.getenv('FLASK_DEBUG', '1') == '1'
-    app.run(host='127.0.0.1', port=8000, debug=debug)
-    print("Server is running on the http://127.0.0.1:8000")
+
+@app.context_processor
+def inject_image_helpers():
+    def item_image_urls(item):
+        if not item:
+            return []
+        return [url_for('uploaded_file', filename=fname) for fname in getattr(item, 'image_filenames', []) if fname]
+
+    def location_image_urls(location):
+        if not location:
+            return []
+        return [url_for('uploaded_file', filename=fname) for fname in getattr(location, 'image_filenames', []) if fname]
+
+    def uploaded_image_url(filename):
+        return url_for('uploaded_file', filename=filename) if filename else None
+
+    return dict(
+        item_image_urls=item_image_urls,
+        location_image_urls=location_image_urls,
+        uploaded_image_url=uploaded_image_url,
+    )
+
+if __name__ == "__main__":
+    host = os.getenv("HOST", "0.0.0.0")
+    port = int(
+        os.getenv("PORT")
+        or os.getenv("FLASK_RUN_PORT")
+        or os.getenv("BENSCI_PORT")
+        or 5001
+    )
+    debug = os.getenv("FLASK_DEBUG", "0") == "1"
+    app.run(host=host, port=port, debug=debug)
+    print(f"Server is running on the http://{host}:{port}")

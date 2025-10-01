@@ -10,3 +10,10 @@ migrations/versions/
 migrations/
 images/
 images/**/*
+*.DB_STORE
+*.DB_STORE
+.DS_Store
+.idea/
+.vscode/
+*.log
+*.pot

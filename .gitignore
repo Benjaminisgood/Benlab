@@ -17,3 +17,5 @@ images/**/*
 .vscode/
 *.log
 *.pot
+flask.log
+flask.pid

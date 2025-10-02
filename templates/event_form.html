@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block content %}
+{% set is_edit = event is not none %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="mb-0">{{ '编辑事项' if is_edit else '新建事项' }}</h2>
+  {% if is_edit %}
+  <form method="post" action="{{ url_for('delete_event', event_id=event.id) }}" onsubmit="return confirm('确认删除该事项？此操作不可恢复。');">
+    <button type="submit" class="btn btn-outline-danger">删除事项</button>
+  </form>
+  {% endif %}
+</div>
+
+<form method="post" class="needs-validation" novalidate enctype="multipart/form-data">
+  <div class="row g-3">
+    <div class="col-md-8">
+      <div class="mb-3">
+        <label class="form-label" for="title">事项标题 *</label>
+        <input type="text" class="form-control" id="title" name="title" value="{{ form_state.title }}" required>
+      </div>
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label" for="start_time">开始时间</label>
+          <input type="datetime-local" class="form-control" id="start_time" name="start_time" value="{{ form_state.start_time }}">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="end_time">结束时间</label>
+          <input type="datetime-local" class="form-control" id="end_time" name="end_time" value="{{ form_state.end_time }}">
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="description">事项内容</label>
+        <textarea class="form-control" id="description" name="description" rows="6" placeholder="描述活动目的、流程、注意事项等...">{{ form_state.description }}</textarea>
+        <div class="form-text">在描述中提到的物品或位置会自动匹配已有记录，未选择的会提示你补充。</div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="detail_link">活动详情链接</label>
+        <input type="url" class="form-control" id="detail_link" name="detail_link" placeholder="https://..." value="{{ form_state.detail_link }}">
+        <div class="form-text">可选。如果有协作文档或活动公告，可贴上链接方便查阅。</div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="event_images">活动照片</label>
+        <input type="file" class="form-control" id="event_images" name="event_images" accept="image/*" multiple>
+        <div class="form-text">支持一次上传多张照片，建议使用小于 5MB 的图片。</div>
+      </div>
+      {% if is_edit and event.images %}
+      <div class="mb-3">
+        <label class="form-label">已上传的照片</label>
+        <div class="row g-2">
+          {% for img in event.images %}
+          <div class="col-sm-4">
+            <div class="card h-100">
+              <img src="{{ uploaded_image_url(img.filename) }}" class="card-img-top" alt="活动照片">
+              <div class="card-body p-2">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" value="{{ img.id }}" id="removeImg{{ img.id }}" name="remove_event_image_ids">
+                  <label class="form-check-label small" for="removeImg{{ img.id }}">删除该照片</label>
+                </div>
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+    <div class="col-md-4">
+      <div class="mb-3">
+        <label class="form-label d-block">可见性</label>
+        <div class="list-group">
+          <label class="list-group-item">
+            <input class="form-check-input me-1 visibility-toggle" type="radio" name="visibility" value="personal" {% if form_state.visibility == 'personal' %}checked{% endif %}>
+            个人事项 <small class="text-muted">仅自己可见，之后可改成其他模式。</small>
+          </label>
+          <label class="list-group-item">
+            <input class="form-check-input me-1 visibility-toggle" type="radio" name="visibility" value="internal" {% if form_state.visibility == 'internal' %}checked{% endif %}>
+            内部事项 <small class="text-muted">仅选中的成员可见，需指定参与人。</small>
+          </label>
+          <label class="list-group-item">
+            <input class="form-check-input me-1 visibility-toggle" type="radio" name="visibility" value="public" {% if form_state.visibility == 'public' %}checked{% endif %}>
+            公开事项 <small class="text-muted">所有成员可见，可自由报名。</small>
+          </label>
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="location_ids">活动地点</label>
+        <select class="form-select" id="location_ids" name="location_ids" multiple size="6">
+          {% set selected_locations = form_state.location_ids | list %}
+          {% for location in locations %}
+          <option value="{{ location.id }}" {% if location.id in selected_locations %}selected{% endif %}>{{ location.name }}</option>
+          {% endfor %}
+        </select>
+        <div class="form-text">可多选，按住 Ctrl/⌘ 或 Shift 进行多选。</div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="item_ids">所需物品</label>
+        <select class="form-select" id="item_ids" name="item_ids" multiple size="6">
+          {% set selected_items = form_state.item_ids | list %}
+          {% for item in items %}
+          <option value="{{ item.id }}" {% if item.id in selected_items %}selected{% endif %}>{{ item.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="mb-3" id="participantWrapper">
+        <label class="form-label" for="participant_ids">参与成员</label>
+        <select class="form-select" id="participant_ids" name="participant_ids" multiple size="6">
+          {% set selected_participants = form_state.participant_ids | list %}
+          {% for member in members %}
+          {% if member.id != current_user.id %}
+          <option value="{{ member.id }}" {% if member.id in selected_participants %}selected{% endif %}>{{ member.name or member.username }}</option>
+          {% endif %}
+          {% endfor %}
+        </select>
+        <div class="form-text">内部事项需指定参与人；公开事项可预先指定默认参与者，其他成员可在详情页报名。</div>
+      </div>
+    </div>
+  </div>
+  <div class="mt-4 d-flex justify-content-end gap-2">
+    <a class="btn btn-outline-secondary" href="{{ url_for('events_overview') }}">取消</a>
+    <button type="submit" class="btn btn-primary">{{ '保存修改' if is_edit else '创建事项' }}</button>
+  </div>
+</form>
+
+<script>
+  const visibilityRadios = document.querySelectorAll('.visibility-toggle');
+  const participantWrapper = document.getElementById('participantWrapper');
+  const participantSelect = document.getElementById('participant_ids');
+
+  function toggleParticipants() {
+    const value = document.querySelector('.visibility-toggle:checked').value;
+    const isVisible = value !== 'personal';
+    participantWrapper.style.display = isVisible ? 'block' : 'none';
+    participantSelect.disabled = !isVisible;
+  }
+
+  visibilityRadios.forEach(radio => radio.addEventListener('change', toggleParticipants));
+  toggleParticipants();
+</script>
+{% endblock %}

@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h2 class="mb-0">{{ event.title }}</h2>
+    <div class="text-muted small mt-1">由 {{ event.owner.name if event.owner else '未知成员' }} 创建于 {{ event.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+  </div>
+  <div class="d-flex gap-2">
+    <span class="badge bg-{% if event.visibility == 'public' %}success{% elif event.visibility == 'internal' %}info{% else %}secondary{% endif %} align-self-center">
+      {% if event.visibility == 'public' %}公开事项{% elif event.visibility == 'internal' %}内部事项{% else %}个人事项{% endif %}
+    </span>
+    {% if event.detail_link %}
+    <a class="btn btn-outline-secondary" href="{{ event.detail_link }}" target="_blank" rel="noopener">查看活动链接</a>
+    {% endif %}
+    {% if event.can_edit(current_user) %}
+    <a class="btn btn-outline-primary" href="{{ url_for('edit_event', event_id=event.id) }}">编辑</a>
+    {% endif %}
+  </div>
+</div>
+
+{% if current_user.id == event.owner_id and (missing_items or missing_locations) %}
+<div class="alert alert-warning">
+  <strong>提示：</strong>事项内容中提到了
+  {% if missing_items %}
+    物品 {{ missing_items | map(attribute='name') | join('、') }}
+  {% endif %}
+  {% if missing_items and missing_locations %}，以及{% endif %}
+  {% if missing_locations %}
+    位置 {{ missing_locations | map(attribute='name') | join('、') }}
+  {% endif %}
+  ，但未在下方列表中。<a href="{{ url_for('edit_event', event_id=event.id) }}" class="alert-link">点击编辑补充</a>。
+</div>
+{% endif %}
+
+<div class="row g-4">
+  <div class="col-lg-8">
+    <div class="card mb-3">
+      <div class="card-header">事项安排</div>
+      <div class="card-body">
+        <p><strong>时间：</strong>
+          {% if event.start_time %}
+            {{ event.start_time.strftime('%Y-%m-%d %H:%M') }}
+            {% if event.end_time %}&ndash;{{ event.end_time.strftime('%Y-%m-%d %H:%M') }}{% endif %}
+          {% else %}
+            待定
+          {% endif %}
+        </p>
+        {% if event.detail_link %}
+        <p><strong>活动链接：</strong><a href="{{ event.detail_link }}" target="_blank" rel="noopener">{{ event.detail_link }}</a></p>
+        {% endif %}
+        <p><strong>地点：</strong>
+          {% if event.locations %}
+            {% for loc in event.locations %}
+              <a class="badge bg-light text-dark border me-1" href="{{ url_for('view_location', loc_id=loc.id) }}">{{ loc.name }}</a>
+            {% endfor %}
+          {% else %}未指定{% endif %}
+        </p>
+        <p><strong>所需物品：</strong>
+          {% if event.items %}
+            {% for item in event.items %}
+              <a class="badge bg-light text-dark border me-1" href="{{ url_for('item_detail', item_id=item.id) }}">{{ item.name }}</a>
+            {% endfor %}
+          {% else %}未指定{% endif %}
+        </p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>事项内容</span>
+        {% if event.description %}
+        <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#rawContent" aria-expanded="false" aria-controls="rawContent">查看原文</button>
+        {% endif %}
+      </div>
+      <div class="card-body">
+        {% if event.description %}
+        <div class="mb-3">
+          {{ linked_description | safe }}
+        </div>
+        <div class="collapse" id="rawContent">
+          <div class="card card-body bg-light">
+            <pre class="mb-0" style="white-space: pre-wrap;">{{ event.description }}</pre>
+          </div>
+        </div>
+        {% else %}
+        <div class="text-muted">尚未填写详细内容。</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card mb-3">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>参与成员</span>
+        <span class="badge bg-secondary">{{ participant_links | length }}</span>
+      </div>
+      <ul class="list-group list-group-flush">
+        {% for link in participant_links %}
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+          <div>
+            {% if link.member %}
+              <a class="fw-semibold text-decoration-none" href="{{ url_for('profile', member_id=link.member.id) }}">
+                {{ link.member.name if link.member.name else link.member.username }}
+              </a>
+            {% else %}
+              <span class="fw-semibold">未知成员</span>
+            {% endif %}
+            {% if link.member_id == current_user.id %}
+              <span class="badge bg-light text-dark border ms-2">我</span>
+            {% endif %}
+            {% if link.role == 'owner' %}
+              <span class="badge bg-primary ms-2">负责人</span>
+            {% endif %}
+          </div>
+          <small class="text-muted">{{ link.joined_at.strftime('%m-%d %H:%M') if link.joined_at else '' }}</small>
+        </li>
+        {% else %}
+        <li class="list-group-item text-muted">暂无成员</li>
+        {% endfor %}
+      </ul>
+      <div class="card-footer d-flex gap-2">
+        {% if allow_join %}
+        <form method="post" action="{{ url_for('signup_event', event_id=event.id) }}">
+          <button type="submit" class="btn btn-success btn-sm">报名参加</button>
+        </form>
+        {% elif event.is_participant(current_user) and event.owner_id != current_user.id %}
+        <form method="post" action="{{ url_for('withdraw_event', event_id=event.id) }}" onsubmit="return confirm('确认退出该事项？');">
+          <button type="submit" class="btn btn-outline-secondary btn-sm">退出事项</button>
+        </form>
+        {% endif %}
+        {% if not allow_join and not event.is_participant(current_user) and event.visibility == 'public' %}
+          <span class="text-muted small">报名已关闭或你已加入。</span>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">相关提醒</div>
+      <div class="card-body">
+        <p class="mb-1"><strong>可见范围：</strong>
+          {% if event.visibility == 'public' %}所有成员可见，可报名加入。
+          {% elif event.visibility == 'internal' %}仅负责人和选定成员可见。
+          {% else %}仅创建者本人可见。
+          {% endif %}
+        </p>
+        <p class="mb-1"><strong>参与人数：</strong>{{ event.participant_count() }}</p>
+        <p class="mb-0 text-muted small">若需要更改可见性或参与成员，请点击上方“编辑”。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if event.images %}
+<div class="card mt-4">
+  <div class="card-header">活动照片</div>
+  <div class="card-body">
+    <div class="row g-3">
+      {% for img in event.images %}
+      <div class="col-md-4">
+        <div class="ratio ratio-4x3 border rounded overflow-hidden">
+          <img src="{{ uploaded_image_url(img.filename) }}" alt="活动照片" style="object-fit: cover; width: 100%; height: 100%;">
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

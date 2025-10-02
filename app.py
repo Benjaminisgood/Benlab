@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 import re
-from flask import Flask, render_template, request, redirect, url_for, flash, send_file, send_from_directory
+from flask import Flask, render_template, request, redirect, url_for, flash, send_file, send_from_directory, abort
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -10,6 +10,7 @@ from collections import Counter
 from sqlalchemy.orm import selectinload
 from sqlalchemy import or_, func
 from flask_migrate import Migrate
+from markupsafe import Markup, escape
 
 
 app = Flask(__name__)
@@ -61,6 +62,19 @@ login_manager.login_view = 'login'
 item_locations = db.Table(
     'item_locations',
     db.Column('item_id', db.Integer, db.ForeignKey('items.id'), primary_key=True),
+    db.Column('location_id', db.Integer, db.ForeignKey('locations.id'), primary_key=True)
+)
+
+# 事项与物品/位置的关联表
+event_items = db.Table(
+    'event_items',
+    db.Column('event_id', db.Integer, db.ForeignKey('events.id'), primary_key=True),
+    db.Column('item_id', db.Integer, db.ForeignKey('items.id'), primary_key=True)
+)
+
+event_locations = db.Table(
+    'event_locations',
+    db.Column('event_id', db.Integer, db.ForeignKey('events.id'), primary_key=True),
     db.Column('location_id', db.Integer, db.ForeignKey('locations.id'), primary_key=True)
 )
 login_manager = LoginManager(app)
@@ -121,6 +135,7 @@ class Member(UserMixin, db.Model):
     sent_messages = db.relationship('Message', backref='sender', lazy=True, foreign_keys='Message.sender_id')
     received_messages = db.relationship('Message', backref='receiver', lazy=True, foreign_keys='Message.receiver_id')
     logs = db.relationship('Log', backref='user', lazy=True)
+    event_participations = db.relationship('EventParticipant', back_populates='member', cascade='all, delete-orphan', lazy='select')
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -247,6 +262,205 @@ class Message(db.Model):
         return f'<Message from {self.sender_id} to {self.receiver_id}>'
 
 
+class EventParticipant(db.Model):
+    __tablename__ = 'event_participants'
+    event_id = db.Column(db.Integer, db.ForeignKey('events.id'), primary_key=True)
+    member_id = db.Column(db.Integer, db.ForeignKey('members.id'), primary_key=True)
+    role = db.Column(db.String(20), default='participant', nullable=False)
+    status = db.Column(db.String(20), default='confirmed', nullable=False)
+    joined_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    event = db.relationship('Event', back_populates='participant_links')
+    member = db.relationship('Member', back_populates='event_participations')
+
+    def __repr__(self):
+        return f'<EventParticipant event={self.event_id} member={self.member_id} role={self.role}>'
+
+
+class Event(db.Model):
+    __tablename__ = 'events'
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(150), nullable=False)
+    description = db.Column(db.Text)
+    visibility = db.Column(db.String(20), nullable=False, default='personal')  # personal/internal/public
+    owner_id = db.Column(db.Integer, db.ForeignKey('members.id'), nullable=False)
+    start_time = db.Column(db.DateTime)
+    end_time = db.Column(db.DateTime)
+    detail_link = db.Column(db.String(255))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    owner = db.relationship('Member', backref=db.backref('events_owned', lazy='dynamic'))
+    participant_links = db.relationship(
+        'EventParticipant',
+        back_populates='event',
+        cascade='all, delete-orphan',
+        lazy='select'
+    )
+    participants = db.relationship(
+        'Member',
+        secondary='event_participants',
+        viewonly=True,
+        lazy='select',
+        backref=db.backref('events_participating', lazy='select')
+    )
+    items = db.relationship(
+        'Item',
+        secondary=event_items,
+        lazy='select',
+        backref=db.backref('events', lazy='select')
+    )
+    locations = db.relationship(
+        'Location',
+        secondary=event_locations,
+        lazy='select',
+        backref=db.backref('events', lazy='select')
+    )
+    images = db.relationship(
+        'EventImage',
+        backref='event',
+        lazy='select',
+        cascade='all, delete-orphan',
+        order_by='EventImage.created_at'
+    )
+
+    @property
+    def image_filenames(self):
+        return [img.filename for img in self.images if img.filename]
+
+    def can_view(self, member):
+        if self.visibility == 'public':
+            return True
+        if not member:
+            return False
+        if member.id == self.owner_id:
+            return True
+        return any(link.member_id == member.id for link in self.participant_links)
+
+    def can_edit(self, member):
+        return bool(member and member.id == self.owner_id)
+
+    def can_join(self, member):
+        if not member or member.id == self.owner_id:
+            return False
+        if self.visibility != 'public':
+            return False
+        return all(link.member_id != member.id for link in self.participant_links)
+
+    def is_participant(self, member):
+        if not member:
+            return False
+        return any(link.member_id == member.id for link in self.participant_links)
+
+    def touch(self):
+        self.updated_at = datetime.utcnow()
+
+    def participant_count(self):
+        return len(self.participant_links)
+
+    def __repr__(self):
+        return f'<Event {self.id} {self.title}>'
+
+
+def parse_datetime_local(raw_value):
+    if not raw_value:
+        return None
+    try:
+        return datetime.strptime(raw_value, '%Y-%m-%dT%H:%M')
+    except (ValueError, TypeError):
+        return None
+
+
+def format_datetime_local(value):
+    if not value:
+        return ''
+    return value.strftime('%Y-%m-%dT%H:%M')
+
+
+def detect_entity_mentions(text, model):
+    if not text:
+        return []
+    mentions = []
+    seen_ids = set()
+    for obj in model.query.order_by(model.name).all():
+        name = getattr(obj, 'name', None)
+        if not name or obj.id in seen_ids:
+            continue
+        if name in text:
+            mentions.append(obj)
+            seen_ids.add(obj.id)
+    return mentions
+
+
+def link_text_with_entities(text, replacements):
+    if not text:
+        return Markup('')
+    if not replacements:
+        return Markup(escape(text))
+    # 优先替换较长的名称，避免短词抢占
+    ordered_names = sorted(replacements.keys(), key=len, reverse=True)
+    pattern = re.compile('|'.join(re.escape(name) for name in ordered_names))
+    pieces = []
+    last_index = 0
+    for match in pattern.finditer(text):
+        start, end = match.span()
+        if start > last_index:
+            pieces.append(escape(text[last_index:start]))
+        name = match.group(0)
+        url = replacements.get(name)
+        if url:
+            pieces.append(Markup(f'<a href="{url}">{escape(name)}</a>'))
+        else:
+            pieces.append(escape(name))
+        last_index = end
+    if last_index < len(text):
+        pieces.append(escape(text[last_index:]))
+    return Markup('').join(pieces)
+
+
+def compute_missing_resources(event):
+    content = event.description or ''
+    mentioned_items = detect_entity_mentions(content, Item)
+    mentioned_locations = detect_entity_mentions(content, Location)
+    selected_item_ids = {item.id for item in event.items}
+    selected_location_ids = {loc.id for loc in event.locations}
+    missing_items = [item for item in mentioned_items if item.id not in selected_item_ids]
+    missing_locations = [loc for loc in mentioned_locations if loc.id not in selected_location_ids]
+    return missing_items, missing_locations
+
+
+def build_event_view_model(event):
+    content = event.description or ''
+    item_links = {item.name: url_for('item_detail', item_id=item.id) for item in event.items if item.name}
+    location_links = {loc.name: url_for('view_location', loc_id=loc.id) for loc in event.locations if loc.name}
+    combined_links = {**item_links, **{k: v for k, v in location_links.items() if k not in item_links}}
+    linked_content = link_text_with_entities(content, combined_links)
+    missing_items, missing_locations = compute_missing_resources(event)
+    return linked_content, missing_items, missing_locations
+
+
+def ensure_owner_participation(event):
+    owner_link = None
+    for link in event.participant_links:
+        if link.member_id == event.owner_id:
+            owner_link = link
+            break
+    if owner_link:
+        owner_link.role = 'owner'
+        owner_link.status = 'confirmed'
+    else:
+        event.participant_links.append(
+            EventParticipant(member_id=event.owner_id, role='owner', status='confirmed')
+        )
+
+
+def add_event_images(event, file_storages):
+    for image_file in file_storages:
+        stored_name = save_uploaded_image(image_file)
+        if stored_name:
+            event.images.append(EventImage(filename=stored_name))
+
+
 class ItemImage(db.Model):
     __tablename__ = 'item_images'
     id = db.Column(db.Integer, primary_key=True)
@@ -268,6 +482,17 @@ class LocationImage(db.Model):
     def __repr__(self):
         return f'<LocationImage {self.filename}>'
 
+
+class EventImage(db.Model):
+    __tablename__ = 'event_images'
+    id = db.Column(db.Integer, primary_key=True)
+    event_id = db.Column(db.Integer, db.ForeignKey('events.id'), nullable=False, index=True)
+    filename = db.Column(db.String(255), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<EventImage {self.filename}>'
+
 # 初始化数据库并创建默认用户
 with app.app_context():
     db.create_all()
@@ -279,7 +504,12 @@ with app.app_context():
 
 @login_manager.user_loader
 def load_user(user_id):
-    return Member.query.get(int(user_id))
+    if not user_id:
+        return None
+    try:
+        return db.session.get(Member, int(user_id))
+    except (TypeError, ValueError):
+        return None
 
 # 路由定义
 @app.route('/')
@@ -336,6 +566,356 @@ def register():
             flash('注册成功，请登录', 'success')
             return redirect(url_for('login'))
     return render_template('register.html')
+
+
+@app.route('/events')
+@login_required
+def events_overview():
+    events_query = Event.query.options(
+        selectinload(Event.owner),
+        selectinload(Event.items),
+        selectinload(Event.locations),
+        selectinload(Event.participant_links).selectinload(EventParticipant.member)
+    )
+    accessible_events = events_query.filter(
+        or_(
+            Event.visibility == 'public',
+            Event.owner_id == current_user.id,
+            Event.participant_links.any(EventParticipant.member_id == current_user.id)
+        )
+    ).order_by(Event.start_time.asc(), Event.created_at.desc()).all()
+    now = datetime.utcnow()
+    upcoming_events = []
+    past_events = []
+    for event in accessible_events:
+        if event.start_time and event.start_time < now:
+            past_events.append(event)
+        else:
+            upcoming_events.append(event)
+    return render_template('events.html', events=accessible_events, now=now, upcoming_events=upcoming_events, past_events=past_events)
+
+
+def _event_form_choices():
+    members = Member.query.order_by(Member.name).all()
+    items = Item.query.order_by(Item.name).all()
+    locations = Location.query.order_by(Location.name).all()
+    return members, items, locations
+
+
+def _collect_selected_ids(raw_list):
+    selected = set()
+    for raw in raw_list:
+        try:
+            selected.add(int(raw))
+        except (TypeError, ValueError):
+            continue
+    return selected
+
+
+def _load_event_for_edit(event_id):
+    return Event.query.options(
+        selectinload(Event.owner),
+        selectinload(Event.items),
+        selectinload(Event.locations),
+        selectinload(Event.participant_links).selectinload(EventParticipant.member)
+    ).get_or_404(event_id)
+
+
+@app.route('/events/add', methods=['GET', 'POST'])
+@login_required
+def add_event():
+    members, items, locations = _event_form_choices()
+    default_state = {
+        'title': '',
+        'description': '',
+        'visibility': 'personal',
+        'start_time': '',
+        'end_time': '',
+        'item_ids': [],
+        'location_ids': [],
+        'participant_ids': [],
+        'detail_link': ''
+    }
+    if request.method == 'POST':
+        title = (request.form.get('title') or '').strip()
+        description = request.form.get('description') or ''
+        visibility = request.form.get('visibility', 'personal')
+        if visibility not in {'personal', 'internal', 'public'}:
+            visibility = 'personal'
+        start_raw = request.form.get('start_time')
+        end_raw = request.form.get('end_time')
+        start_time = parse_datetime_local(start_raw)
+        end_time = parse_datetime_local(end_raw)
+        item_ids = _collect_selected_ids(request.form.getlist('item_ids'))
+        location_ids = _collect_selected_ids(request.form.getlist('location_ids'))
+        participant_ids = _collect_selected_ids(request.form.getlist('participant_ids'))
+        detail_link = (request.form.get('detail_link') or '').strip()
+
+        available_member_ids = {member.id for member in members}
+        participant_ids = {pid for pid in participant_ids if pid in available_member_ids and pid != current_user.id}
+
+        errors = []
+        if not title:
+            errors.append('事项标题不能为空')
+        if start_time and end_time and end_time < start_time:
+            errors.append('结束时间不能早于开始时间')
+        if visibility == 'internal' and not participant_ids:
+            errors.append('内部事项需要至少选择一名参与人员')
+
+        form_state = {
+            'title': title,
+            'description': description,
+            'visibility': visibility,
+            'start_time': start_raw or '',
+            'end_time': end_raw or '',
+            'item_ids': list(item_ids),
+            'location_ids': list(location_ids),
+            'participant_ids': list(participant_ids),
+            'detail_link': detail_link
+        }
+
+        if errors:
+            for msg in errors:
+                flash(msg, 'danger')
+            return render_template('event_form.html', event=None, members=members, items=items, locations=locations, form_state=form_state)
+
+        event = Event(
+            title=title,
+            description=description,
+            visibility=visibility,
+            owner_id=current_user.id,
+            start_time=start_time,
+            end_time=end_time,
+            detail_link=detail_link or None
+        )
+        db.session.add(event)
+
+        ensure_owner_participation(event)
+
+        if visibility in {'internal', 'public'}:
+            for pid in participant_ids:
+                event.participant_links.append(EventParticipant(member_id=pid, role='participant', status='confirmed'))
+
+        selected_items = Item.query.filter(Item.id.in_(item_ids)).all() if item_ids else []
+        selected_locations = Location.query.filter(Location.id.in_(location_ids)).all() if location_ids else []
+        event.items = selected_items
+        event.locations = selected_locations
+
+        uploaded_event_files = request.files.getlist('event_images')
+        cleaned_files = [f for f in uploaded_event_files if f and getattr(f, 'filename', '')]
+        if cleaned_files:
+            add_event_images(event, cleaned_files)
+        event.touch()
+        db.session.commit()
+
+        missing_items, missing_locations = compute_missing_resources(event)
+        if missing_items:
+            flash('事项内容提到了以下物品但未在“所需物品”中选择：' + '、'.join(item.name for item in missing_items), 'warning')
+        if missing_locations:
+            flash('事项内容提到了以下位置但未在“活动地点”中选择：' + '、'.join(loc.name for loc in missing_locations), 'warning')
+
+        flash('事项已创建', 'success')
+        return redirect(url_for('event_detail', event_id=event.id))
+
+    return render_template('event_form.html', event=None, members=members, items=items, locations=locations, form_state=default_state)
+
+
+@app.route('/events/<int:event_id>')
+@login_required
+def event_detail(event_id):
+    event = _load_event_for_edit(event_id)
+    if not event.can_view(current_user):
+        abort(403)
+
+    participant_links = sorted(
+        event.participant_links,
+        key=lambda link: (
+            0 if link.role == 'owner' else 1,
+            (link.member.name or link.member.username) if link.member else '',
+            link.joined_at or datetime.utcnow()
+        )
+    )
+    linked_description, missing_items, missing_locations = build_event_view_model(event)
+    allow_join = event.can_join(current_user)
+    return render_template(
+        'event_detail.html',
+        event=event,
+        linked_description=linked_description,
+        participant_links=participant_links,
+        missing_items=missing_items,
+        missing_locations=missing_locations,
+        allow_join=allow_join
+    )
+
+
+@app.route('/events/<int:event_id>/edit', methods=['GET', 'POST'])
+@login_required
+def edit_event(event_id):
+    event = _load_event_for_edit(event_id)
+    if not event.can_edit(current_user):
+        abort(403)
+
+    members, items, locations = _event_form_choices()
+
+    if request.method == 'POST':
+        title = (request.form.get('title') or '').strip()
+        description = request.form.get('description') or ''
+        visibility = request.form.get('visibility', event.visibility)
+        if visibility not in {'personal', 'internal', 'public'}:
+            visibility = event.visibility
+        start_raw = request.form.get('start_time')
+        end_raw = request.form.get('end_time')
+        start_time = parse_datetime_local(start_raw)
+        end_time = parse_datetime_local(end_raw)
+        item_ids = _collect_selected_ids(request.form.getlist('item_ids'))
+        location_ids = _collect_selected_ids(request.form.getlist('location_ids'))
+        participant_ids = _collect_selected_ids(request.form.getlist('participant_ids'))
+        detail_link = (request.form.get('detail_link') or '').strip()
+
+        available_member_ids = {member.id for member in members}
+        participant_ids = {pid for pid in participant_ids if pid in available_member_ids and pid != current_user.id}
+
+        errors = []
+        if not title:
+            errors.append('事项标题不能为空')
+        if start_time and end_time and end_time < start_time:
+            errors.append('结束时间不能早于开始时间')
+        if visibility == 'internal' and not participant_ids:
+            errors.append('内部事项需要至少选择一名参与人员')
+
+        form_state = {
+            'title': title,
+            'description': description,
+            'visibility': visibility,
+            'start_time': start_raw or '',
+            'end_time': end_raw or '',
+            'item_ids': list(item_ids),
+            'location_ids': list(location_ids),
+            'participant_ids': list(participant_ids),
+            'detail_link': detail_link
+        }
+
+        if errors:
+            for msg in errors:
+                flash(msg, 'danger')
+            return render_template('event_form.html', event=event, members=members, items=items, locations=locations, form_state=form_state)
+
+        event.title = title
+        event.description = description
+        event.visibility = visibility
+        event.start_time = start_time
+        event.end_time = end_time
+        event.detail_link = detail_link or None
+
+        current_links = {link.member_id: link for link in event.participant_links}
+        desired_ids = participant_ids if visibility in {'internal', 'public'} else set()
+
+        for member_id, link in list(current_links.items()):
+            if member_id == event.owner_id:
+                continue
+            if member_id not in desired_ids:
+                db.session.delete(link)
+
+        if visibility in {'internal', 'public'}:
+            for pid in desired_ids:
+                if pid not in current_links:
+                    event.participant_links.append(EventParticipant(member_id=pid, role='participant', status='confirmed'))
+
+        ensure_owner_participation(event)
+
+        selected_items = Item.query.filter(Item.id.in_(item_ids)).all() if item_ids else []
+        selected_locations = Location.query.filter(Location.id.in_(location_ids)).all() if location_ids else []
+        event.items = selected_items
+        event.locations = selected_locations
+
+        remove_image_ids_raw = request.form.getlist('remove_event_image_ids')
+        remove_image_ids = {int(x) for x in remove_image_ids_raw if x.isdigit()}
+        if remove_image_ids:
+            for img in list(event.images):
+                if img.id in remove_image_ids:
+                    remove_uploaded_file(img.filename)
+                    event.images.remove(img)
+                    db.session.delete(img)
+
+        uploaded_event_files = request.files.getlist('event_images')
+        cleaned_files = [f for f in uploaded_event_files if f and getattr(f, 'filename', '')]
+        if cleaned_files:
+            add_event_images(event, cleaned_files)
+
+        event.touch()
+        db.session.commit()
+
+        missing_items, missing_locations = compute_missing_resources(event)
+        if missing_items:
+            flash('事项内容提到了以下物品但未在“所需物品”中选择：' + '、'.join(item.name for item in missing_items), 'warning')
+        if missing_locations:
+            flash('事项内容提到了以下位置但未在“活动地点”中选择：' + '、'.join(loc.name for loc in missing_locations), 'warning')
+
+        flash('事项已更新', 'success')
+        return redirect(url_for('event_detail', event_id=event.id))
+
+    form_state = {
+        'title': event.title,
+        'description': event.description or '',
+        'visibility': event.visibility,
+        'start_time': format_datetime_local(event.start_time),
+        'end_time': format_datetime_local(event.end_time),
+        'item_ids': [item.id for item in event.items],
+        'location_ids': [loc.id for loc in event.locations],
+        'participant_ids': [link.member_id for link in event.participant_links if link.member_id != event.owner_id],
+        'detail_link': event.detail_link or ''
+    }
+    return render_template('event_form.html', event=event, members=members, items=items, locations=locations, form_state=form_state)
+
+
+@app.route('/events/<int:event_id>/delete', methods=['POST'])
+@login_required
+def delete_event(event_id):
+    event = Event.query.get_or_404(event_id)
+    if not event.can_edit(current_user):
+        abort(403)
+    for img in list(event.images):
+        remove_uploaded_file(img.filename)
+    db.session.delete(event)
+    db.session.commit()
+    flash('事项已删除', 'info')
+    return redirect(url_for('events_overview'))
+
+
+@app.route('/events/<int:event_id>/signup', methods=['POST'])
+@login_required
+def signup_event(event_id):
+    event = _load_event_for_edit(event_id)
+    if not event.can_join(current_user):
+        flash('无法报名该事项', 'warning')
+        return redirect(url_for('event_detail', event_id=event.id))
+    event.participant_links.append(EventParticipant(member_id=current_user.id, role='participant', status='confirmed'))
+    event.touch()
+    db.session.commit()
+    flash('报名成功，已加入事项', 'success')
+    return redirect(url_for('event_detail', event_id=event.id))
+
+
+@app.route('/events/<int:event_id>/withdraw', methods=['POST'])
+@login_required
+def withdraw_event(event_id):
+    event = _load_event_for_edit(event_id)
+    if not event.is_participant(current_user):
+        flash('你尚未参与该事项', 'warning')
+        return redirect(url_for('event_detail', event_id=event.id))
+    if event.owner_id == current_user.id:
+        flash('事项负责人不能退出该事项', 'warning')
+        return redirect(url_for('event_detail', event_id=event.id))
+    removed = False
+    for link in list(event.participant_links):
+        if link.member_id == current_user.id:
+            db.session.delete(link)
+            removed = True
+    if removed:
+        event.touch()
+        db.session.commit()
+        flash('已退出该事项', 'info')
+    return redirect(url_for('event_detail', event_id=event.id))
 
 @app.route('/items')
 @login_required
@@ -740,10 +1320,30 @@ def profile(member_id):
     any_item_empty = any(it.stock_status and '用完' in it.stock_status for it in items_resp)
     any_location_dirty = any(loc.clean_status == '脏/报修' for loc in locations_resp)
 
+    # 相关事项（区分进行中与历史）
+    events_upcoming = []
+    events_past = []
+    event_query = Event.query.options(
+        selectinload(Event.participant_links).selectinload(EventParticipant.member),
+        selectinload(Event.locations)
+    ).filter(
+        or_(
+            Event.owner_id == member.id,
+            Event.participant_links.any(EventParticipant.member_id == member.id)
+        )
+    ).order_by(Event.start_time.asc(), Event.created_at.desc())
+    now = datetime.utcnow()
+    for evt in event_query.all():
+        if not evt.can_view(current_user):
+            continue
+        if evt.start_time and evt.start_time < now:
+            events_past.append(evt)
+        else:
+            events_upcoming.append(evt)
+
     # 通知列表：他人对该成员负责的物品/位置的最近更新
     notifications = []
     if member.id == current_user.id:
-        from sqlalchemy import or_
         # 只查找该成员负责的物品和位置的日志（物品表的responsible_id，位置表通过多对多）
         location_ids = [loc.id for loc in member.responsible_locations]
         notifications = Log.query.join(Item, Log.item_id == Item.id, isouter=True) \
@@ -770,7 +1370,9 @@ def profile(member_id):
                            messages=messages, 
                            user_logs=user_logs,
                            any_item_empty=any_item_empty,
-                           any_location_dirty=any_location_dirty)
+                           any_location_dirty=any_location_dirty,
+                           events_upcoming=events_upcoming,
+                           events_past=events_past)
 
 @app.route('/member/<int:member_id>/edit', methods=['GET', 'POST'])
 @login_required

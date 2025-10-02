@@ -87,6 +87,49 @@
   </div>
 </div>
 
+<div class="mb-4">
+  <h5>相关事项</h5>
+  {% if events_upcoming or events_past %}
+  <div class="list-group mb-2">
+    {% for evt in events_upcoming %}
+    <a class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" href="{{ url_for('event_detail', event_id=evt.id) }}">
+      <div>
+        <strong>{{ evt.title }}</strong>
+        <div class="small text-muted">
+          {% if evt.start_time %}
+            {{ evt.start_time.strftime('%Y-%m-%d %H:%M') }}
+          {% else %}
+            时间待定
+          {% endif %}
+          · {% if evt.visibility == 'public' %}公开{% elif evt.visibility == 'internal' %}内部{% else %}个人{% endif %}
+        </div>
+      </div>
+      <span class="badge bg-secondary">{{ evt.participant_count() }}</span>
+    </a>
+    {% else %}
+    <span class="list-group-item text-muted">暂无进行中的事项</span>
+    {% endfor %}
+  </div>
+  {% if events_past %}
+  <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#memberPastEvents" aria-expanded="false" aria-controls="memberPastEvents">
+    查看历史事项 ({{ events_past|length }})
+  </button>
+  <div class="collapse mt-2" id="memberPastEvents">
+    <ul class="list-group small">
+      {% for evt in events_past %}
+      <li class="list-group-item d-flex justify-content-between align-items-center">
+        <a href="{{ url_for('event_detail', event_id=evt.id) }}">{{ evt.title }}</a>
+        <span class="text-muted">{{ evt.start_time.strftime('%Y-%m-%d') if evt.start_time else '时间待定' }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+  {% else %}
+  <div class="text-muted">暂无相关事项。</div>
+  {% endif %}
+</div>
+
 {% if current_user.id == profile_user.id %}
 <div class="mb-4">
   <h5>通知</h5>

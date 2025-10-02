@@ -19,7 +19,7 @@
   <div class="mb-3">
     <label for="stock_status">库存状态</label>
     <select name="stock_status" class="form-select">
-      {% for opt in ['充足','少量','用完','舍弃'] %}
+      {% for opt in ['充足','少量','用完','舍弃','闲置','借出'] %}
       <option value="{{ opt }}" {% if item and item.stock_status == opt %}selected{% endif %}>{{ opt }}</option>
       {% endfor %}
     </select>
@@ -29,7 +29,7 @@
     <label for="features" class="form-label">物品特性</label>
     <select name="features" class="form-select">
       <option value="">-- 请选择 --</option>
-      {% for opt in ['安全','注意','危险'] %}
+      {% for opt in ['安全','注意','危险','昂贵','私人','公共','易损'] %}
       <option value="{{ opt }}" {% if item and item.features == opt %}selected{% endif %}>{{ opt }}</option>
       {% endfor %}
     </select>

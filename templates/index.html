@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  #graph-canvas {
+    width: 100%;
+    height: 72vh;
+    background: #0b1723;
+    border-radius: 12px;
+    position: relative;
+    overflow: hidden;
+  }
+  .graph-legend .badge {
+    margin-right: 0.5rem;
+  }
+</style>
+
+<h3 class="mb-3">我的实验室宇宙</h3>
+<div class="row g-4">
+  <div class="col-lg-9">
+    <div id="graph-canvas"></div>
+  </div>
+  <div class="col-lg-3">
+    <div class="card mb-3 graph-legend">
+      <div class="card-header">图例</div>
+      <div class="card-body">
+        <p><span class="badge" style="background:#1f77b4;">成员</span> 课题组成员</p>
+        <p><span class="badge" style="background:#2ca02c;">物品</span> 实验物品</p>
+        <p><span class="badge" style="background:#ff7f0e;">事项</span> 事项 / 活动</p>
+        <p><span class="badge" style="background:#9467bd;">地点</span> 实验位置</p>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">提示</div>
+      <div class="card-body">
+        <ul class="mb-0">
+          <li>拖拽节点可重新排布</li>
+          <li>滚轮控制缩放</li>
+          <li>点击节点查看详情信息</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script>
+  const graphData = {{ graph_json|safe }};
+  const container = document.getElementById('graph-canvas');
+  const width = container.clientWidth;
+  const height = container.clientHeight;
+
+  const svg = d3.select(container)
+    .append('svg')
+    .attr('width', width)
+    .attr('height', height);
+
+  const colorMap = {
+    member: '#1f77b4',
+    item: '#2ca02c',
+    event: '#ff7f0e',
+    location: '#9467bd'
+  };
+
+  const simulation = d3.forceSimulation(graphData.nodes)
+    .force('link', d3.forceLink(graphData.links).id(d => d.id).distance(90).strength(0.5))
+    .force('charge', d3.forceManyBody().strength(-260))
+    .force('center', d3.forceCenter(width / 2, height / 2))
+    .force('collision', d3.forceCollide().radius(d => d.type === 'member' && d.meta?.isCenter ? 44 : 28));
+
+  const zoom = d3.zoom().scaleExtent([0.3, 2.6]).on('zoom', event => {
+    svgGroup.attr('transform', event.transform);
+  });
+  svg.call(zoom);
+
+  const svgGroup = svg.append('g');
+
+  const link = svgGroup.append('g')
+    .attr('stroke', '#94a3b8')
+    .attr('stroke-opacity', 0.5)
+    .selectAll('line')
+    .data(graphData.links)
+    .enter()
+    .append('line')
+    .attr('stroke-width', 1.2);
+
+  const node = svgGroup.append('g')
+    .selectAll('g')
+    .data(graphData.nodes)
+    .enter()
+    .append('g')
+    .call(d3.drag()
+      .on('start', dragStarted)
+      .on('drag', dragged)
+      .on('end', dragEnded));
+
+  node.append('circle')
+    .attr('r', d => {
+      if (d.type === 'member') {
+        return d.meta?.isCenter ? 20 : 14;
+      }
+      if (d.type === 'event') return 12;
+      if (d.type === 'item') return 11;
+      return 10;
+    })
+    .attr('fill', d => colorMap[d.type] || '#ccc')
+    .attr('stroke', d => d.meta?.isCenter ? '#f59e0b' : '#0f172a')
+    .attr('stroke-width', d => d.meta?.isCenter ? 3 : 1.5)
+    .attr('opacity', d => d.meta?.isCenter ? 1 : 0.92);
+
+  node.append('text')
+    .text(d => d.label)
+    .attr('x', d => (d.type === 'member' && d.meta?.isCenter) ? 24 : 18)
+    .attr('y', 4)
+    .attr('fill', '#e2e8f0')
+    .attr('font-size', '0.8rem');
+
+  node.append('title')
+    .text(d => {
+      const info = [d.label];
+      if (d.type === 'member' && d.meta?.username) info.push(`用户名: ${d.meta.username}`);
+      if (d.type === 'member' && d.meta?.relation) info.push(`关系: ${d.meta.relation}`);
+      if (d.type === 'item' && d.meta?.category) info.push(`类别: ${d.meta.category}`);
+      if (d.type === 'item' && d.meta?.stockStatus) info.push(`库存: ${d.meta.stockStatus}`);
+      if (d.type === 'event' && d.meta?.startTime) info.push(`开始: ${d.meta.startTime}`);
+      if (d.type === 'event' && d.meta?.visibility) info.push(`可见性: ${d.meta.visibility}`);
+      return info.join('\n');
+    });
+
+  simulation.on('tick', () => {
+    link
+      .attr('x1', d => d.source.x)
+      .attr('y1', d => d.source.y)
+      .attr('x2', d => d.target.x)
+      .attr('y2', d => d.target.y);
+
+    node.attr('transform', d => `translate(${d.x},${d.y})`);
+  });
+
+  function dragStarted(event, d) {
+    if (!event.active) simulation.alphaTarget(0.2).restart();
+    d.fx = d.x;
+    d.fy = d.y;
+  }
+
+  function dragged(event, d) {
+    d.fx = event.x;
+    d.fy = event.y;
+  }
+
+  function dragEnded(event, d) {
+    if (!event.active) simulation.alphaTarget(0);
+    d.fx = null;
+    d.fy = null;
+  }
+</script>
+{% endblock %}

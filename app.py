@@ -1,6 +1,7 @@
 import os
 from datetime import datetime
 import re
+import json
 from flask import Flask, render_template, request, redirect, url_for, flash, send_file, send_from_directory, abort, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
@@ -529,11 +530,22 @@ def load_user(user_id):
 # 路由定义
 @app.route('/')
 def index():
-    # 未登录则跳转到登录页，已登录则进入管理员主页（固定 member_id=1）
-    if current_user.is_authenticated:
-        return redirect(url_for('profile', member_id=1))
-    else:
+    if not current_user.is_authenticated:
         return redirect(url_for('login'))
+
+    center_member = Member.query.options(
+        selectinload(Member.following),
+        selectinload(Member.followers),
+        selectinload(Member.items).selectinload(Item.locations),
+        selectinload(Member.responsible_locations)
+    ).filter_by(id=current_user.id).first()
+    if not center_member:
+        abort(404)
+
+    graph_payload = build_lab_universe_graph(center_member)
+    graph_json = json.dumps(graph_payload, ensure_ascii=False)
+
+    return render_template('index.html', graph_json=graph_json)
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -625,6 +637,194 @@ def _collect_selected_ids(raw_list):
         except (TypeError, ValueError):
             continue
     return selected
+
+
+def build_lab_universe_graph(center_member):
+    """Build a universe graph centered on the given member."""
+    nodes = {}
+    links = []
+
+    def add_node(node_id, label, node_type, meta=None):
+        if node_id in nodes:
+            if meta:
+                nodes[node_id]['meta'].update(meta)
+            return nodes[node_id]
+        nodes[node_id] = {
+            'id': node_id,
+            'label': label,
+            'type': node_type,
+            'meta': meta or {}
+        }
+        return nodes[node_id]
+
+    center_id = f'member-{center_member.id}'
+    add_node(
+        center_id,
+        center_member.name or center_member.username,
+        'member',
+        {
+            'username': center_member.username,
+            'contact': center_member.contact,
+            'isCenter': True
+        }
+    )
+
+    # Follow relationships (outgoing)
+    for followed in getattr(center_member, 'following', []) or []:
+        target_id = f'member-{followed.id}'
+        add_node(
+            target_id,
+            followed.name or followed.username,
+            'member',
+            {
+                'username': followed.username,
+                'contact': followed.contact,
+                'relation': 'following'
+            }
+        )
+        links.append({
+            'source': center_id,
+            'target': target_id,
+            'type': 'follows'
+        })
+
+    # Followers (incoming)
+    for follower in getattr(center_member, 'followers', []) or []:
+        source_id = f'member-{follower.id}'
+        add_node(
+            source_id,
+            follower.name or follower.username,
+            'member',
+            {
+                'username': follower.username,
+                'contact': follower.contact,
+                'relation': 'follower'
+            }
+        )
+        links.append({
+            'source': source_id,
+            'target': center_id,
+            'type': 'follows'
+        })
+
+    # Items the member is responsible for
+    for item in getattr(center_member, 'items', []) or []:
+        item_id = f'item-{item.id}'
+        add_node(
+            item_id,
+            item.name,
+            'item',
+            {
+                'category': item.category,
+                'stockStatus': item.stock_status
+            }
+        )
+        links.append({
+            'source': center_id,
+            'target': item_id,
+            'type': 'responsible_for'
+        })
+        for loc in getattr(item, 'locations', []) or []:
+            loc_id = f'location-{loc.id}'
+            add_node(loc_id, loc.name, 'location')
+            links.append({
+                'source': item_id,
+                'target': loc_id,
+                'type': 'stored_at'
+            })
+
+    # Locations the member is directly responsible for
+    for loc in getattr(center_member, 'responsible_locations', []) or []:
+        loc_id = f'location-{loc.id}'
+        add_node(loc_id, loc.name, 'location')
+        links.append({
+            'source': center_id,
+            'target': loc_id,
+            'type': 'manages'
+        })
+
+    # Events the member owns or participates in
+    events = Event.query.options(
+        selectinload(Event.owner),
+        selectinload(Event.items),
+        selectinload(Event.locations),
+        selectinload(Event.participant_links).selectinload(EventParticipant.member)
+    ).filter(
+        or_(
+            Event.owner_id == center_member.id,
+            Event.participant_links.any(EventParticipant.member_id == center_member.id)
+        )
+    ).all()
+
+    for event in events:
+        event_id = f'event-{event.id}'
+        add_node(
+            event_id,
+            event.title,
+            'event',
+            {
+                'startTime': event.start_time.isoformat() if event.start_time else None,
+                'visibility': event.visibility
+            }
+        )
+        if event.owner:
+            owner_id = f'member-{event.owner.id}'
+            add_node(
+                owner_id,
+                event.owner.name or event.owner.username,
+                'member',
+                {'username': event.owner.username, 'relation': 'event_owner'}
+            )
+            links.append({
+                'source': owner_id,
+                'target': event_id,
+                'type': 'owns_event'
+            })
+        for link in event.participant_links:
+            participant = link.member
+            if not participant:
+                continue
+            participant_id = f'member-{participant.id}'
+            add_node(
+                participant_id,
+                participant.name or participant.username,
+                'member',
+                {'username': participant.username, 'relation': 'event_participant'}
+            )
+            links.append({
+                'source': event_id,
+                'target': participant_id,
+                'type': f'participant_{link.role}'
+            })
+        for item in event.items:
+            item_id = f'item-{item.id}'
+            add_node(
+                item_id,
+                item.name,
+                'item',
+                {
+                    'category': item.category,
+                    'stockStatus': item.stock_status
+                }
+            )
+            links.append({
+                'source': event_id,
+                'target': item_id,
+                'type': 'event_item'
+            })
+        for loc in event.locations:
+            loc_id = f'location-{loc.id}'
+            add_node(loc_id, loc.name, 'location')
+            links.append({
+                'source': event_id,
+                'target': loc_id,
+                'type': 'event_location'
+            })
+
+    return {
+        'nodes': list(nodes.values()),
+        'links': links
+    }
 
 
 def _load_event_for_edit(event_id):

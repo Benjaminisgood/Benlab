@@ -913,7 +913,8 @@ def add_event():
         'item_ids': [],
         'location_ids': [],
         'participant_ids': [],
-        'detail_link': ''
+        'detail_link': '',
+        'external_image_urls': ''
     }
     if request.method == 'POST':
         title = (request.form.get('title') or '').strip()
@@ -950,7 +951,8 @@ def add_event():
             'item_ids': list(item_ids),
             'location_ids': list(location_ids),
             'participant_ids': list(participant_ids),
-            'detail_link': detail_link
+            'detail_link': detail_link,
+            'external_image_urls': request.form.get('external_event_image_urls', '')
         }
 
         if errors:
@@ -984,6 +986,13 @@ def add_event():
         cleaned_files = [f for f in uploaded_event_files if f and getattr(f, 'filename', '')]
         if cleaned_files:
             add_event_images(event, cleaned_files)
+        external_urls = _extract_external_urls(request.form.get('external_event_image_urls'))
+        if external_urls:
+            existing_refs = {img.filename for img in event.images}
+            for url in external_urls:
+                if url not in existing_refs:
+                    event.images.append(EventImage(filename=url))
+                    existing_refs.add(url)
         event.touch()
         db.session.commit()
 
@@ -1080,7 +1089,8 @@ def edit_event(event_id):
             'item_ids': list(item_ids),
             'location_ids': list(location_ids),
             'participant_ids': list(participant_ids),
-            'detail_link': detail_link
+            'detail_link': detail_link,
+            'external_image_urls': request.form.get('external_event_image_urls', '')
         }
 
         if errors:
@@ -1129,6 +1139,13 @@ def edit_event(event_id):
         cleaned_files = [f for f in uploaded_event_files if f and getattr(f, 'filename', '')]
         if cleaned_files:
             add_event_images(event, cleaned_files)
+        external_urls = _extract_external_urls(request.form.get('external_event_image_urls'))
+        if external_urls:
+            existing_refs = {img.filename for img in event.images}
+            for url in external_urls:
+                if url not in existing_refs:
+                    event.images.append(EventImage(filename=url))
+                    existing_refs.add(url)
 
         event.touch()
         db.session.commit()
@@ -1160,7 +1177,8 @@ def edit_event(event_id):
         'item_ids': [item.id for item in event.items],
         'location_ids': [loc.id for loc in event.locations],
         'participant_ids': [link.member_id for link in event.participant_links if link.member_id != event.owner_id],
-        'detail_link': event.detail_link or ''
+        'detail_link': event.detail_link or '',
+        'external_image_urls': ''
     }
     return render_template('event_form.html', event=event, members=members, items=items, locations=locations, form_state=form_state)
 

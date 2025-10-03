@@ -1,14 +1,53 @@
 {% extends "base.html" %}
 {% block content %}
+<style>
+  .follow-toggle {
+    background: none;
+    border: none;
+    padding: 0;
+    margin-right: 0.5rem;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .follow-toggle:disabled {
+    cursor: wait;
+    opacity: 0.6;
+  }
+  .follow-star {
+    font-size: 1.1rem;
+    color: #ced4da;
+    transition: color 0.2s ease;
+  }
+  .follow-star.followed {
+    color: #ffc107;
+  }
+  .identity-badge {
+    display: inline-block;
+    margin-right: 0.5rem;
+  }
+</style>
+
 <h3 class="mb-3">课题组成员</h3>
-<table class="table table-hover">
+<table class="table table-hover align-middle">
   <thead class="table-light">
     <tr><th>姓名</th><th>用户名</th><th>联系方式</th><th>负责物品数</th><th>负责位置数</th></tr>
   </thead>
   <tbody>
     {% for mem in members %}
     <tr>
-      <td><a href="{{ url_for('profile', member_id=mem.id) }}">{{ mem.name }}</a></td>
+      <td>
+        {% if mem.id == current_user.id %}
+          <span class="badge bg-secondary identity-badge">我</span>
+          <a href="{{ url_for('profile', member_id=mem.id) }}">{{ mem.name or mem.username }}</a>
+        {% else %}
+          <button class="follow-toggle" type="button" data-url="{{ url_for('toggle_follow', member_id=mem.id) }}" aria-label="关注或取消关注">
+            <span class="follow-star{% if mem.id in followed_ids %} followed{% endif %}">
+              {% if mem.id in followed_ids %}★{% else %}☆{% endif %}
+            </span>
+          </button>
+          <a href="{{ url_for('profile', member_id=mem.id) }}">{{ mem.name or mem.username }}</a>
+        {% endif %}
+      </td>
       <td>{{ mem.username }}</td>
       <td>{{ mem.contact or '-' }}</td>
       <td>{{ mem.items|length }}</td>
@@ -20,4 +59,50 @@
     {% endif %}
   </tbody>
 </table>
+
+<script>
+  document.querySelectorAll('.follow-toggle').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var url = btn.dataset.url;
+      if (!url) {
+        return;
+      }
+      btn.disabled = true;
+      fetch(url, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest'
+        }
+      }).then(function (response) {
+        btn.disabled = false;
+        if (!response.ok) {
+          return response.json().catch(function () { return {}; }).then(function (data) {
+            if (data.error) {
+              alert(data.error);
+            }
+          });
+        }
+        return response.json().then(function (data) {
+          var star = btn.querySelector('.follow-star');
+          if (!star) {
+            return;
+          }
+          if (data.followed) {
+            star.classList.add('followed');
+            star.textContent = '★';
+          } else {
+            star.classList.remove('followed');
+            star.textContent = '☆';
+          }
+          setTimeout(function () {
+            window.location.reload();
+          }, 100);
+        });
+      }).catch(function () {
+        btn.disabled = false;
+      });
+    });
+  });
+</script>
 {% endblock %}

@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 import re
-from flask import Flask, render_template, request, redirect, url_for, flash, send_file, send_from_directory, abort
+from flask import Flask, render_template, request, redirect, url_for, flash, send_file, send_from_directory, abort, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -77,6 +77,13 @@ event_locations = db.Table(
     db.Column('event_id', db.Integer, db.ForeignKey('events.id'), primary_key=True),
     db.Column('location_id', db.Integer, db.ForeignKey('locations.id'), primary_key=True)
 )
+
+member_follows = db.Table(
+    'member_follows',
+    db.Column('follower_id', db.Integer, db.ForeignKey('members.id'), primary_key=True),
+    db.Column('followed_id', db.Integer, db.ForeignKey('members.id'), primary_key=True),
+    db.CheckConstraint('follower_id != followed_id', name='ck_member_follows_no_self')
+)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
@@ -136,6 +143,14 @@ class Member(UserMixin, db.Model):
     received_messages = db.relationship('Message', backref='receiver', lazy=True, foreign_keys='Message.receiver_id')
     logs = db.relationship('Log', backref='user', lazy=True)
     event_participations = db.relationship('EventParticipant', back_populates='member', cascade='all, delete-orphan', lazy='select')
+    following = db.relationship(
+        'Member',
+        secondary=member_follows,
+        primaryjoin=(id == member_follows.c.follower_id),
+        secondaryjoin=(id == member_follows.c.followed_id),
+        lazy='select',
+        backref=db.backref('followers', lazy='select')
+    )
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -1296,7 +1311,28 @@ def view_location(loc_id):
 @login_required
 def members_list():
     members = Member.query.order_by(Member.name).all()
-    return render_template('members.html', members=members)
+    followed_ids = {mem.id for mem in current_user.following}
+    def sort_key(member):
+        display_name = (member.name or member.username).lower()
+        return (0 if member.id in followed_ids else 1, display_name)
+    members.sort(key=sort_key)
+    return render_template('members.html', members=members, followed_ids=followed_ids)
+
+
+@app.route('/members/<int:member_id>/toggle_follow', methods=['POST'])
+@login_required
+def toggle_follow(member_id):
+    if member_id == current_user.id:
+        return jsonify({'error': '不能关注自己'}), 400
+    member = Member.query.get_or_404(member_id)
+    if member in current_user.following:
+        current_user.following.remove(member)
+        followed = False
+    else:
+        current_user.following.append(member)
+        followed = True
+    db.session.commit()
+    return jsonify({'followed': followed})
 
 @app.route('/member/<int:member_id>')
 @login_required

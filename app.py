@@ -301,6 +301,7 @@ class Log(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('members.id'))     # 执行操作的用户ID
     item_id = db.Column(db.Integer, db.ForeignKey('items.id'), nullable=True)         # 涉及的物品ID（如果有）
     location_id = db.Column(db.Integer, db.ForeignKey('locations.id'), nullable=True) # 涉及的位置ID（如果有）
+    event_id = db.Column(db.Integer, db.ForeignKey('events.id'), nullable=True)
     action_type = db.Column(db.String(50))       # 操作类型描述（如 新增物品/修改位置 等）
     details = db.Column(db.Text)                 # 详情备注
     def __repr__(self):
@@ -378,6 +379,7 @@ class Event(db.Model):
         cascade='all, delete-orphan',
         order_by='EventImage.created_at'
     )
+    logs = db.relationship('Log', backref='event', lazy=True)
 
     @property
     def image_filenames(self):
@@ -569,6 +571,11 @@ with app.app_context():
             with db.engine.begin() as conn:
                 for stmt in alter_statements:
                     conn.execute(text(stmt))
+    if 'logs' in table_names:
+        log_cols = {col['name'] for col in inspector.get_columns('logs')}
+        if 'event_id' not in log_cols:
+            with db.engine.begin() as conn:
+                conn.execute(text('ALTER TABLE logs ADD COLUMN event_id INTEGER'))
     if Member.query.count() == 0:
         default_user = Member(name="Admin User", username="admin", contact="admin@example.com", notes="Default admin user")
         default_user.set_password("admin")
@@ -986,6 +993,15 @@ def add_event():
         if missing_locations:
             flash('事项内容提到了以下位置但未在“活动地点”中选择：' + '、'.join(loc.name for loc in missing_locations), 'warning')
 
+        log = Log(
+            user_id=current_user.id,
+            event_id=event.id,
+            action_type="新增事项",
+            details=f"Created event {event.title} (visibility={event.visibility})"
+        )
+        db.session.add(log)
+        db.session.commit()
+
         flash('事项已创建', 'success')
         return redirect(url_for('event_detail', event_id=event.id))
 
@@ -1123,6 +1139,15 @@ def edit_event(event_id):
         if missing_locations:
             flash('事项内容提到了以下位置但未在“活动地点”中选择：' + '、'.join(loc.name for loc in missing_locations), 'warning')
 
+        log = Log(
+            user_id=current_user.id,
+            event_id=event.id,
+            action_type="修改事项",
+            details=f"Updated event {event.title}"
+        )
+        db.session.add(log)
+        db.session.commit()
+
         flash('事项已更新', 'success')
         return redirect(url_for('event_detail', event_id=event.id))
 
@@ -1146,9 +1171,19 @@ def delete_event(event_id):
     event = Event.query.get_or_404(event_id)
     if not event.can_edit(current_user):
         abort(403)
+    event_title = event.title
+    event_identifier = event.id
     for img in list(event.images):
         remove_uploaded_file(img.filename)
     db.session.delete(event)
+    db.session.commit()
+    log = Log(
+        user_id=current_user.id,
+        event_id=event_identifier,
+        action_type="删除事项",
+        details=f"Deleted event {event_title}"
+    )
+    db.session.add(log)
     db.session.commit()
     flash('事项已删除', 'info')
     return redirect(url_for('events_overview'))
@@ -1163,6 +1198,14 @@ def signup_event(event_id):
         return redirect(url_for('event_detail', event_id=event.id))
     event.participant_links.append(EventParticipant(member_id=current_user.id, role='participant', status='confirmed'))
     event.touch()
+    db.session.commit()
+    log = Log(
+        user_id=current_user.id,
+        event_id=event.id,
+        action_type="参加事项",
+        details=f"Joined event {event.title}"
+    )
+    db.session.add(log)
     db.session.commit()
     flash('报名成功，已加入事项', 'success')
     return redirect(url_for('event_detail', event_id=event.id))
@@ -1185,6 +1228,14 @@ def withdraw_event(event_id):
             removed = True
     if removed:
         event.touch()
+        db.session.commit()
+        log = Log(
+            user_id=current_user.id,
+            event_id=event.id,
+            action_type="退出事项",
+            details=f"Withdrew from event {event.title}"
+        )
+        db.session.add(log)
         db.session.commit()
         flash('已退出该事项', 'info')
     return redirect(url_for('event_detail', event_id=event.id))

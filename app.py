@@ -104,6 +104,32 @@ def _parse_coordinate(raw_value):
         return None
 
 
+_EXTERNAL_IMAGE_PREFIXES = ('http://', 'https://', '//')
+
+
+def _is_external_image(ref):
+    return isinstance(ref, str) and ref.startswith(_EXTERNAL_IMAGE_PREFIXES)
+
+
+def _extract_external_urls(raw_value):
+    """Parse newline/comma separated URLs, keeping only web-accessible links."""
+    if not raw_value:
+        return []
+    cleaned = raw_value.replace('\r', '\n')
+    chunks = []
+    for line in cleaned.split('\n'):
+        parts = [segment.strip() for segment in line.split(',') if segment.strip()]
+        chunks.extend(parts)
+    urls = []
+    seen = set()
+    for candidate in chunks:
+        if candidate.startswith('//') or re.match(r'^https?://', candidate, flags=re.IGNORECASE):
+            if candidate not in seen:
+                urls.append(candidate)
+                seen.add(candidate)
+    return urls
+
+
 def save_uploaded_image(file_storage):
     """Persist an uploaded image and return the stored filename."""
     if not file_storage or file_storage.filename == '':
@@ -121,7 +147,7 @@ def save_uploaded_image(file_storage):
 
 def remove_uploaded_file(filename):
     """Delete a previously saved image file if it still exists."""
-    if not filename:
+    if not filename or _is_external_image(filename):
         return
     path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     try:
@@ -1240,6 +1266,9 @@ def add_item():
             if stored_name:
                 saved_filenames.append(stored_name)
 
+        external_urls = _extract_external_urls(request.form.get('external_image_urls'))
+        primary_image = saved_filenames[0] if saved_filenames else (external_urls[0] if external_urls else None)
+
         # ✅ 创建新的 Item 实例（已更新字段）
         new_item = Item(
             name=name,
@@ -1254,7 +1283,7 @@ def add_item():
             responsible_id=responsible_id if responsible_id else current_user.id,
             notes=notes,
             purchase_link=purchase_link,
-            image=saved_filenames[0] if saved_filenames else None
+            image=primary_image
         )
         # 绑定多个位置（若前端未选择则为空列表）
         loc_ids = [int(x) for x in location_ids] if location_ids else []
@@ -1263,8 +1292,15 @@ def add_item():
         if loc_ids:
             new_item.locations = Location.query.filter(Location.id.in_(loc_ids)).all()
         db.session.add(new_item)
+        existing_refs = set()
         for fname in saved_filenames:
-            new_item.images.append(ItemImage(filename=fname))
+            if fname not in existing_refs:
+                new_item.images.append(ItemImage(filename=fname))
+                existing_refs.add(fname)
+        for url in external_urls:
+            if url not in existing_refs:
+                new_item.images.append(ItemImage(filename=url))
+                existing_refs.add(url)
         db.session.commit()
 
         # ✅ 写入日志
@@ -1342,6 +1378,16 @@ def edit_item(item_id):
             stored_name = save_uploaded_image(image_file)
             if stored_name:
                 item.images.append(ItemImage(filename=stored_name))
+
+        external_urls = _extract_external_urls(request.form.get('external_image_urls'))
+        if external_urls:
+            existing_refs = {img.filename for img in item.images}
+            if item.image:
+                existing_refs.add(item.image)
+            for url in external_urls:
+                if url not in existing_refs:
+                    item.images.append(ItemImage(filename=url))
+                    existing_refs.add(url)
 
         if item.images:
             item.image = item.images[0].filename
@@ -1443,12 +1489,14 @@ def add_location():
             stored_name = save_uploaded_image(image_file)
             if stored_name:
                 saved_filenames.append(stored_name)
+        external_urls = _extract_external_urls(request.form.get('external_image_urls'))
+        primary_image = saved_filenames[0] if saved_filenames else (external_urls[0] if external_urls else None)
         # 先创建 Location
         new_loc = Location(
             name=name,
             parent_id=parent_id if parent_id else None,
             notes=notes,
-            image=saved_filenames[0] if saved_filenames else None,
+            image=primary_image,
             clean_status=clean_status,
             detail_link=detail_link,
             latitude=latitude,
@@ -1456,8 +1504,15 @@ def add_location():
             coordinate_source=coordinate_source
         )
         db.session.add(new_loc)
+        existing_refs = set()
         for fname in saved_filenames:
-            new_loc.images.append(LocationImage(filename=fname))
+            if fname not in existing_refs:
+                new_loc.images.append(LocationImage(filename=fname))
+                existing_refs.add(fname)
+        for url in external_urls:
+            if url not in existing_refs:
+                new_loc.images.append(LocationImage(filename=url))
+                existing_refs.add(url)
         # 多负责人
         member_objs = []
         if responsible_ids:
@@ -1523,6 +1578,16 @@ def edit_location(loc_id):
             stored_name = save_uploaded_image(image_file)
             if stored_name:
                 location.images.append(LocationImage(filename=stored_name))
+
+        external_urls = _extract_external_urls(request.form.get('external_image_urls'))
+        if external_urls:
+            existing_refs = {img.filename for img in location.images}
+            if location.image:
+                existing_refs.add(location.image)
+            for url in external_urls:
+                if url not in existing_refs:
+                    location.images.append(LocationImage(filename=url))
+                    existing_refs.add(url)
 
         if location.images:
             location.image = location.images[0].filename
@@ -1756,18 +1821,35 @@ def export_data(datatype):
 
 @app.context_processor
 def inject_image_helpers():
+    def resolve_image_url(ref):
+        if not ref:
+            return None
+        if _is_external_image(ref):
+            return ref
+        return url_for('uploaded_file', filename=ref)
+
     def item_image_urls(item):
         if not item:
             return []
-        return [url_for('uploaded_file', filename=fname) for fname in getattr(item, 'image_filenames', []) if fname]
+        urls = []
+        for fname in getattr(item, 'image_filenames', []) or []:
+            resolved = resolve_image_url(fname)
+            if resolved:
+                urls.append(resolved)
+        return urls
 
     def location_image_urls(location):
         if not location:
             return []
-        return [url_for('uploaded_file', filename=fname) for fname in getattr(location, 'image_filenames', []) if fname]
+        urls = []
+        for fname in getattr(location, 'image_filenames', []) or []:
+            resolved = resolve_image_url(fname)
+            if resolved:
+                urls.append(resolved)
+        return urls
 
     def uploaded_image_url(filename):
-        return url_for('uploaded_file', filename=filename) if filename else None
+        return resolve_image_url(filename)
 
     return dict(
         item_image_urls=item_image_urls,

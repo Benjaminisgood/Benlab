@@ -18,47 +18,6 @@
     </select>
     <div class="form-text">可多选负责人，按住 Ctrl (Windows) 或 Cmd (Mac) 选择多个人。</div>
   </div>
-  {% set loc_adv_open = location and (location.clean_status or location.parent_id) %}
-  <div class="accordion mb-3" id="locationAdvancedAccordion">
-    <div class="accordion-item">
-      <h2 class="accordion-header" id="locationAdvancedHeader">
-        <button class="accordion-button {% if not loc_adv_open %}collapsed{% endif %}" type="button"
-                data-bs-toggle="collapse" data-bs-target="#locationAdvancedSection"
-                aria-expanded="{{ 'true' if loc_adv_open else 'false' }}" aria-controls="locationAdvancedSection">
-          更多属性（父位置 / 卫生状态）
-        </button>
-      </h2>
-      <div id="locationAdvancedSection" class="accordion-collapse collapse {% if loc_adv_open %}show{% endif %}"
-           data-bs-parent="#locationAdvancedAccordion">
-        <div class="accordion-body">
-          <div class="mb-3">
-            <label for="parent_id" class="form-label">父位置（可选）</label>
-            <select name="parent_id" id="parent_id" class="form-select">
-              <option value="">无</option>
-              {% for parent in parents %}
-                {% if not (location and parent.id == location.id) %}
-                  <option value="{{ parent.id }}"
-                    {% if location and location.parent_id == parent.id %}selected{% endif %}>
-                    {{ parent.name }}
-                  </option>
-                {% endif %}
-              {% endfor %}
-            </select>
-            <div class="form-text">用于构建层级结构，留空表示顶层位置。</div>
-          </div>
-          <div class="mb-0">
-            <label for="clean_status" class="form-label">卫生状态</label>
-            <select name="clean_status" class="form-select">
-              <option value="">-- 请选择 --</option>
-              {% for opt in ['干净', '一般', '脏/报修'] %}
-                <option value="{{ opt }}" {% if location and location.clean_status == opt %}selected{% endif %}>{{ opt }}</option>
-              {% endfor %}
-            </select>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
   <div class="mb-3">
     <label for="detail_link" class="form-label">详情链接</label>
     <input type="url" class="form-control" id="detail_link" name="detail_link"
@@ -124,6 +83,47 @@
   <div class="mb-3">
     <label for="notes" class="form-label">备注</label>
     <textarea class="form-control" id="notes" name="notes" rows="3">{{ location.notes if location else '' }}</textarea>
+  </div>
+  {% set loc_adv_open = location and (location.clean_status or location.parent_id) %}
+  <div class="accordion mb-3" id="locationAdvancedAccordion">
+    <div class="accordion-item">
+      <h2 class="accordion-header" id="locationAdvancedHeader">
+        <button class="accordion-button {% if not loc_adv_open %}collapsed{% endif %}" type="button"
+                data-bs-toggle="collapse" data-bs-target="#locationAdvancedSection"
+                aria-expanded="{{ 'true' if loc_adv_open else 'false' }}" aria-controls="locationAdvancedSection">
+          更多属性（父位置 / 卫生状态）
+        </button>
+      </h2>
+      <div id="locationAdvancedSection" class="accordion-collapse collapse {% if loc_adv_open %}show{% endif %}"
+           data-bs-parent="#locationAdvancedAccordion">
+        <div class="accordion-body">
+          <div class="mb-3">
+            <label for="parent_id" class="form-label">父位置（可选）</label>
+            <select name="parent_id" id="parent_id" class="form-select">
+              <option value="">无</option>
+              {% for parent in parents %}
+                {% if not (location and parent.id == location.id) %}
+                  <option value="{{ parent.id }}"
+                    {% if location and location.parent_id == parent.id %}selected{% endif %}>
+                    {{ parent.name }}
+                  </option>
+                {% endif %}
+              {% endfor %}
+            </select>
+            <div class="form-text">用于构建层级结构，留空表示顶层位置。</div>
+          </div>
+          <div class="mb-0">
+            <label for="clean_status" class="form-label">卫生状态</label>
+            <select name="clean_status" class="form-select">
+              <option value="">-- 请选择 --</option>
+              {% for opt in ['干净', '一般', '脏/报修'] %}
+                <option value="{{ opt }}" {% if location and location.clean_status == opt %}selected{% endif %}>{{ opt }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
   <button type="submit" class="btn btn-success">{{ location and '保存修改' or '添加位置' }}</button>
   <a href="{{ url_for('locations_list') }}" class="btn btn-secondary">取消</a>

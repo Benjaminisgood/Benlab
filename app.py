@@ -9,7 +9,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from collections import Counter
 from sqlalchemy.orm import selectinload
-from sqlalchemy import or_, func
+from sqlalchemy import or_, func, text, inspect
 from flask_migrate import Migrate
 from markupsafe import Markup, escape
 
@@ -92,6 +92,16 @@ login_manager.login_view = 'login'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def _parse_coordinate(raw_value):
+    """Return a normalized float for latitude/longitude or None on failure."""
+    if raw_value in (None, '', 'undefined'):
+        return None
+    try:
+        return round(float(raw_value), 8)
+    except (TypeError, ValueError):
+        return None
 
 
 def save_uploaded_image(file_storage):
@@ -215,6 +225,9 @@ class Location(db.Model):
     name = db.Column(db.String(100), nullable=False)    # 位置名称
     parent_id = db.Column(db.Integer, db.ForeignKey('locations.id'))  # 父级位置
     clean_status = db.Column(db.String(20))
+    latitude = db.Column(db.Float, index=True)
+    longitude = db.Column(db.Float, index=True)
+    coordinate_source = db.Column(db.String(20))
     children = db.relationship('Location',
                             backref=db.backref('parent', remote_side=[id]),
                             cascade='all, delete-orphan')
@@ -512,6 +525,24 @@ class EventImage(db.Model):
 # 初始化数据库并创建默认用户
 with app.app_context():
     db.create_all()
+    try:
+        inspector = inspect(db.engine)
+        table_names = inspector.get_table_names()
+    except Exception:
+        table_names = []
+    if 'locations' in table_names:
+        existing_cols = {col['name'] for col in inspector.get_columns('locations')}
+        alter_statements = []
+        if 'latitude' not in existing_cols:
+            alter_statements.append('ALTER TABLE locations ADD COLUMN latitude REAL')
+        if 'longitude' not in existing_cols:
+            alter_statements.append('ALTER TABLE locations ADD COLUMN longitude REAL')
+        if 'coordinate_source' not in existing_cols:
+            alter_statements.append('ALTER TABLE locations ADD COLUMN coordinate_source VARCHAR(20)')
+        if alter_statements:
+            with db.engine.begin() as conn:
+                for stmt in alter_statements:
+                    conn.execute(text(stmt))
     if Member.query.count() == 0:
         default_user = Member(name="Admin User", username="admin", contact="admin@example.com", notes="Default admin user")
         default_user.set_password("admin")
@@ -1356,6 +1387,33 @@ def locations_list():
     ).order_by(Location.name).all()
     return render_template('locations.html', locations=locations)
 
+
+@app.route('/api/locations/search')
+@login_required
+def search_locations():
+    keyword = (request.args.get('q') or '').strip()
+    if not keyword:
+        return jsonify([])
+    pattern = f"%{keyword}%"
+    matches = (
+        Location.query
+        .filter(Location.name.ilike(pattern))
+        .order_by(func.lower(Location.name))
+        .limit(12)
+        .all()
+    )
+    payload = []
+    for loc in matches:
+        payload.append({
+            'id': loc.id,
+            'name': loc.name,
+            'latitude': loc.latitude,
+            'longitude': loc.longitude,
+            'detailUrl': url_for('view_location', loc_id=loc.id),
+            'hasCoordinates': loc.latitude is not None and loc.longitude is not None
+        })
+    return jsonify(payload)
+
 @app.route('/locations/add', methods=['GET', 'POST'])
 @login_required
 def add_location():
@@ -1367,6 +1425,13 @@ def add_location():
         responsible_ids = request.form.getlist('responsible_ids')
         notes = request.form.get('notes')
         detail_link = request.form.get('detail_link')
+        latitude = _parse_coordinate(request.form.get('latitude'))
+        longitude = _parse_coordinate(request.form.get('longitude'))
+        coordinate_source = request.form.get('coordinate_source') or None
+        if latitude is None or longitude is None:
+            latitude = None
+            longitude = None
+            coordinate_source = None
 
         uploaded_files = request.files.getlist('images')
         if not uploaded_files:
@@ -1385,7 +1450,10 @@ def add_location():
             notes=notes,
             image=saved_filenames[0] if saved_filenames else None,
             clean_status=clean_status,
-            detail_link=detail_link
+            detail_link=detail_link,
+            latitude=latitude,
+            longitude=longitude,
+            coordinate_source=coordinate_source
         )
         db.session.add(new_loc)
         for fname in saved_filenames:
@@ -1421,6 +1489,13 @@ def edit_location(loc_id):
         notes = request.form.get('notes')
         detail_link = request.form.get('detail_link')
         location.clean_status = request.form.get('clean_status') or None
+        latitude = _parse_coordinate(request.form.get('latitude'))
+        longitude = _parse_coordinate(request.form.get('longitude'))
+        coordinate_source = request.form.get('coordinate_source') or None
+        if latitude is None or longitude is None:
+            latitude = None
+            longitude = None
+            coordinate_source = None
 
         if location.image and not any(img.filename == location.image for img in location.images):
             location.images.append(LocationImage(filename=location.image))
@@ -1462,6 +1537,9 @@ def edit_location(loc_id):
         location.responsible_members = member_objs
         location.notes = notes
         location.detail_link = detail_link
+        location.latitude = latitude
+        location.longitude = longitude
+        location.coordinate_source = coordinate_source
         location.last_modified = datetime.utcnow()
         db.session.commit()
         # 记录日志
@@ -1471,7 +1549,8 @@ def edit_location(loc_id):
         flash('位置信息已更新', 'success')
         return redirect(url_for('locations_list'))
     members = Member.query.all()
-    return render_template('location_form.html', members=members, location=location)
+    parents = Location.query.filter(Location.id != location.id).all()
+    return render_template('location_form.html', members=members, location=location, parents=parents)
 
 @app.route('/locations/<int:loc_id>/delete', methods=['POST'])
 @login_required

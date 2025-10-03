@@ -47,6 +47,27 @@
         <a href="{{ location.detail_link }}" target="_blank">{{ location.detail_link }}</a>
       </li>
       {% endif %}
+      {% if location.latitude is not none and location.longitude is not none %}
+      <li class="list-group-item">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+          <div>
+            <strong>坐标：</strong>
+            <span id="locationCoordinates">{{ '%.6f'|format(location.latitude) }}, {{ '%.6f'|format(location.longitude) }}</span>
+            {% if location.coordinate_source %}
+              <span class="badge bg-secondary ms-2">
+                {% if location.coordinate_source == 'device' %}自动定位{% elif location.coordinate_source == 'manual' %}手动输入{% else %}{{ location.coordinate_source }}{% endif %}
+              </span>
+            {% endif %}
+          </div>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="copyLocationCoordBtn">复制坐标</button>
+        </div>
+        <div class="btn-group btn-group-sm mt-3" role="group" aria-label="导航">
+          <a class="btn btn-outline-primary" href="geo:{{ '%.6f'|format(location.latitude) }},{{ '%.6f'|format(location.longitude) }}">系统地图</a>
+          <a class="btn btn-outline-primary" href="https://www.google.com/maps/dir/?api=1&destination={{ '%.6f'|format(location.latitude) }},{{ '%.6f'|format(location.longitude) }}" target="_blank" rel="noopener">Google 导航</a>
+          <a class="btn btn-outline-primary" href="http://maps.apple.com/?ll={{ '%.6f'|format(location.latitude) }},{{ '%.6f'|format(location.longitude) }}" target="_blank" rel="noopener">Apple 地图</a>
+        </div>
+      </li>
+      {% endif %}
       <li class="list-group-item"><strong>最近修改：</strong> {{ location.last_modified.strftime('%Y-%m-%d %H:%M') if location.last_modified else '未知' }}</li>
       <li class="list-group-item">
         <strong>物品统计：</strong>
@@ -77,6 +98,12 @@
     {% endif %}
     {% else %}
     <p class="text-muted">无图片</p>
+    {% endif %}
+    {% if location.latitude is not none and location.longitude is not none %}
+    <div class="mb-3">
+      <h6 class="mb-2">地图</h6>
+      <iframe id="locationMapFrame" class="w-100 rounded border" style="min-height: 260px;" loading="lazy" referrerpolicy="no-referrer-when-downgrade" allowfullscreen></iframe>
+    </div>
     {% endif %}
     <div class="mb-3">
       <h6 class="mb-2">二维码（手机扫码打开本页）</h6>
@@ -152,6 +179,52 @@
       nextBtn.addEventListener('click', function () {
         index = (index + 1) % locImages.length;
         updateGallery();
+      });
+    }
+  }
+  var lat = {{ location.latitude|tojson }};
+  var lng = {{ location.longitude|tojson }};
+  if (typeof lat === 'number' && typeof lng === 'number') {
+    var mapFrame = document.getElementById('locationMapFrame');
+    if (mapFrame) {
+      var delta = 0.01;
+      var bbox = [
+        (lng - delta).toFixed(6),
+        (lat - delta).toFixed(6),
+        (lng + delta).toFixed(6),
+        (lat + delta).toFixed(6)
+      ].join(',');
+      var mapUrl = 'https://www.openstreetmap.org/export/embed.html?layer=mapnik&marker='
+        + lat.toFixed(6) + ',' + lng.toFixed(6)
+        + '&bbox=' + bbox;
+      mapFrame.src = mapUrl;
+    }
+    var copyBtn = document.getElementById('copyLocationCoordBtn');
+    if (copyBtn) {
+      copyBtn.addEventListener('click', function () {
+        var coords = lat.toFixed(6) + ', ' + lng.toFixed(6);
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(coords).then(function () {
+            copyBtn.textContent = '已复制';
+            setTimeout(function () { copyBtn.textContent = '复制坐标'; }, 1200);
+          }).catch(function () {
+            alert('复制失败，请手动复制：' + coords);
+          });
+        } else {
+          try {
+            var range = document.createRange();
+            range.selectNodeContents(document.getElementById('locationCoordinates'));
+            var selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+            document.execCommand('copy');
+            selection.removeAllRanges();
+            copyBtn.textContent = '已复制';
+            setTimeout(function () { copyBtn.textContent = '复制坐标'; }, 1200);
+          } catch (err) {
+            alert('复制失败，请手动复制：' + coords);
+          }
+        }
       });
     }
   }

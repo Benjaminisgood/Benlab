@@ -49,6 +49,26 @@
     <div class="form-text">可填写位置的相关详情链接（可选）</div>
   </div>
   <div class="mb-3">
+    <label class="form-label">精准坐标</label>
+    <div class="row g-2 align-items-end">
+      <div class="col-sm-6">
+        <input type="text" class="form-control" id="latitude" name="latitude" placeholder="纬度，例如 39.9042"
+               value="{{ '%.6f'|format(location.latitude) if location and location.latitude is not none else '' }}">
+      </div>
+      <div class="col-sm-6">
+        <input type="text" class="form-control" id="longitude" name="longitude" placeholder="经度，例如 116.4074"
+               value="{{ '%.6f'|format(location.longitude) if location and location.longitude is not none else '' }}">
+      </div>
+    </div>
+    <div class="d-flex gap-2 mt-2">
+      <button type="button" class="btn btn-outline-primary btn-sm" id="detectLocationBtn">自动获取当前位置</button>
+      <button type="button" class="btn btn-outline-secondary btn-sm" id="clearLocationBtn">清除坐标</button>
+    </div>
+    <div class="form-text">可从手机定位自动填充，也可手动输入；保留为空则不记录坐标。</div>
+    <input type="hidden" id="coordinate_source" name="coordinate_source"
+           value="{{ location.coordinate_source if location and location.coordinate_source else '' }}">
+  </div>
+  <div class="mb-3">
     <label for="imageInput" class="form-label">位置图片 (可选，可多选)</label>
     {% if location %}
     <div class="d-flex flex-wrap gap-3 mb-2">
@@ -101,5 +121,54 @@
       }
     });
   }
+
+  (function registerGeoButtons() {
+    const detectBtn = document.getElementById('detectLocationBtn');
+    const clearBtn = document.getElementById('clearLocationBtn');
+    const latInput = document.getElementById('latitude');
+    const lngInput = document.getElementById('longitude');
+    const sourceInput = document.getElementById('coordinate_source');
+    if (!latInput || !lngInput || !sourceInput) {
+      return;
+    }
+    const markManual = () => { sourceInput.value = latInput.value && lngInput.value ? 'manual' : ''; };
+    latInput.addEventListener('input', markManual);
+    lngInput.addEventListener('input', markManual);
+    if (detectBtn && navigator.geolocation) {
+      detectBtn.addEventListener('click', function () {
+        detectBtn.disabled = true;
+        detectBtn.textContent = '定位中…';
+        navigator.geolocation.getCurrentPosition(function (pos) {
+          const { latitude, longitude } = pos.coords || {};
+          if (typeof latitude === 'number' && typeof longitude === 'number') {
+            latInput.value = latitude.toFixed(6);
+            lngInput.value = longitude.toFixed(6);
+            sourceInput.value = 'device';
+          }
+          detectBtn.disabled = false;
+          detectBtn.textContent = '自动获取当前位置';
+        }, function () {
+          detectBtn.disabled = false;
+          detectBtn.textContent = '自动获取当前位置';
+          alert('无法获取当前位置，请检查浏览器定位权限或手动输入。');
+        }, {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 60000
+        });
+      });
+    } else if (detectBtn) {
+      detectBtn.addEventListener('click', function () {
+        alert('当前浏览器不支持定位，请手动输入坐标。');
+      });
+    }
+    if (clearBtn) {
+      clearBtn.addEventListener('click', function () {
+        latInput.value = '';
+        lngInput.value = '';
+        sourceInput.value = '';
+      });
+    }
+  })();
 </script>
 {% endblock %}

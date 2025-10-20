@@ -1388,7 +1388,20 @@ def add_item():
     # GET 请求
     members = Member.query.all()
     locations = Location.query.all()
-    return render_template('item_form.html', members=members, locations=locations, item=None, default_loc_id=default_loc_id)
+    categories = [
+        c for (c,) in db.session.query(Item.category)
+        .filter(Item.category.isnot(None), Item.category != '')
+        .distinct()
+        .order_by(Item.category)
+    ]
+    return render_template(
+        'item_form.html',
+        members=members,
+        locations=locations,
+        item=None,
+        default_loc_id=default_loc_id,
+        categories=categories
+    )
 
 @app.route('/items/<int:item_id>/edit', methods=['GET', 'POST'])
 @login_required
@@ -1476,7 +1489,19 @@ def edit_item(item_id):
 
     members = Member.query.all()
     locations = Location.query.all()
-    return render_template('item_form.html', members=members, locations=locations, item=item)
+    categories = [
+        c for (c,) in db.session.query(Item.category)
+        .filter(Item.category.isnot(None), Item.category != '')
+        .distinct()
+        .order_by(Item.category)
+    ]
+    return render_template(
+        'item_form.html',
+        members=members,
+        locations=locations,
+        item=item,
+        categories=categories
+    )
 
 @app.route('/items/<int:item_id>/delete', methods=['POST'])
 @login_required

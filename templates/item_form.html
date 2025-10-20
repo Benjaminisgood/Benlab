@@ -120,7 +120,13 @@
           </div>
           <div class="mb-3">
             <label for="category" class="form-label">类别</label>
-            <input type="text" class="form-control" id="category" name="category" value="{{ item.category if item else '' }}">
+            <input type="text" class="form-control" id="category" name="category"
+                   value="{{ item.category if item else '' }}" list="categorySuggestions" autocomplete="off">
+            <datalist id="categorySuggestions">
+              {% for cat in categories or [] %}
+              <option value="{{ cat }}"></option>
+              {% endfor %}
+            </datalist>
           </div>
           <div class="mb-3">
             <label for="quantity" class="form-label">数量</label>

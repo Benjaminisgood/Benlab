@@ -1,35 +1,24 @@
 {% extends "base.html" %}
 {% block content %}
 <style>
-  .follow-toggle {
-    background: none;
-    border: none;
-    padding: 0;
-    margin-right: 0.5rem;
-    cursor: pointer;
-    line-height: 1;
-  }
-  .follow-toggle:disabled {
-    cursor: wait;
-    opacity: 0.6;
-  }
-  .follow-star {
-    font-size: 1.1rem;
-    color: #ced4da;
-    transition: color 0.2s ease;
-  }
-  .follow-star.followed {
-    color: #ffc107;
-  }
-  .identity-badge {
-    display: inline-block;
-    margin-right: 0.5rem;
+  .member-legend .badge {
+    min-width: 4.5rem;
   }
 </style>
 
-<h3 class="mb-3">课题组成员</h3>
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="mb-0">课题组成员</h3>
+  <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#followManageModal">
+    新增关注
+  </button>
+</div>
 <div class="position-relative mb-3">
   <input type="text" class="form-control" id="membersFilterInput" placeholder="输入姓名 / 用户名 / 联系方式即时筛选">
+</div>
+<div class="member-legend d-flex flex-wrap align-items-center gap-2 small text-muted mb-2">
+  <span class="badge bg-primary text-white">自己</span>
+  <span class="badge bg-success text-white">已关注</span>
+  <span class="badge bg-light text-dark border">其他成员</span>
 </div>
 <table class="table table-hover align-middle" id="membersTable">
   <thead class="table-light">
@@ -40,19 +29,17 @@
     {% set items_count = mem.items|length %}
     {% set locations_count = mem.locations|length %}
     {% set search_blob = ((mem.name or mem.username) ~ ' ' ~ mem.username ~ ' ' ~ (mem.contact or '') ~ ' ' ~ items_count ~ ' ' ~ locations_count) %}
-    <tr data-search="{{ search_blob|lower }}">
+    {% set row_class = '' %}
+    {% if mem.id == current_user.id %}
+      {% set row_class = 'table-primary' %}
+    {% elif mem.id in followed_ids %}
+      {% set row_class = 'table-success' %}
+    {% endif %}
+    <tr class="{{ row_class }}" data-search="{{ search_blob|lower }}">
       <td>
-        {% if mem.id == current_user.id %}
-          <span class="badge bg-secondary identity-badge">我</span>
-          <a href="{{ url_for('profile', member_id=mem.id) }}">{{ mem.name or mem.username }}</a>
-        {% else %}
-          <button class="follow-toggle" type="button" data-url="{{ url_for('toggle_follow', member_id=mem.id) }}" aria-label="关注或取消关注">
-            <span class="follow-star{% if mem.id in followed_ids %} followed{% endif %}">
-              {% if mem.id in followed_ids %}★{% else %}☆{% endif %}
-            </span>
-          </button>
-          <a href="{{ url_for('profile', member_id=mem.id) }}">{{ mem.name or mem.username }}</a>
-        {% endif %}
+        <a class="fw-semibold text-decoration-none" href="{{ url_for('profile', member_id=mem.id) }}">
+          {{ mem.name or mem.username }}
+        </a>
       </td>
       <td>{{ mem.username }}</td>
       <td>{{ mem.contact or '-' }}</td>
@@ -66,50 +53,129 @@
   </tbody>
 </table>
 
+<div class="modal fade" id="followManageModal" tabindex="-1" aria-labelledby="followManageModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable">
+    <div class="modal-content">
+      <form id="followManageForm">
+        <div class="modal-header">
+          <h5 class="modal-title" id="followManageModalLabel">新增关注成员</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+        </div>
+        <div class="modal-body">
+          <p class="small text-muted">勾选后保存即可置顶显示；取消勾选将移出关注列表。</p>
+          <div class="list-group">
+            {% for mem in members if mem.id != current_user.id %}
+              <label class="list-group-item d-flex justify-content-between align-items-center">
+                <span>{{ mem.name or mem.username }}</span>
+                <input class="form-check-input ms-3 follow-manage-checkbox" type="checkbox"
+                       value="{{ mem.id }}"
+                       data-toggle-url="{{ url_for('toggle_follow', member_id=mem.id) }}"
+                       {% if mem.id in followed_ids %}checked{% endif %}>
+              </label>
+            {% endfor %}
+            {% if members|length <= 1 %}
+              <p class="text-muted mb-0">暂无其他成员可关注。</p>
+            {% endif %}
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+          <button type="submit" class="btn btn-primary">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
 <script>
-  document.querySelectorAll('.follow-toggle').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var url = btn.dataset.url;
-      if (!url) {
-        return;
-      }
-      btn.disabled = true;
-      fetch(url, {
+  (function () {
+    function toggleFollow(url) {
+      return fetch(url, {
         method: 'POST',
         credentials: 'same-origin',
-        headers: {
-          'X-Requested-With': 'XMLHttpRequest'
-        }
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }
       }).then(function (response) {
-        btn.disabled = false;
         if (!response.ok) {
           return response.json().catch(function () { return {}; }).then(function (data) {
             if (data.error) {
               alert(data.error);
             }
+            throw new Error('Toggle failed');
           });
         }
-        return response.json().then(function (data) {
-          var star = btn.querySelector('.follow-star');
-          if (!star) {
-            return;
-          }
-          if (data.followed) {
-            star.classList.add('followed');
-            star.textContent = '★';
-          } else {
-            star.classList.remove('followed');
-            star.textContent = '☆';
-          }
-          setTimeout(function () {
-            window.location.reload();
-          }, 100);
-        });
-      }).catch(function () {
-        btn.disabled = false;
+        return response.json();
       });
-    });
-  });
+    }
+
+    var followModalEl = document.getElementById('followManageModal');
+    var followForm = document.getElementById('followManageForm');
+    if (followModalEl && followForm) {
+      var initialFollowed = new Set({{ followed_ids | list | tojson }});
+      followModalEl.addEventListener('show.bs.modal', function () {
+        followForm.querySelectorAll('.follow-manage-checkbox').forEach(function (cb) {
+          cb.checked = initialFollowed.has(Number(cb.value));
+          cb.disabled = false;
+        });
+        var submitBtn = followForm.querySelector('button[type="submit"]');
+        if (submitBtn) {
+          submitBtn.disabled = false;
+        }
+      });
+      followForm.addEventListener('submit', function (evt) {
+        evt.preventDefault();
+        var submitBtn = followForm.querySelector('button[type="submit"]');
+        if (submitBtn) {
+          submitBtn.disabled = true;
+        }
+        var checkboxes = Array.prototype.slice.call(followForm.querySelectorAll('.follow-manage-checkbox'));
+        var selected = new Set();
+        checkboxes.forEach(function (cb) {
+          if (cb.checked) {
+            selected.add(Number(cb.value));
+          }
+        });
+        var operations = [];
+        selected.forEach(function (id) {
+          if (!initialFollowed.has(id)) {
+            var cb = followForm.querySelector('.follow-manage-checkbox[value="' + id + '"]');
+            var url = cb ? cb.dataset.toggleUrl : null;
+            if (url) {
+              cb.disabled = true;
+              operations.push(toggleFollow(url));
+            }
+          }
+        });
+        initialFollowed.forEach(function (id) {
+          if (!selected.has(id)) {
+            var cb = followForm.querySelector('.follow-manage-checkbox[value="' + id + '"]');
+            var url = cb ? cb.dataset.toggleUrl : null;
+            if (url) {
+              cb.disabled = true;
+              operations.push(toggleFollow(url));
+            }
+          }
+        });
+        if (operations.length === 0) {
+          var modalInstance = bootstrap.Modal.getInstance(followModalEl);
+          if (modalInstance) {
+            modalInstance.hide();
+          }
+          if (submitBtn) {
+            submitBtn.disabled = false;
+          }
+          return;
+        }
+        Promise.all(operations).then(function () {
+          window.location.reload();
+        }).catch(function () {
+          if (submitBtn) {
+            submitBtn.disabled = false;
+          }
+          checkboxes.forEach(function (cb) { cb.disabled = false; });
+        });
+      });
+    }
+  })();
 
   (function () {
     var filterInput = document.getElementById('membersFilterInput');

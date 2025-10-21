@@ -1,24 +1,22 @@
 {% extends "base.html" %}
 {% block content %}
-<h3 class="mb-3">物品列表</h3>
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="mb-0">物品列表</h3>
+  <a href="{{ url_for('add_item') }}" class="btn btn-primary">新增物品</a>
+</div>
 
-<div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
+<div class="d-flex flex-column flex-md-row align-items-md-center gap-2 mb-3">
   <div class="flex-grow-1 position-relative">
     <input type="text" id="itemsFilterInput" class="form-control" placeholder="输入名称 / 备注 / CAS 号立即筛选">
     <div id="itemsSuggestions" class="list-group position-absolute w-100 shadow-sm d-none" style="z-index: 20;"></div>
   </div>
-  <a href="{{ url_for('add_item') }}" class="btn btn-primary flex-shrink-0">新增物品</a>
 </div>
 
 <table class="table table-hover align-middle" id="itemsTable">
   <thead class="table-light">
     <tr>
       <th>名称</th>
-      <th>
-        <button type="button" class="btn btn-link p-0 align-baseline text-decoration-none fw-semibold" data-bs-toggle="modal" data-bs-target="#manageCategoryModal">
-          类别
-        </button>
-      </th>
+      <th>类别</th>
       <th>库存状态 / 特性</th>
       <th>存放位置</th>
       <th>负责人</th>
@@ -58,7 +56,19 @@
         <td>
           <a href="{{ url_for('item_detail', item_id=item.id) }}">{{ item.name }}</a>
         </td>
-        <td>{{ item.category or '-' }}</td>
+        <td>
+          {% if item.category %}
+            <button type="button"
+                    class="btn btn-link p-0 align-baseline category-manage-trigger"
+                    data-bs-toggle="modal"
+                    data-bs-target="#manageCategoryModal"
+                    data-category="{{ item.category }}">
+              {{ item.category }}
+            </button>
+          {% else %}
+            <span class="text-muted">-</span>
+          {% endif %}
+        </td>
         <td>
           {% if item.stock_status %}
             <span class="badge bg-primary me-1">{{ item.stock_status }}</span>
@@ -110,7 +120,7 @@
         <div class="modal-body">
           <input type="hidden" name="category_name" id="categoryNameField">
           <div class="mb-3">
-            <label for="categorySelectorInput" class="form-label">选择或输入类别</label>
+            <label for="categorySelectorInput" class="form-label mb-1">选择或输入类别</label>
             <input type="text" id="categorySelectorInput" class="form-control form-control-sm" list="categoryOptions" placeholder="直接输入或选择已有类别名称">
             <datalist id="categoryOptions">
               {% for cat in categories %}
@@ -374,6 +384,7 @@
   function resetModal() {
     if (categorySelector) {
       categorySelector.value = '';
+      categorySelector.removeAttribute('readonly');
     }
     if (hiddenField) {
       hiddenField.value = '';
@@ -399,6 +410,26 @@
       if (categorySelector) {
         categorySelector.focus();
       }
+    });
+    modalEl.addEventListener('show.bs.modal', function (evt) {
+      var trigger = evt.relatedTarget || null;
+      var categoryName = '';
+      if (trigger && trigger.getAttribute('data-category')) {
+        categoryName = trigger.getAttribute('data-category');
+      }
+      if (categorySelector) {
+        categorySelector.value = categoryName;
+        if (categoryName) {
+          categorySelector.setAttribute('readonly', 'readonly');
+        } else {
+          categorySelector.removeAttribute('readonly');
+        }
+      }
+      if (hiddenField) {
+        hiddenField.value = categoryName;
+      }
+      rebuildCurrentList(categoryName);
+      updateSummary();
     });
   }
 

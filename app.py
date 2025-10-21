@@ -1940,7 +1940,13 @@ def members_list():
     followed_ids = {mem.id for mem in current_user.following}
     def sort_key(member):
         display_name = (member.name or member.username).lower()
-        return (0 if member.id in followed_ids else 1, display_name)
+        if member.id == current_user.id:
+            group = 0
+        elif member.id in followed_ids:
+            group = 1
+        else:
+            group = 2
+        return (group, display_name)
     members.sort(key=sort_key)
     return render_template('members.html', members=members, followed_ids=followed_ids)
 
@@ -2024,6 +2030,10 @@ def profile(member_id):
     user_logs = []
     if member.id == current_user.id:
         user_logs = Log.query.filter_by(user_id=member.id).order_by(Log.timestamp.desc()).limit(5).all()
+    is_following = False
+    if member.id != current_user.id:
+        is_following = member in current_user.following
+
     return render_template('profile.html', 
                            profile_user=member, 
                            items_resp=items_resp, 
@@ -2034,7 +2044,8 @@ def profile(member_id):
                            any_item_empty=any_item_empty,
                            any_location_dirty=any_location_dirty,
                            events_upcoming=events_upcoming,
-                           events_past=events_past)
+                           events_past=events_past,
+                           is_following=is_following)
 
 @app.route('/member/<int:member_id>/edit', methods=['GET', 'POST'])
 @login_required

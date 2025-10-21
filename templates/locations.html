@@ -31,13 +31,13 @@
 {% endfor %}
 {% endmacro %}
 
-<h3 class="mb-3">实验室位置列表</h3>
-<div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-3 gap-2">
-  <div class="flex-grow-1 position-relative">
-    <input type="text" id="filterInput" class="form-control" placeholder="按位置名称筛选 / 导航">
-    <div id="locationsSuggestions" class="list-group position-absolute w-100 shadow-sm d-none" style="z-index: 20;"></div>
-  </div>
-  <a href="{{ url_for('add_location') }}" class="btn btn-primary flex-shrink-0">新增位置</a>
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="mb-0">实验室位置列表</h3>
+  <a href="{{ url_for('add_location') }}" class="btn btn-primary">新增位置</a>
+</div>
+<div class="position-relative mb-3">
+  <input type="text" id="filterInput" class="form-control" placeholder="按位置名称筛选 / 导航">
+  <div id="locationsSuggestions" class="list-group position-absolute w-100 shadow-sm d-none" style="z-index: 20;"></div>
 </div>
 <table class="table table-hover" id="locationsTable">
   <thead class="table-light">

@@ -1261,32 +1261,41 @@ def withdraw_event(event_id):
 @app.route('/items')
 @login_required
 def items():
-    # 物品列表，支持按名称/备注搜索，按类别筛选
-    search = request.args.get('search', '')
-    category_filter = request.args.get('category', '')
-    items_query = Item.query
-    if search:
-        s = search.strip()
-        # 去除非数字字符，便于做“无连字符”的模糊匹配（输入 '6' 也能匹配）
-        s_digits = re.sub(r'[^0-9]', '', s)
-        cas_col = func.coalesce(Item.cas_no, '')
-        cas_no_hyphenless = func.replace(cas_col, '-', '')
-        like_s = f"%{s}%"
-        items_conds = [
-            Item.name.ilike(like_s),
-            Item.notes.ilike(like_s),
-            Item.cas_no.ilike(like_s),
-        ]
-        if s_digits:
-            like_digits = f"%{s_digits}%"
-            items_conds.append(cas_no_hyphenless.like(like_digits))
-        items_query = items_query.filter(or_(*items_conds))
-    if category_filter:
-        items_query = items_query.filter_by(category=category_filter)
-    items_list = items_query.order_by(Item.name).all()
-    # 获取现有类别列表供筛选选项
-    categories = [c for (c,) in db.session.query(Item.category).distinct() if c]
-    return render_template('items.html', items=items_list, search=search, category=category_filter, categories=categories)
+    items_list = (
+        Item.query.options(
+            selectinload(Item.locations),
+            selectinload(Item.responsible_member)
+        )
+        .order_by(func.lower(Item.name))
+        .all()
+    )
+    category_map = {}
+    uncategorized_bucket = []
+    for item in items_list:
+        category_name = (item.category or '').strip()
+        if category_name:
+            category_map.setdefault(category_name, []).append(item)
+        else:
+            uncategorized_bucket.append(item)
+    categories = sorted(category_map.keys(), key=lambda name: name.lower())
+    category_payload = []
+    for name in categories:
+        members = sorted(category_map[name], key=lambda x: x.name.lower())
+        category_payload.append({
+            'name': name,
+            'items': [{'id': it.id, 'name': it.name} for it in members]
+        })
+    uncategorized_payload = [
+        {'id': it.id, 'name': it.name}
+        for it in sorted(uncategorized_bucket, key=lambda x: x.name.lower())
+    ]
+    return render_template(
+        'items.html',
+        items=items_list,
+        categories=categories,
+        category_payload=category_payload,
+        uncategorized_items=uncategorized_payload
+    )
 
 @app.route('/items/<int:item_id>')
 @login_required
@@ -1518,6 +1527,74 @@ def delete_item(item_id):
     flash('物品已删除', 'info')
     return redirect(url_for('items'))
 
+@app.route('/items/manage-category', methods=['POST'])
+@login_required
+def manage_item_category():
+    category_name = (request.form.get('category_name') or '').strip()
+    if not category_name:
+        flash('请输入要管理的类别名称', 'warning')
+        return redirect(url_for('items'))
+
+    def parse_ids(key):
+        raw = request.form.getlist(key)
+        return {int(val) for val in raw if val.isdigit()}
+
+    add_ids = parse_ids('add_item_ids')
+    remove_ids = parse_ids('remove_item_ids')
+
+    if not add_ids and not remove_ids:
+        flash('未选择任何需要调整的物品', 'info')
+        return redirect(url_for('items'))
+
+    added_items = []
+    removed_items = []
+    now = datetime.utcnow()
+
+    if add_ids:
+        candidates = Item.query.filter(Item.id.in_(add_ids)).all()
+        for item in candidates:
+            if (item.category or '').strip():
+                continue
+            item.category = category_name
+            item.last_modified = now
+            added_items.append(item)
+            log = Log(
+                user_id=current_user.id,
+                item_id=item.id,
+                action_type="物品类别调整",
+                details=f"将物品 {item.name} 归类为 {category_name}"
+            )
+            db.session.add(log)
+
+    if remove_ids:
+        candidates = Item.query.filter(Item.id.in_(remove_ids)).all()
+        for item in candidates:
+            if (item.category or '').strip() != category_name:
+                continue
+            item.category = None
+            item.last_modified = now
+            removed_items.append(item)
+            log = Log(
+                user_id=current_user.id,
+                item_id=item.id,
+                action_type="物品类别调整",
+                details=f"取消物品 {item.name} 的类别 {category_name}"
+            )
+            db.session.add(log)
+
+    if not added_items and not removed_items:
+        flash('没有物品符合调整条件', 'info')
+        return redirect(url_for('items'))
+
+    db.session.commit()
+    summary = []
+    if added_items:
+        summary.append(f"新增 {len(added_items)} 个物品")
+    if removed_items:
+        summary.append(f"取消 {len(removed_items)} 个物品")
+    flash('，'.join(summary) + f' 于类别 {category_name}', 'success')
+    return redirect(url_for('items'))
+
 @app.route('/locations')
 @login_required
 def locations_list():
@@ -1551,6 +1628,41 @@ def search_locations():
             'longitude': loc.longitude,
             'detailUrl': url_for('view_location', loc_id=loc.id),
             'hasCoordinates': loc.latitude is not None and loc.longitude is not None
+        })
+    return jsonify(payload)
+
+@app.route('/api/items/search')
+@login_required
+def search_items():
+    keyword = (request.args.get('q') or '').strip()
+    if not keyword:
+        return jsonify([])
+    like_pattern = f"%{keyword}%"
+    keyword_digits = re.sub(r'[^0-9]', '', keyword)
+    digit_pattern = f"%{keyword_digits}%" if keyword_digits else None
+    cas_col = func.coalesce(Item.cas_no, '')
+    cas_no_hyphenless = func.replace(cas_col, '-', '')
+    filters = [
+        Item.name.ilike(like_pattern),
+        Item.notes.ilike(like_pattern),
+        Item.cas_no.ilike(like_pattern)
+    ]
+    if digit_pattern:
+        filters.append(cas_no_hyphenless.like(digit_pattern))
+    matches = (
+        Item.query
+        .filter(or_(*filters))
+        .order_by(func.lower(Item.name))
+        .limit(12)
+        .all()
+    )
+    payload = []
+    for item in matches:
+        payload.append({
+            'id': item.id,
+            'name': item.name,
+            'category': item.category,
+            'detailUrl': url_for('item_detail', item_id=item.id)
         })
     return jsonify(payload)
 

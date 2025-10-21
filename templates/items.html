@@ -2,31 +2,23 @@
 {% block content %}
 <h3 class="mb-3">物品列表</h3>
 
-<form class="row g-3 mb-3" method="get" action="{{ url_for('items') }}">
-  <div class="col-auto">
-    <input type="text" name="search" value="{{ search }}" class="form-control" placeholder="搜索名称 / 备注 / CAS号">
+<div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
+  <div class="flex-grow-1 position-relative">
+    <input type="text" id="itemsFilterInput" class="form-control" placeholder="输入名称 / 备注 / CAS 号立即筛选">
+    <div id="itemsSuggestions" class="list-group position-absolute w-100 shadow-sm d-none" style="z-index: 20;"></div>
   </div>
-  <div class="col-auto">
-    <select name="category" class="form-select">
-      <option value="">全部类别</option>
-      {% for cat in categories %}
-      <option value="{{ cat }}" {% if cat == category %}selected{% endif %}>{{ cat }}</option>
-      {% endfor %}
-    </select>
-  </div>
-  <div class="col-auto">
-    <button type="submit" class="btn btn-secondary">筛选</button>
-  </div>
-  <div class="col-auto ms-auto">
-    <a href="{{ url_for('add_item') }}" class="btn btn-primary">新增物品</a>
-  </div>
-</form>
+  <a href="{{ url_for('add_item') }}" class="btn btn-primary flex-shrink-0">新增物品</a>
+</div>
 
-<table class="table table-hover align-middle">
+<table class="table table-hover align-middle" id="itemsTable">
   <thead class="table-light">
     <tr>
       <th>名称</th>
-      <th>类别</th>
+      <th>
+        <button type="button" class="btn btn-link p-0 align-baseline text-decoration-none fw-semibold" data-bs-toggle="modal" data-bs-target="#manageCategoryModal">
+          类别
+        </button>
+      </th>
       <th>库存状态 / 特性</th>
       <th>存放位置</th>
       <th>负责人</th>
@@ -59,8 +51,10 @@
           {% set row_class = 'table-secondary' %}
         {% endif %}
       {% endif %}
+      {% set location_names = item.locations | map(attribute='name') | list %}
+      {% set search_blob = (item.name ~ ' ' ~ (item.category or '-') ~ ' ' ~ (item.stock_status or '-') ~ ' ' ~ (item.features or '-') ~ ' ' ~ (item.cas_no or '-') ~ ' ' ~ (item.notes or '-') ~ ' ' ~ ((item.responsible_member.name) if item.responsible_member else '-') ~ ' ' ~ (location_names|join(' '))) %}
 
-      <tr class="{{ row_class }}">
+      <tr class="{{ row_class }}" data-search="{{ search_blob|lower }}">
         <td>
           <a href="{{ url_for('item_detail', item_id=item.id) }}">{{ item.name }}</a>
         </td>
@@ -99,11 +93,352 @@
       </tr>
     {% endfor %}
 
-    {% if items|length == 0 %}
-    <tr>
-      <td colspan="6" class="text-center text-muted">没有找到物品</td>
+    <tr id="itemsNoResultRow" class="text-center text-muted {% if items|length > 0 %}d-none{% endif %}">
+      <td colspan="6">没有找到物品</td>
     </tr>
-    {% endif %}
   </tbody>
 </table>
+
+<div class="modal fade" id="manageCategoryModal" tabindex="-1" aria-labelledby="manageCategoryLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('manage_item_category') }}" id="manageCategoryForm">
+        <div class="modal-header">
+          <h5 class="modal-title" id="manageCategoryLabel">管理物品类别</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" name="category_name" id="categoryNameField">
+          <div class="mb-3">
+            <label for="categorySelectorInput" class="form-label">选择或输入类别</label>
+            <input type="text" id="categorySelectorInput" class="form-control form-control-sm" list="categoryOptions" placeholder="直接输入或选择已有类别名称">
+            <datalist id="categoryOptions">
+              {% for cat in categories %}
+                <option value="{{ cat }}"></option>
+              {% endfor %}
+            </datalist>
+            <div class="form-text">可输入新类别名称，或从现有类别中选择。</div>
+          </div>
+          <div class="row g-3">
+            <div class="col-lg-6">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">当前类别内的物品</h6>
+                <small id="currentCategoryCounter" class="text-muted">0 个</small>
+              </div>
+              <div class="border rounded p-2" style="max-height: 280px; overflow-y: auto;" id="currentCategoryContainer">
+                <p class="text-muted mb-0">请选择类别查看现有物品。</p>
+              </div>
+            </div>
+            <div class="col-lg-6">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">可加入的未分类物品</h6>
+                <small id="availableCategoryCounter" class="text-muted">0 个</small>
+              </div>
+              <div class="border rounded p-2" style="max-height: 280px; overflow-y: auto;" id="availableCategoryContainer">
+                {% if uncategorized_items %}
+                  {% for entry in uncategorized_items %}
+                    <div class="form-check form-check-sm py-1">
+                      <input class="form-check-input category-add-checkbox" type="checkbox" name="add_item_ids" value="{{ entry.id }}" id="addCategoryItem{{ entry.id }}">
+                      <label class="form-check-label" for="addCategoryItem{{ entry.id }}">{{ entry.name }}</label>
+                    </div>
+                  {% endfor %}
+                {% else %}
+                  <p class="text-muted mb-0">暂无未分类物品。</p>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <span class="text-muted small me-auto" id="categoryChangeSummary">未选择变更</span>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+          <button type="submit" class="btn btn-primary" id="categorySubmitBtn" disabled>保存变更</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var filterInput = document.getElementById('itemsFilterInput');
+  var suggestionBox = document.getElementById('itemsSuggestions');
+  var tableRows = Array.prototype.slice.call(document.querySelectorAll('#itemsTable tbody tr[data-search]'));
+  var emptyRow = document.getElementById('itemsNoResultRow');
+  var debounceTimer = null;
+  var activeAbort = null;
+
+  function applyFilter(value) {
+    var normalized = value.trim().toLowerCase();
+    var visibleCount = 0;
+    tableRows.forEach(function (row) {
+      if (!normalized) {
+        row.classList.remove('d-none');
+        visibleCount += 1;
+        return;
+      }
+      var haystack = row.getAttribute('data-search') || '';
+      if (haystack.indexOf(normalized) !== -1) {
+        row.classList.remove('d-none');
+        visibleCount += 1;
+      } else {
+        row.classList.add('d-none');
+      }
+    });
+    if (emptyRow) {
+      if (tableRows.length === 0) {
+        emptyRow.classList.remove('d-none');
+      } else {
+        emptyRow.classList.toggle('d-none', visibleCount > 0);
+      }
+    }
+  }
+
+  function renderSuggestions(items) {
+    if (!suggestionBox) {
+      return;
+    }
+    suggestionBox.innerHTML = '';
+    if (!items || !items.length) {
+      suggestionBox.classList.add('d-none');
+      return;
+    }
+    items.forEach(function (item) {
+      var row = document.createElement('a');
+      row.className = 'list-group-item list-group-item-action d-flex justify-content-between align-items-center';
+      row.href = item.detailUrl;
+      row.textContent = item.name;
+      if (item.category) {
+        var badge = document.createElement('span');
+        badge.className = 'badge bg-light text-dark border ms-3';
+        badge.textContent = item.category;
+        row.appendChild(badge);
+      }
+      suggestionBox.appendChild(row);
+    });
+    suggestionBox.classList.remove('d-none');
+  }
+
+  function fetchSuggestions(value) {
+    if (!suggestionBox) {
+      return;
+    }
+    if (activeAbort) {
+      activeAbort.abort();
+      activeAbort = null;
+    }
+    var term = value.trim();
+    if (!term) {
+      suggestionBox.classList.add('d-none');
+      suggestionBox.innerHTML = '';
+      return;
+    }
+    var controller = new AbortController();
+    activeAbort = controller;
+    fetch('{{ url_for("search_items") }}?q=' + encodeURIComponent(term), { signal: controller.signal })
+      .then(function (resp) {
+        if (!resp.ok) {
+          throw new Error('Search failed');
+        }
+        return resp.json();
+      })
+      .then(function (payload) {
+        renderSuggestions(payload);
+      })
+      .catch(function (err) {
+        if (err.name === 'AbortError') {
+          return;
+        }
+        suggestionBox.classList.add('d-none');
+      });
+  }
+
+  if (filterInput) {
+    filterInput.addEventListener('input', function () {
+      var value = this.value || '';
+      applyFilter(value);
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(function () {
+        fetchSuggestions(value);
+      }, 180);
+    });
+    filterInput.addEventListener('focus', function () {
+      if (this.value && this.value.trim()) {
+        fetchSuggestions(this.value);
+      }
+    });
+    filterInput.addEventListener('blur', function () {
+      setTimeout(function () {
+        if (suggestionBox) {
+          suggestionBox.classList.add('d-none');
+        }
+      }, 200);
+    });
+  }
+
+  var modalEl = document.getElementById('manageCategoryModal');
+  if (!modalEl) {
+    return;
+  }
+  var categoryData = {{ category_payload|tojson }};
+  var categorySelector = document.getElementById('categorySelectorInput');
+  var hiddenField = document.getElementById('categoryNameField');
+  var currentContainer = document.getElementById('currentCategoryContainer');
+  var availableContainer = document.getElementById('availableCategoryContainer');
+  var currentCounter = document.getElementById('currentCategoryCounter');
+  var availableCounter = document.getElementById('availableCategoryCounter');
+  var summaryEl = document.getElementById('categoryChangeSummary');
+  var submitBtn = document.getElementById('categorySubmitBtn');
+  var addCheckboxes = Array.prototype.slice.call(document.querySelectorAll('.category-add-checkbox'));
+  var manageForm = document.getElementById('manageCategoryForm');
+
+  function getCategoryEntry(name) {
+    for (var i = 0; i < categoryData.length; i += 1) {
+      if (categoryData[i].name === name) {
+        return categoryData[i];
+      }
+    }
+    return null;
+  }
+
+  function rebuildCurrentList(name) {
+    if (!currentContainer) {
+      return;
+    }
+    currentContainer.innerHTML = '';
+    var entry = getCategoryEntry(name);
+    if (!entry || !entry.items.length) {
+      currentContainer.innerHTML = '<p class="text-muted mb-0">尚无物品属于该类别。</p>';
+      if (currentCounter) {
+        currentCounter.textContent = '0 个';
+      }
+      return;
+    }
+    entry.items.forEach(function (item) {
+      var wrapper = document.createElement('div');
+      wrapper.className = 'form-check form-check-sm py-1';
+      var checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.className = 'form-check-input category-remove-checkbox';
+      checkbox.name = 'remove_item_ids';
+      checkbox.value = item.id;
+      checkbox.id = 'removeCategoryItem' + item.id;
+      var label = document.createElement('label');
+      label.className = 'form-check-label';
+      label.setAttribute('for', checkbox.id);
+      label.textContent = item.name;
+      wrapper.appendChild(checkbox);
+      wrapper.appendChild(label);
+      currentContainer.appendChild(wrapper);
+    });
+    if (currentCounter) {
+      currentCounter.textContent = entry.items.length + ' 个';
+    }
+  }
+
+  function updateAvailableCounter() {
+    if (!availableCounter || !availableContainer) {
+      return;
+    }
+    var total = availableContainer.querySelectorAll('.category-add-checkbox').length;
+    availableCounter.textContent = total + ' 个';
+  }
+
+  function updateSummary() {
+    if (!summaryEl) {
+      return;
+    }
+    var selectedAdds = availableContainer ? availableContainer.querySelectorAll('.category-add-checkbox:checked').length : 0;
+    var selectedRemoves = currentContainer ? currentContainer.querySelectorAll('.category-remove-checkbox:checked').length : 0;
+    var categoryName = hiddenField ? hiddenField.value.trim() : '';
+    if (!categoryName) {
+      summaryEl.textContent = '请先选择或输入类别';
+      if (submitBtn) {
+        submitBtn.disabled = true;
+      }
+      return;
+    }
+    if (selectedAdds === 0 && selectedRemoves === 0) {
+      summaryEl.textContent = '未选择变更';
+      if (submitBtn) {
+        submitBtn.disabled = true;
+      }
+    } else {
+      summaryEl.textContent = '即将新增 ' + selectedAdds + ' / 取消 ' + selectedRemoves + ' 个物品';
+      if (submitBtn) {
+        submitBtn.disabled = false;
+      }
+    }
+  }
+
+  function resetModal() {
+    if (categorySelector) {
+      categorySelector.value = '';
+    }
+    if (hiddenField) {
+      hiddenField.value = '';
+    }
+    if (currentContainer) {
+      currentContainer.innerHTML = '<p class="text-muted mb-0">请选择类别查看现有物品。</p>';
+    }
+    if (currentCounter) {
+      currentCounter.textContent = '0 个';
+    }
+    if (summaryEl) {
+      summaryEl.textContent = '未选择变更';
+    }
+    if (submitBtn) {
+      submitBtn.disabled = true;
+    }
+    addCheckboxes.forEach(function (cb) { cb.checked = false; });
+  }
+
+  if (modalEl) {
+    modalEl.addEventListener('hidden.bs.modal', resetModal);
+    modalEl.addEventListener('shown.bs.modal', function () {
+      if (categorySelector) {
+        categorySelector.focus();
+      }
+    });
+  }
+
+  if (categorySelector) {
+    categorySelector.addEventListener('input', function () {
+      var name = (this.value || '').trim();
+      if (hiddenField) {
+        hiddenField.value = name;
+      }
+      rebuildCurrentList(name);
+      updateSummary();
+    });
+  }
+
+  if (availableContainer) {
+    availableContainer.addEventListener('change', function (evt) {
+      if (evt.target && evt.target.classList.contains('category-add-checkbox')) {
+        updateSummary();
+      }
+    });
+    updateAvailableCounter();
+  }
+  if (currentContainer) {
+    currentContainer.addEventListener('change', function (evt) {
+      if (evt.target && evt.target.classList.contains('category-remove-checkbox')) {
+        updateSummary();
+      }
+    });
+  }
+  if (manageForm) {
+    manageForm.addEventListener('submit', function (evt) {
+      var name = hiddenField ? hiddenField.value.trim() : '';
+      var addCount = availableContainer ? availableContainer.querySelectorAll('.category-add-checkbox:checked').length : 0;
+      var removeCount = currentContainer ? currentContainer.querySelectorAll('.category-remove-checkbox:checked').length : 0;
+      if (!name || (addCount === 0 && removeCount === 0)) {
+        evt.preventDefault();
+        updateSummary();
+      }
+    });
+  }
+})();
+</script>
 {% endblock %}

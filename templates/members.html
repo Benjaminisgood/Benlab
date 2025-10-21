@@ -28,13 +28,19 @@
 </style>
 
 <h3 class="mb-3">课题组成员</h3>
-<table class="table table-hover align-middle">
+<div class="position-relative mb-3">
+  <input type="text" class="form-control" id="membersFilterInput" placeholder="输入姓名 / 用户名 / 联系方式即时筛选">
+</div>
+<table class="table table-hover align-middle" id="membersTable">
   <thead class="table-light">
     <tr><th>姓名</th><th>用户名</th><th>联系方式</th><th>负责物品数</th><th>负责位置数</th></tr>
   </thead>
   <tbody>
     {% for mem in members %}
-    <tr>
+    {% set items_count = mem.items|length %}
+    {% set locations_count = mem.locations|length %}
+    {% set search_blob = ((mem.name or mem.username) ~ ' ' ~ mem.username ~ ' ' ~ (mem.contact or '') ~ ' ' ~ items_count ~ ' ' ~ locations_count) %}
+    <tr data-search="{{ search_blob|lower }}">
       <td>
         {% if mem.id == current_user.id %}
           <span class="badge bg-secondary identity-badge">我</span>
@@ -54,9 +60,9 @@
       <td>{{ mem.locations|length }}</td>
     </tr>
     {% endfor %}
-    {% if members|length == 0 %}
-    <tr><td colspan="5" class="text-center text-muted">暂无成员</td></tr>
-    {% endif %}
+    <tr id="membersEmptyRow" class="text-center text-muted {% if members|length > 0 %}d-none{% endif %}">
+      <td colspan="5">暂无成员</td>
+    </tr>
   </tbody>
 </table>
 
@@ -104,5 +110,49 @@
       });
     });
   });
+
+  (function () {
+    var filterInput = document.getElementById('membersFilterInput');
+    if (!filterInput) {
+      return;
+    }
+    var rows = Array.prototype.slice.call(document.querySelectorAll('#membersTable tbody tr[data-search]'));
+    var emptyRow = document.getElementById('membersEmptyRow');
+    filterInput.addEventListener('input', function () {
+      var keyword = (this.value || '').trim().toLowerCase();
+      var visible = 0;
+      rows.forEach(function (row) {
+        var haystack = row.getAttribute('data-search') || '';
+        var match = !keyword || haystack.indexOf(keyword) !== -1;
+        if (match) {
+          row.classList.remove('d-none');
+          visible += 1;
+        } else {
+          row.classList.add('d-none');
+        }
+      });
+      if (emptyRow) {
+        var cell = emptyRow.querySelector('td');
+        if (rows.length === 0) {
+          emptyRow.classList.remove('d-none');
+          if (cell) {
+            cell.textContent = '暂无成员';
+          }
+          return;
+        }
+        if (visible === 0) {
+          emptyRow.classList.remove('d-none');
+          if (cell) {
+            cell.textContent = '未找到匹配的成员';
+          }
+        } else {
+          emptyRow.classList.add('d-none');
+          if (cell) {
+            cell.textContent = '暂无成员';
+          }
+        }
+      }
+    });
+  })();
 </script>
 {% endblock %}

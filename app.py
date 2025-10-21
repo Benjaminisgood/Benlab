@@ -1731,7 +1731,7 @@ def delete_location(loc_id):
 def view_location(loc_id):
     location = Location.query.get_or_404(loc_id)
     # 获取该位置包含的所有物品（多对多）
-    items_at_location = list(location.items)
+    items_at_location = sorted(location.items, key=lambda item: item.name.lower())
     # 分类统计状态标签（如：用完、少量、充足）
     status_counter = Counter()
     for item in items_at_location:
@@ -1740,9 +1740,85 @@ def view_location(loc_id):
             for s in statuses:
                 status_counter[s.strip()] += 1
 
+    available_items = Item.query.filter(~Item.locations.any(Location.id == location.id)) \
+                                .order_by(Item.name.asc()).all()
+
     return render_template('location.html', location=location, 
                            items=items_at_location,
-                           status_counter=status_counter)
+                           status_counter=status_counter,
+                           available_items=available_items)
+
+
+@app.route('/locations/<int:loc_id>/items/manage', methods=['POST'])
+@login_required
+def manage_location_items(loc_id):
+    location = Location.query.get_or_404(loc_id)
+    action = request.form.get('action')
+    if action not in {'add_existing', 'remove'}:
+        flash('无效操作类型', 'danger')
+        return redirect(url_for('view_location', loc_id=loc_id))
+
+    if action == 'add_existing':
+        raw_ids = request.form.getlist('existing_item_ids')
+        selected_ids = {int(x) for x in raw_ids if x.isdigit()}
+        if not selected_ids:
+            flash('请选择要加入的位置物品', 'warning')
+            return redirect(url_for('view_location', loc_id=loc_id))
+        items_to_add = Item.query.filter(Item.id.in_(selected_ids)).all()
+        added_items = []
+        for item in items_to_add:
+            if location not in item.locations:
+                item.locations.append(location)
+                added_items.append(item)
+        if not added_items:
+            flash('所选物品已在该位置中', 'info')
+            return redirect(url_for('view_location', loc_id=loc_id))
+        now = datetime.utcnow()
+        location.last_modified = now
+        for item in added_items:
+            item.last_modified = now
+            log = Log(
+                user_id=current_user.id,
+                item_id=item.id,
+                location_id=location.id,
+                action_type="物品关联位置",
+                details=f"关联物品 {item.name} 至位置 {location.name}"
+            )
+            db.session.add(log)
+        db.session.commit()
+        flash(f"{len(added_items)} 个物品已加入此位置", 'success')
+        return redirect(url_for('view_location', loc_id=loc_id))
+
+    # action == 'remove'
+    raw_ids = request.form.getlist('remove_item_ids')
+    selected_ids = {int(x) for x in raw_ids if x.isdigit()}
+    if not selected_ids:
+        flash('请选择要移除的物品', 'warning')
+        return redirect(url_for('view_location', loc_id=loc_id))
+    items_to_remove = Item.query.filter(Item.id.in_(selected_ids)).all()
+    removed_items = []
+    for item in items_to_remove:
+        if location in item.locations:
+            item.locations.remove(location)
+            removed_items.append(item)
+    if not removed_items:
+        flash('未移除任何物品', 'info')
+        return redirect(url_for('view_location', loc_id=loc_id))
+    now = datetime.utcnow()
+    location.last_modified = now
+    for item in removed_items:
+        item.last_modified = now
+        log = Log(
+            user_id=current_user.id,
+            item_id=item.id,
+            location_id=location.id,
+            action_type="物品移出位置",
+            details=f"将物品 {item.name} 从位置 {location.name} 移除"
+        )
+        db.session.add(log)
+    db.session.commit()
+    flash(f"{len(removed_items)} 个物品已从该位置移除", 'success')
+    return redirect(url_for('view_location', loc_id=loc_id))
 
 
 @app.route('/members')

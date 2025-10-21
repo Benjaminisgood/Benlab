@@ -79,9 +79,6 @@
         </ul>
       </li>
     </ul>
-    <a href="{{ url_for('add_item', loc_id=location.id) }}" class="btn btn-sm btn-success mb-3">
-      ➕ 在此位置添加物品
-    </a>
   </div>
   <div class="col-md-6">
     {% set image_urls = location_image_urls(location) %}
@@ -117,27 +114,153 @@
 </div>
 
 <h5 class="mt-4">包含的物品</h5>
-<ul class="list-group">
-  {% for it in items %}
-    <li class="list-group-item d-flex justify-content-between align-items-center">
-      <a href="{{ url_for('item_detail', item_id=it.id) }}">{{ it.name }}</a>
-      <div>
-        {% if it.stock_status %}
-          <span class="badge bg-secondary me-2">{{ it.stock_status }}</span>
-        {% endif %}
-        {% if it.responsible_member %}
-          <small class="text-muted">{{ it.responsible_member.name }}</small>
-        {% endif %}
-      </div>
-    </li>
-  {% else %}
-    <li class="list-group-item text-muted">（此位置暂无物品）</li>
-  {% endfor %}
-</ul>
+<form method="post" action="{{ url_for('manage_location_items', loc_id=location.id) }}" id="removeItemsForm" class="mb-3">
+  <input type="hidden" name="action" value="remove">
+  <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+    <div class="d-flex flex-wrap align-items-center gap-2">
+      <button type="button" class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addExistingItemsModal" {% if not available_items %}disabled{% endif %}>
+        ➕ 加入已有物品
+      </button>
+      <a href="{{ url_for('add_item', loc_id=location.id) }}" class="btn btn-outline-success btn-sm">
+        🆕 新建物品并加入
+      </a>
+      {% if not available_items %}
+        <span class="text-muted small">暂无可加入的现有物品</span>
+      {% endif %}
+    </div>
+    <div class="d-flex align-items-center gap-2">
+      <button type="submit" class="btn btn-outline-danger btn-sm" id="removeSelectedBtn" disabled>移除选中物品</button>
+      <span class="text-muted small" id="selectedCountHint">未选择物品</span>
+    </div>
+  </div>
+  <ul class="list-group" id="locationItemsList">
+    {% for it in items %}
+      <li class="list-group-item">
+        <div class="d-flex align-items-center gap-3">
+          <div class="form-check mb-0">
+            <input class="form-check-input remove-item-checkbox" type="checkbox" name="remove_item_ids" value="{{ it.id }}" id="removeItem{{ it.id }}" aria-label="选择移除 {{ it.name }}">
+          </div>
+          <div class="flex-grow-1 d-flex justify-content-between align-items-center gap-3">
+            <a href="{{ url_for('item_detail', item_id=it.id) }}" class="text-decoration-none fw-semibold">{{ it.name }}</a>
+            <div class="text-end">
+              {% if it.stock_status %}
+                <span class="badge bg-secondary me-2">{{ it.stock_status }}</span>
+              {% endif %}
+              {% if it.responsible_member %}
+                <small class="text-muted">{{ it.responsible_member.name }}</small>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </li>
+    {% else %}
+      <li class="list-group-item text-muted text-center">（此位置暂无物品）</li>
+    {% endfor %}
+  </ul>
+</form>
+
+<div class="modal fade" id="addExistingItemsModal" tabindex="-1" aria-labelledby="addExistingItemsLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable modal-lg">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('manage_location_items', loc_id=location.id) }}">
+        <input type="hidden" name="action" value="add_existing">
+        <div class="modal-header">
+          <h5 class="modal-title" id="addExistingItemsLabel">加入已有物品</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+        </div>
+        <div class="modal-body">
+          {% if available_items %}
+            <p class="text-muted small mb-2">勾选后点击“加入所选”即可批量加入，支持名称关键词搜索。</p>
+            <input type="text" class="form-control form-control-sm mb-3" id="existingItemsSearch" placeholder="搜索物品名称">
+            <div class="border rounded p-2 existing-items-container" style="max-height: 320px; overflow-y: auto;">
+              {% for item in available_items %}
+                <div class="form-check existing-item-row py-1" data-label="{{ item.name|lower }}">
+                  <input class="form-check-input existing-item-checkbox" type="checkbox" value="{{ item.id }}" name="existing_item_ids" id="availableItem{{ item.id }}">
+                  <label class="form-check-label d-flex justify-content-between align-items-center gap-2" for="availableItem{{ item.id }}">
+                    <span>{{ item.name }}</span>
+                    {% if item.stock_status %}
+                      <span class="badge bg-secondary">{{ item.stock_status }}</span>
+                    {% endif %}
+                  </label>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="text-muted mb-0">暂无可添加的其他物品，请先创建新物品。</p>
+          {% endif %}
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+          <button type="submit" class="btn btn-primary" id="confirmAddExistingBtn" {% if not available_items %}disabled{% endif %}>加入所选</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 <script>
 (function () {
+  var removeForm = document.getElementById('removeItemsForm');
+  if (removeForm) {
+    var removeButton = document.getElementById('removeSelectedBtn');
+    var selectedHint = document.getElementById('selectedCountHint');
+    var itemCheckboxes = Array.prototype.slice.call(removeForm.querySelectorAll('.remove-item-checkbox'));
+    var updateRemoveState = function () {
+      var selected = itemCheckboxes.filter(function (cb) { return cb.checked; }).length;
+      if (removeButton) {
+        removeButton.disabled = selected === 0;
+      }
+      if (selectedHint) {
+        selectedHint.textContent = selected ? ('已选择 ' + selected + ' 个物品') : '未选择物品';
+      }
+    };
+    itemCheckboxes.forEach(function (cb) {
+      cb.addEventListener('change', updateRemoveState);
+    });
+    updateRemoveState();
+    removeForm.addEventListener('submit', function (evt) {
+      if (removeButton && removeButton.disabled) {
+        evt.preventDefault();
+      }
+    });
+  }
+
+  var modalEl = document.getElementById('addExistingItemsModal');
+  if (modalEl) {
+    var confirmBtn = document.getElementById('confirmAddExistingBtn');
+    var existingSearch = document.getElementById('existingItemsSearch');
+    var existingCheckboxes = Array.prototype.slice.call(modalEl.querySelectorAll('.existing-item-checkbox'));
+    var existingRows = Array.prototype.slice.call(modalEl.querySelectorAll('.existing-item-row'));
+    var updateConfirmState = function () {
+      if (confirmBtn) {
+        var anySelected = existingCheckboxes.some(function (cb) { return cb.checked; });
+        confirmBtn.disabled = !anySelected;
+      }
+    };
+    existingCheckboxes.forEach(function (cb) {
+      cb.addEventListener('change', updateConfirmState);
+    });
+    updateConfirmState();
+    if (existingSearch) {
+      existingSearch.addEventListener('input', function () {
+        var term = existingSearch.value.trim().toLowerCase();
+        existingRows.forEach(function (row) {
+          var label = (row.getAttribute('data-label') || '').toLowerCase();
+          row.style.display = term ? (label.indexOf(term) !== -1 ? '' : 'none') : '';
+        });
+      });
+    }
+    modalEl.addEventListener('hidden.bs.modal', function () {
+      existingCheckboxes.forEach(function (cb) { cb.checked = false; });
+      if (existingSearch) {
+        existingSearch.value = '';
+      }
+      existingRows.forEach(function (row) { row.style.display = ''; });
+      updateConfirmState();
+    });
+  }
+
   try {
     var url = document.getElementById('locPermalink').value || window.location.href;
     var box = document.getElementById('locQrBox');

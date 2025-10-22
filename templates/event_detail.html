@@ -87,6 +87,48 @@
         {% endif %}
       </div>
     </div>
+    <div class="card mt-3">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>留言讨论</span>
+        <span class="badge bg-light text-dark border">{{ (feedback_entries|default([]))|length }}</span>
+      </div>
+      <div class="list-group list-group-flush">
+        {% for fb in feedback_entries|default([]) %}
+        <div class="list-group-item">
+          <div class="d-flex justify-content-between align-items-start">
+            <div>
+              {% if fb.sender_url %}
+                <a href="{{ fb.sender_url }}" class="fw-semibold text-decoration-none">{{ fb.sender_name }}</a>
+              {% else %}
+                <span class="fw-semibold">{{ fb.sender_name }}</span>
+              {% endif %}
+              {% if fb.sentiment == 'positive' %}
+                <span class="badge bg-success ms-2">好评</span>
+              {% elif fb.sentiment == 'doubt' %}
+                <span class="badge bg-warning text-dark ms-2">待关注</span>
+              {% endif %}
+            </div>
+            <small class="text-muted">{{ fb.timestamp_display }}</small>
+          </div>
+          <div class="mt-2 rich-text-content">{{ fb.html|safe }}</div>
+        </div>
+        {% else %}
+        <div class="list-group-item text-muted">暂时没有留言，欢迎率先分享想法。</div>
+        {% endfor %}
+      </div>
+      <div class="card-footer">
+        <form method="post" action="{{ feedback_post_url }}">
+          <div class="mb-3">
+            <label for="eventFeedbackContent" class="form-label">发表讨论</label>
+            <textarea id="eventFeedbackContent" name="content" class="form-control" rows="2" required placeholder="写下你的建议或提醒，支持链接、@提及、#标签、!!好评、??质疑等语法"></textarea>
+          </div>
+          <div class="d-flex justify-content-between align-items-center">
+            <small class="text-muted">留言提交后将记录作者与时间，所有成员可见且不可编辑。</small>
+            <button type="submit" class="btn btn-primary btn-sm">发布留言</button>
+          </div>
+        </form>
+      </div>
+    </div>
   </div>
   <div class="col-lg-4">
     <div class="card mb-3">

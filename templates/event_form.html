@@ -11,6 +11,9 @@
 </div>
 
 <form method="post" class="needs-validation" novalidate enctype="multipart/form-data">
+  {% set selected_locations = form_state.location_ids | list %}
+  {% set selected_items = form_state.item_ids | list %}
+  {% set selected_participants = form_state.participant_ids | list %}
   <div class="row g-3">
     <div class="col-md-8">
       <div class="mb-3">
@@ -87,57 +90,252 @@
         </div>
       </div>
       <div class="mb-3">
-        <label class="form-label" for="location_ids">活动地点</label>
-        <select class="form-select" id="location_ids" name="location_ids" multiple size="6">
-          {% set selected_locations = form_state.location_ids | list %}
-          {% for location in locations %}
-          <option value="{{ location.id }}" {% if location.id in selected_locations %}selected{% endif %}>{{ location.name }}</option>
-          {% endfor %}
-        </select>
-        <div class="form-text">可多选，按住 Ctrl/⌘ 或 Shift 进行多选。</div>
+        <label class="form-label">活动地点</label>
+        <div class="d-flex flex-wrap align-items-center gap-2">
+          <div id="eventLocationsSummary" class="d-flex flex-wrap gap-2"></div>
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#eventLocationsModal">管理地点</button>
+        </div>
+        <div class="form-text text-muted">选择活动涉及的地点，可多选。</div>
       </div>
       <div class="mb-3">
-        <label class="form-label" for="item_ids">所需物品</label>
-        <select class="form-select" id="item_ids" name="item_ids" multiple size="6">
-          {% set selected_items = form_state.item_ids | list %}
-          {% for item in items %}
-          <option value="{{ item.id }}" {% if item.id in selected_items %}selected{% endif %}>{{ item.name }}</option>
-          {% endfor %}
-        </select>
+        <label class="form-label">所需物品</label>
+        <div class="d-flex flex-wrap align-items-center gap-2">
+          <div id="eventItemsSummary" class="d-flex flex-wrap gap-2"></div>
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#eventItemsModal">管理物品</button>
+        </div>
+        <div class="form-text text-muted">列出事项需要提前准备的物品。</div>
       </div>
       <div class="mb-3" id="participantWrapper">
-        <label class="form-label" for="participant_ids">参与成员</label>
-        <select class="form-select" id="participant_ids" name="participant_ids" multiple size="6">
-          {% set selected_participants = form_state.participant_ids | list %}
-          {% for member in members %}
-          {% if member.id != current_user.id %}
-          <option value="{{ member.id }}" {% if member.id in selected_participants %}selected{% endif %}>{{ member.name or member.username }}</option>
-          {% endif %}
+        <label class="form-label">参与成员</label>
+        <div class="d-flex flex-wrap align-items-center gap-2">
+          <div id="eventParticipantsSummary" class="d-flex flex-wrap gap-2"></div>
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#eventParticipantsModal">管理成员</button>
+        </div>
+        <div class="form-text text-muted">内部事项需指定参与人；公开事项可预先指定默认参与者，其他成员可在详情页报名。</div>
+      </div>
+    </div>
+</div>
+<div class="modal fade" id="eventLocationsModal" tabindex="-1" aria-labelledby="eventLocationsModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="eventLocationsModalLabel">选择活动地点</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+      </div>
+      <div class="modal-body">
+        <input type="search" class="form-control form-control-sm mb-3" id="eventLocationsSearch" placeholder="搜索地点名称">
+        <div class="border rounded p-2" style="max-height: 320px; overflow-y: auto;">
+          {% for location in locations %}
+          <div class="form-check event-location-row py-1" data-label="{{ location.name|lower }}">
+            <input class="form-check-input event-location-checkbox" type="checkbox" name="location_ids" value="{{ location.id }}"
+                   id="eventLocation{{ location.id }}" data-label="{{ location.name }}"
+                   {% if location.id in selected_locations %}checked{% endif %}>
+            <label class="form-check-label d-flex justify-content-between align-items-center" for="eventLocation{{ location.id }}">
+              <span>{{ location.name }}</span>
+              {% if location.clean_status %}
+                <span class="badge bg-light text-dark border ms-2">{{ location.clean_status }}</span>
+              {% endif %}
+            </label>
+          </div>
           {% endfor %}
-        </select>
-        <div class="form-text">内部事项需指定参与人；公开事项可预先指定默认参与者，其他成员可在详情页报名。</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="eventLocationsClearBtn">清除全部</button>
+        <button type="button" class="btn btn-primary btn-sm" data-bs-dismiss="modal">完成</button>
       </div>
     </div>
   </div>
-  <div class="mt-4 d-flex justify-content-end gap-2">
-    <a class="btn btn-outline-secondary" href="{{ url_for('events_overview') }}">取消</a>
-    <button type="submit" class="btn btn-primary">{{ '保存修改' if is_edit else '创建事项' }}</button>
+</div>
+<div class="modal fade" id="eventItemsModal" tabindex="-1" aria-labelledby="eventItemsModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="eventItemsModalLabel">选择所需物品</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+      </div>
+      <div class="modal-body">
+        <input type="search" class="form-control form-control-sm mb-3" id="eventItemsSearch" placeholder="搜索物品名称">
+        <div class="border rounded p-2" style="max-height: 320px; overflow-y: auto;">
+          {% for item in items %}
+          <div class="form-check event-item-row py-1" data-label="{{ item.name|lower }}">
+            <input class="form-check-input event-item-checkbox" type="checkbox" name="item_ids" value="{{ item.id }}"
+                   id="eventItem{{ item.id }}" data-label="{{ item.name }}"
+                   {% if item.id in selected_items %}checked{% endif %}>
+            <label class="form-check-label d-flex justify-content-between align-items-center" for="eventItem{{ item.id }}">
+              <span>{{ item.name }}</span>
+              {% if item.stock_status %}
+                <span class="badge bg-light text-dark border ms-2">{{ item.stock_status }}</span>
+              {% endif %}
+            </label>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="eventItemsClearBtn">清除全部</button>
+        <button type="button" class="btn btn-primary btn-sm" data-bs-dismiss="modal">完成</button>
+      </div>
+    </div>
   </div>
+</div>
+<div class="modal fade" id="eventParticipantsModal" tabindex="-1" aria-labelledby="eventParticipantsModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="eventParticipantsModalLabel">选择参与成员</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+      </div>
+      <div class="modal-body">
+        <input type="search" class="form-control form-control-sm mb-3" id="eventParticipantsSearch" placeholder="搜索姓名或用户名">
+        <div class="border rounded p-2" style="max-height: 320px; overflow-y: auto;">
+          {% for member in members %}
+          {% if member.id != current_user.id %}
+          <div class="form-check event-participant-row py-1" data-label="{{ (member.name or member.username)|lower }}">
+            <input class="form-check-input event-participant-checkbox" type="checkbox" name="participant_ids" value="{{ member.id }}"
+                   id="eventParticipant{{ member.id }}" data-label="{{ member.name or member.username }}"
+                   {% if member.id in selected_participants %}checked{% endif %}>
+            <label class="form-check-label d-flex justify-content-between align-items-center" for="eventParticipant{{ member.id }}">
+              <span>{{ member.name or member.username }}</span>
+              {% if member.username and member.name and member.username != member.name %}
+                <small class="text-muted">@{{ member.username }}</small>
+              {% endif %}
+            </label>
+          </div>
+          {% endif %}
+          {% endfor %}
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="eventParticipantsClearBtn">清除全部</button>
+        <button type="button" class="btn btn-primary btn-sm" data-bs-dismiss="modal">完成</button>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="mt-4 d-flex justify-content-end gap-2">
+  <a class="btn btn-outline-secondary" href="{{ url_for('events_overview') }}">取消</a>
+  <button type="submit" class="btn btn-primary">{{ '保存修改' if is_edit else '创建事项' }}</button>
+</div>
 </form>
 
 <script>
   const visibilityRadios = document.querySelectorAll('.visibility-toggle');
   const participantWrapper = document.getElementById('participantWrapper');
-  const participantSelect = document.getElementById('participant_ids');
+  const participantCheckboxes = Array.prototype.slice.call(document.querySelectorAll('.event-participant-checkbox'));
 
-  function toggleParticipants() {
-    const value = document.querySelector('.visibility-toggle:checked').value;
-    const isVisible = value !== 'personal';
-    participantWrapper.style.display = isVisible ? 'block' : 'none';
-    participantSelect.disabled = !isVisible;
+  function initSelectionControl(config) {
+    const summary = document.getElementById(config.summaryId);
+    const modal = document.getElementById(config.modalId);
+    if (!summary) {
+      return null;
+    }
+    if (!modal) {
+      summary.innerHTML = '<span class="text-muted">' + (config.emptyText || '未选择') + '</span>';
+      return null;
+    }
+    const searchInput = config.searchInputId ? document.getElementById(config.searchInputId) : null;
+    const clearBtn = config.clearBtnId ? document.getElementById(config.clearBtnId) : null;
+    const checkboxes = Array.prototype.slice.call(modal.querySelectorAll(config.checkboxSelector));
+    const rows = config.rowSelector ? Array.prototype.slice.call(modal.querySelectorAll(config.rowSelector)) : [];
+    const emptyText = config.emptyText || '未选择';
+    const updateSummary = function () {
+      const selected = checkboxes.filter(function (cb) { return cb.checked && !cb.disabled; });
+      if (!selected.length) {
+        summary.innerHTML = '<span class="text-muted">' + emptyText + '</span>';
+      } else {
+        summary.innerHTML = selected.map(function (cb) {
+          const label = cb.getAttribute('data-label') || cb.value;
+          return '<span class="badge bg-light text-dark border me-1">' + label + '</span>';
+        }).join('');
+      }
+    };
+    checkboxes.forEach(function (cb) {
+      cb.addEventListener('change', updateSummary);
+    });
+    if (searchInput) {
+      searchInput.addEventListener('input', function () {
+        const term = searchInput.value.trim().toLowerCase();
+        rows.forEach(function (row) {
+          const label = (row.getAttribute('data-label') || '').toLowerCase();
+          row.style.display = term ? (label.indexOf(term) !== -1 ? '' : 'none') : '';
+        });
+      });
+    }
+    if (clearBtn) {
+      clearBtn.addEventListener('click', function () {
+        checkboxes.forEach(function (cb) { if (!cb.disabled) { cb.checked = false; } });
+        updateSummary();
+      });
+    }
+    modal.addEventListener('hidden.bs.modal', function () {
+      if (searchInput) {
+        searchInput.value = '';
+      }
+      rows.forEach(function (row) { row.style.display = ''; });
+      updateSummary();
+    });
+    modal.addEventListener('shown.bs.modal', function () {
+      if (searchInput) {
+        searchInput.focus();
+      }
+    });
+    updateSummary();
+    return { checkboxes: checkboxes, updateSummary: updateSummary, summary: summary, emptyText: emptyText };
   }
 
-  visibilityRadios.forEach(radio => radio.addEventListener('change', toggleParticipants));
+  const locationsControl = initSelectionControl({
+    summaryId: 'eventLocationsSummary',
+    modalId: 'eventLocationsModal',
+    checkboxSelector: '.event-location-checkbox',
+    rowSelector: '.event-location-row',
+    searchInputId: 'eventLocationsSearch',
+    clearBtnId: 'eventLocationsClearBtn',
+    emptyText: '未选择地点'
+  });
+
+  const itemsControl = initSelectionControl({
+    summaryId: 'eventItemsSummary',
+    modalId: 'eventItemsModal',
+    checkboxSelector: '.event-item-checkbox',
+    rowSelector: '.event-item-row',
+    searchInputId: 'eventItemsSearch',
+    clearBtnId: 'eventItemsClearBtn',
+    emptyText: '未选择物品'
+  });
+
+  const participantsControl = initSelectionControl({
+    summaryId: 'eventParticipantsSummary',
+    modalId: 'eventParticipantsModal',
+    checkboxSelector: '.event-participant-checkbox',
+    rowSelector: '.event-participant-row',
+    searchInputId: 'eventParticipantsSearch',
+    clearBtnId: 'eventParticipantsClearBtn',
+    emptyText: '未选择成员'
+  });
+
+  function toggleParticipants() {
+    const checked = document.querySelector('.visibility-toggle:checked');
+    if (!participantWrapper || !checked) {
+      return;
+    }
+    const isVisible = checked.value !== 'personal';
+    participantWrapper.style.display = isVisible ? 'block' : 'none';
+    participantCheckboxes.forEach(function (cb) {
+      cb.disabled = !isVisible;
+    });
+    if (participantsControl) {
+      if (isVisible) {
+        participantsControl.updateSummary();
+      } else {
+        participantsControl.summary.innerHTML = '<span class="text-muted">个人事项无需指定成员</span>';
+      }
+    }
+  }
+
+  visibilityRadios.forEach(function (radio) {
+    radio.addEventListener('change', toggleParticipants);
+  });
   toggleParticipants();
 </script>
 {% endblock %}

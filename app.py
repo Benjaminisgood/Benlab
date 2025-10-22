@@ -8,7 +8,7 @@ from flask_login import LoginManager, UserMixin, login_user, logout_user, login_
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from collections import Counter
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, load_only
 from sqlalchemy import or_, func, text, inspect
 from flask_migrate import Migrate
 from markupsafe import Markup, escape
@@ -129,6 +129,146 @@ def _extract_external_urls(raw_value):
                 seen.add(candidate)
     return urls
 
+_LINK_PATTERN = re.compile(r'(?P<url>https?://[^\s<>"\'`]+)', re.IGNORECASE)
+_HASHTAG_PATTERN = re.compile(r'(?<![\w#])#(?P<tag>[\w\u4e00-\u9fa5-]+)')
+_MENTION_PATTERN = re.compile(r'(?<![\w@])@(?P<handle>[\w\u4e00-\u9fa5-]+)')
+_SENTIMENT_GOOD_TOKEN = '__SENT_POS__'
+_SENTIMENT_DOUBT_TOKEN = '__SENT_QUEST__'
+
+
+def render_rich_text(raw_text, mention_lookup=None):
+    """Convert plain text into HTML with clickable links, tags, and mentions."""
+    if not raw_text:
+        return Markup('')
+    safe_text = escape(raw_text)
+    html = str(safe_text)
+    html = html.replace('!!', _SENTIMENT_GOOD_TOKEN).replace('??', _SENTIMENT_DOUBT_TOKEN)
+
+    def link_repl(match):
+        url = match.group('url')
+        return f'<a href="{escape(url)}" class="link-chip" target="_blank" rel="noopener">{escape(url)}</a>'
+
+    html = _LINK_PATTERN.sub(link_repl, html)
+
+    def hashtag_repl(match):
+        tag = match.group('tag')
+        return f'<span class="tag-chip">#{escape(tag)}</span>'
+
+    html = _HASHTAG_PATTERN.sub(hashtag_repl, html)
+
+    def mention_repl(match):
+        handle = match.group('handle')
+        key = handle.lower()
+        member_id = None
+        if mention_lookup:
+            member_id = mention_lookup.get(key)
+        label = escape(handle)
+        if member_id:
+            href = url_for('profile', member_id=member_id)
+            return f'<a href="{escape(href)}" class="mention-chip">@{label}</a>'
+        return f'<span class="mention-chip">@{label}</span>'
+
+    html = _MENTION_PATTERN.sub(mention_repl, html)
+    html = html.replace(_SENTIMENT_GOOD_TOKEN, '<span class="sentiment-chip sentiment-good">!!</span>')
+    html = html.replace(_SENTIMENT_DOUBT_TOKEN, '<span class="sentiment-chip sentiment-doubt">??</span>')
+    return Markup(html.replace('\n', '<br>'))
+
+
+def load_feedback_stream(raw_text):
+    """Load serialized feedback entries (JSON lines) into Python dicts."""
+    entries = []
+    if not raw_text:
+        return entries
+    for line in raw_text.splitlines():
+        data = line.strip()
+        if not data:
+            continue
+        try:
+            parsed = json.loads(data)
+            if isinstance(parsed, dict):
+                entries.append(parsed)
+        except json.JSONDecodeError:
+            entries.append({'content': data})
+    return entries
+
+
+def append_feedback_entry(target, sender, content, limit=200):
+    """Append a feedback entry to a model that has a feedback_log column."""
+    if not content or not content.strip():
+        return None
+    current = load_feedback_stream(getattr(target, 'feedback_log', '') or '')
+    now = datetime.utcnow()
+    entry = {
+        'ts': now.isoformat(),
+        'sid': sender.id if sender else None,
+        'sn': (sender.name or sender.username) if sender else None,
+        'content': content.strip()
+    }
+    current.append(entry)
+    serialized = '\n'.join(json.dumps(item, ensure_ascii=False) for item in current[-limit:])
+    target.feedback_log = serialized
+    return entry
+
+
+def _parse_iso_timestamp(raw):
+    if not raw:
+        return None
+    try:
+        if raw.endswith('Z'):
+            raw = raw[:-1] + '+00:00'
+        return datetime.fromisoformat(raw)
+    except (ValueError, TypeError):
+        return None
+
+
+def prepare_feedback_entries(raw_text, member_index, mention_lookup):
+    """Convert stored feedback text into rich entries for templates."""
+    entries = []
+    for data in load_feedback_stream(raw_text):
+        content = (data.get('content') or '').strip()
+        if not content:
+            continue
+        ts = _parse_iso_timestamp(data.get('ts'))
+        sender_id = data.get('sid')
+        sender_name = data.get('sn')
+        member = member_index.get(sender_id) if sender_id else None
+        display_name = None
+        sender_url = None
+        if member:
+            display_name = member.name or member.username
+            sender_url = url_for('profile', member_id=member.id)
+        else:
+            display_name = sender_name or '匿名'
+        sentiment = None
+        if '!!' in content:
+            sentiment = 'positive'
+        elif '??' in content:
+            sentiment = 'doubt'
+        entries.append({
+            'html': render_rich_text(content, mention_lookup),
+            'timestamp': ts,
+            'timestamp_display': ts.strftime('%Y-%m-%d %H:%M') if ts else '未知时间',
+            'sender_id': sender_id,
+            'sender_name': display_name,
+            'sender_url': sender_url,
+            'sentiment': sentiment
+        })
+    entries.sort(key=lambda item: item['timestamp'] or datetime.min, reverse=True)
+    return entries
+
+
+def build_member_lookup():
+    """Return dictionaries for quick member lookup and mention resolution."""
+    members = Member.query.options(load_only(Member.id, Member.name, Member.username)).all()
+    member_index = {m.id: m for m in members}
+    mention_lookup = {}
+    for m in members:
+        if m.name:
+            mention_lookup[m.name.lower()] = m.id
+        if m.username:
+            mention_lookup[m.username.lower()] = m.id
+    return member_index, mention_lookup
+
 
 def save_uploaded_image(file_storage):
     """Persist an uploaded image and return the stored filename."""
@@ -166,6 +306,7 @@ class Member(UserMixin, db.Model):
     contact = db.Column(db.String(100))                          # 联系方式（邮箱/电话）
     photo = db.Column(db.String(200))                            # 头像图片路径
     notes = db.Column(db.Text)                                   # 备注/个人展示板
+    feedback_log = db.Column(db.Text, default='')                # 他人评价/留言流（JSON lines）
     last_modified = db.Column(db.DateTime, default=datetime.utcnow)  # 最后修改时间
     # 关系：成员负责的物品，以及发送/收到的消息和日志
     items = db.relationship('Item', backref='responsible_member', lazy=True, foreign_keys='Item.responsible_id')
@@ -343,6 +484,7 @@ class Event(db.Model):
     start_time = db.Column(db.DateTime)
     end_time = db.Column(db.DateTime)
     detail_link = db.Column(db.String(255))
+    feedback_log = db.Column(db.Text, default='')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -576,6 +718,16 @@ with app.app_context():
         if 'event_id' not in log_cols:
             with db.engine.begin() as conn:
                 conn.execute(text('ALTER TABLE logs ADD COLUMN event_id INTEGER'))
+    if 'members' in table_names:
+        member_cols = {col['name'] for col in inspector.get_columns('members')}
+        if 'feedback_log' not in member_cols:
+            with db.engine.begin() as conn:
+                conn.execute(text('ALTER TABLE members ADD COLUMN feedback_log TEXT'))
+    if 'events' in table_names:
+        event_cols = {col['name'] for col in inspector.get_columns('events')}
+        if 'feedback_log' not in event_cols:
+            with db.engine.begin() as conn:
+                conn.execute(text('ALTER TABLE events ADD COLUMN feedback_log TEXT'))
     if Member.query.count() == 0:
         default_user = Member(name="Admin User", username="admin", contact="admin@example.com", notes="Default admin user")
         default_user.set_password("admin")
@@ -1034,6 +1186,8 @@ def event_detail(event_id):
     )
     linked_description, missing_items, missing_locations = build_event_view_model(event)
     allow_join = event.can_join(current_user)
+    member_index, mention_lookup = build_member_lookup()
+    feedback_entries = prepare_feedback_entries(event.feedback_log, member_index, mention_lookup)
     return render_template(
         'event_detail.html',
         event=event,
@@ -1041,8 +1195,27 @@ def event_detail(event_id):
         participant_links=participant_links,
         missing_items=missing_items,
         missing_locations=missing_locations,
-        allow_join=allow_join
+        allow_join=allow_join,
+        feedback_entries=feedback_entries,
+        feedback_post_url=url_for('post_event_feedback', event_id=event.id)
     )
+
+
+@app.route('/events/<int:event_id>/feedback', methods=['POST'])
+@login_required
+def post_event_feedback(event_id):
+    event = _load_event_for_edit(event_id)
+    if not event.can_view(current_user):
+        abort(403)
+    content = request.form.get('content', '')
+    if content and content.strip():
+        append_feedback_entry(event, current_user, content.strip())
+        event.touch()
+        db.session.commit()
+        flash('留言已发布', 'success')
+    else:
+        flash('留言内容不能为空', 'warning')
+    return redirect(url_for('event_detail', event_id=event_id))
 
 
 @app.route('/events/<int:event_id>/edit', methods=['GET', 'POST'])
@@ -1846,11 +2019,38 @@ def view_location(loc_id):
     items_at_location = sorted(location.items, key=lambda item: item.name.lower())
     # 分类统计状态标签（如：用完、少量、充足）
     status_counter = Counter()
+    category_counter = Counter()
+    feature_counter = Counter()
+    responsible_counter = Counter()
+    responsible_map = {}
     for item in items_at_location:
         if item.stock_status:
             statuses = item.stock_status.split(',')  # 支持多个状态
             for s in statuses:
-                status_counter[s.strip()] += 1
+                label = s.strip()
+                if label:
+                    status_counter[label] += 1
+        if item.category:
+            category_counter[item.category.strip()] += 1
+        if item.features:
+            feature_counter[item.features.strip()] += 1
+        if item.responsible_member:
+            responsible_counter[item.responsible_member.id] += 1
+            responsible_map[item.responsible_member.id] = item.responsible_member
+
+    def _counter_to_stats(counter, limit=None):
+        pairs = sorted(counter.items(), key=lambda x: (-x[1], x[0]))
+        if limit:
+            pairs = pairs[:limit]
+        return [{'label': label, 'count': count} for label, count in pairs]
+
+    status_stats = _counter_to_stats(status_counter)
+    category_stats = _counter_to_stats(category_counter, limit=8)
+    feature_stats = _counter_to_stats(feature_counter, limit=8)
+    responsible_stats = []
+    for mid, count in sorted(responsible_counter.items(), key=lambda x: (-x[1], (responsible_map[x[0]].name or responsible_map[x[0]].username or '').lower())):
+        member = responsible_map[mid]
+        responsible_stats.append({'member': member, 'count': count})
 
     available_items = Item.query.filter(~Item.locations.any(Location.id == location.id)) \
                                 .order_by(Item.name.asc()).all()
@@ -1858,6 +2058,10 @@ def view_location(loc_id):
     return render_template('location.html', location=location, 
                            items=items_at_location,
                            status_counter=status_counter,
+                           status_stats=status_stats,
+                           category_stats=category_stats,
+                           feature_stats=feature_stats,
+                           responsible_stats=responsible_stats,
                            available_items=available_items)
 
 
@@ -1987,6 +2191,10 @@ def profile(member_id):
 
     any_item_empty = any(it.stock_status and '用完' in it.stock_status for it in items_resp)
     any_location_dirty = any(loc.clean_status == '脏/报修' for loc in locations_resp)
+    items_preview = items_resp[:5]
+    items_extra = items_resp[5:]
+    locations_preview = locations_resp[:5]
+    locations_extra = locations_resp[5:]
 
     # 相关事项（区分进行中与历史）
     events_upcoming = []
@@ -2024,8 +2232,12 @@ def profile(member_id):
                             Log.user_id != member.id
                         ) \
                         .order_by(Log.timestamp.desc()).limit(5).all()
-    # 留言板消息列表（发送给该成员的留言）
-    messages = Message.query.filter_by(receiver_id=member.id).order_by(Message.timestamp.desc()).limit(10).all()
+    member_index, mention_lookup = build_member_lookup()
+    profile_notes_html = None
+    if member.notes:
+        profile_notes_html = render_rich_text(member.notes, mention_lookup)
+    feedback_entries = prepare_feedback_entries(member.feedback_log, member_index, mention_lookup)
+
     # 当前用户自己的操作记录（仅查看自己的主页时显示）
     user_logs = []
     if member.id == current_user.id:
@@ -2034,13 +2246,18 @@ def profile(member_id):
     if member.id != current_user.id:
         is_following = member in current_user.following
 
-    return render_template('profile.html', 
-                           profile_user=member, 
-                           items_resp=items_resp, 
-                           locations_resp=locations_resp, 
-                           notifications=notifications, 
-                           messages=messages, 
+    return render_template('profile.html',
+                           profile_user=member,
+                           items_resp=items_resp,
+                           locations_resp=locations_resp,
+                           notifications=notifications,
                            user_logs=user_logs,
+                           profile_notes_html=profile_notes_html,
+                           feedback_entries=feedback_entries,
+                           items_preview=items_preview,
+                           items_extra=items_extra,
+                           locations_preview=locations_preview,
+                           locations_extra=locations_extra,
                            any_item_empty=any_item_empty,
                            any_location_dirty=any_location_dirty,
                            events_upcoming=events_upcoming,
@@ -2083,8 +2300,8 @@ def post_message(member_id):
     receiver = Member.query.get_or_404(member_id)
     content = request.form.get('content')
     if content and content.strip() != '':
-        msg = Message(sender_id=current_user.id, receiver_id=receiver.id, content=content.strip())
-        db.session.add(msg)
+        append_feedback_entry(receiver, current_user, content.strip())
+        receiver.last_modified = datetime.utcnow()
         db.session.commit()
         flash('留言已发布', 'success')
     return redirect(url_for('profile', member_id=member_id))

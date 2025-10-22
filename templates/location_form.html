@@ -7,16 +7,14 @@
     <input type="text" class="form-control" id="name" name="name" value="{{ location.name if location else '' }}" required>
   </div>
   <div class="mb-3">
-    <label for="responsible" class="form-label">负责人</label>
-    <select id="responsible" name="responsible_ids" class="form-select" multiple>
-      {% for m in members %}
-        <option value="{{ m.id }}"
-          {% if location and m in location.responsible_members %}selected{% endif %}>
-          {{ m.name }}
-        </option>
-      {% endfor %}
-    </select>
-    <div class="form-text">可多选负责人，按住 Ctrl (Windows) 或 Cmd (Mac) 选择多个人。</div>
+    <label class="form-label">负责人</label>
+    <div class="d-flex flex-wrap align-items-center gap-2">
+      <div id="locationResponsibleSummary" class="d-flex flex-wrap gap-2"></div>
+      <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#locationResponsibleModal">
+        管理负责人
+      </button>
+    </div>
+    <div class="form-text text-muted">通过弹窗选择多个负责人，支持姓名搜索；若未选择，将默认由你负责。</div>
   </div>
   <div class="mb-3">
     <label for="detail_link" class="form-label">详情链接</label>
@@ -125,6 +123,42 @@
       </div>
     </div>
   </div>
+  <div class="modal fade" id="locationResponsibleModal" tabindex="-1" aria-labelledby="locationResponsibleModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="locationResponsibleModalLabel">选择负责成员</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+        </div>
+        <div class="modal-body">
+          <input type="search" class="form-control form-control-sm mb-3" id="locationResponsibleSearch" placeholder="搜索姓名或用户名">
+          <div class="border rounded p-2" style="max-height: 320px; overflow-y: auto;">
+            {% for m in members %}
+            <div class="form-check location-responsible-row py-1" data-label="{{ (m.name or m.username)|lower }}">
+              <input class="form-check-input location-responsible-checkbox" type="checkbox" name="responsible_ids" value="{{ m.id }}"
+                     id="locationResp{{ m.id }}" data-label="{{ m.name or m.username }}"
+                     {% if location and m in location.responsible_members %}
+                       checked
+                     {% elif not location and m.id == current_user.id %}
+                       checked
+                     {% endif %}>
+              <label class="form-check-label d-flex justify-content-between align-items-center w-100" for="locationResp{{ m.id }}">
+                <span>{{ m.name or m.username }}</span>
+                {% if m.username and m.name and m.username != m.name %}
+                  <small class="text-muted">@{{ m.username }}</small>
+                {% endif %}
+              </label>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="locationResponsibleClearBtn">清除全部</button>
+          <button type="button" class="btn btn-primary btn-sm" data-bs-dismiss="modal">完成</button>
+        </div>
+      </div>
+    </div>
+  </div>
   <button type="submit" class="btn btn-success">{{ location and '保存修改' or '添加位置' }}</button>
   <a href="{{ url_for('locations_list') }}" class="btn btn-secondary">取消</a>
 </form>
@@ -143,6 +177,63 @@
       }
     });
   }
+
+  (function initResponsibleSelection() {
+    const summary = document.getElementById('locationResponsibleSummary');
+    const modal = document.getElementById('locationResponsibleModal');
+    if (!summary || !modal) {
+      if (summary) {
+        summary.innerHTML = '<span class="text-muted">未选择</span>';
+      }
+      return;
+    }
+    const searchInput = document.getElementById('locationResponsibleSearch');
+    const clearBtn = document.getElementById('locationResponsibleClearBtn');
+    const checkboxes = Array.prototype.slice.call(modal.querySelectorAll('.location-responsible-checkbox'));
+    const rows = Array.prototype.slice.call(modal.querySelectorAll('.location-responsible-row'));
+    const renderSummary = function () {
+      const selected = checkboxes.filter(function (cb) { return cb.checked; });
+      if (!selected.length) {
+        summary.innerHTML = '<span class="text-muted">未选择</span>';
+      } else {
+        summary.innerHTML = selected.map(function (cb) {
+          const label = cb.getAttribute('data-label') || cb.value;
+          return '<span class="badge bg-light text-dark border me-1">' + label + '</span>';
+        }).join('');
+      }
+    };
+    checkboxes.forEach(function (cb) {
+      cb.addEventListener('change', renderSummary);
+    });
+    if (searchInput) {
+      searchInput.addEventListener('input', function () {
+        const term = searchInput.value.trim().toLowerCase();
+        rows.forEach(function (row) {
+          const label = (row.getAttribute('data-label') || '').toLowerCase();
+          row.style.display = term ? (label.indexOf(term) !== -1 ? '' : 'none') : '';
+        });
+      });
+    }
+    if (clearBtn) {
+      clearBtn.addEventListener('click', function () {
+        checkboxes.forEach(function (cb) { cb.checked = false; });
+        renderSummary();
+      });
+    }
+    modal.addEventListener('hidden.bs.modal', function () {
+      if (searchInput) {
+        searchInput.value = '';
+      }
+      rows.forEach(function (row) { row.style.display = ''; });
+      renderSummary();
+    });
+    modal.addEventListener('shown.bs.modal', function () {
+      if (searchInput) {
+        searchInput.focus();
+      }
+    });
+    renderSummary();
+  })();
 
   (function registerGeoButtons() {
     const detectBtn = document.getElementById('detectLocationBtn');

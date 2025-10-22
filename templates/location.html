@@ -70,15 +70,77 @@
       {% endif %}
       <li class="list-group-item"><strong>最近修改：</strong> {{ location.last_modified.strftime('%Y-%m-%d %H:%M') if location.last_modified else '未知' }}</li>
       <li class="list-group-item">
-        <strong>物品统计：</strong>
-        <ul class="mb-0 ps-3">
-          <li>总数：<strong>{{ items|length }}</strong></li>
-          {% for label, count in status_counter.items() %}
-            <li>{{ label }}：<span class="badge bg-info">{{ count }}</span></li>
+        <strong class="d-block mb-2">物品统计：</strong>
+        <div class="d-flex flex-wrap gap-2 mb-3">
+          <span class="badge bg-primary-subtle text-primary-emphasis border">
+            总数 {{ items|length }}
+          </span>
+          {% for stat in status_stats %}
+            <span class="badge bg-info-subtle text-info-emphasis border">{{ stat.label }} {{ stat.count }}</span>
           {% endfor %}
-        </ul>
+        </div>
+        {% if responsible_stats %}
+        <div class="mb-2">
+          <div class="text-muted small mb-1">负责人分布</div>
+          <div class="d-flex flex-wrap gap-2">
+            {% for stat in responsible_stats %}
+              <a class="badge bg-light text-dark border text-decoration-none" href="{{ url_for('profile', member_id=stat.member.id) }}">
+                {{ stat.member.name }} {{ stat.count }}
+              </a>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+        {% if category_stats %}
+        <div class="mb-2">
+          <div class="text-muted small mb-1">物品类别</div>
+          <div class="d-flex flex-wrap gap-2">
+            {% for stat in category_stats %}
+              <span class="badge bg-secondary-subtle text-secondary-emphasis border">{{ stat.label }} {{ stat.count }}</span>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+        {% if feature_stats %}
+        <div>
+          <div class="text-muted small mb-1">特性概览</div>
+          <div class="d-flex flex-wrap gap-2">
+            {% for stat in feature_stats %}
+              <span class="badge bg-warning-subtle text-warning-emphasis border">{{ stat.label }} {{ stat.count }}</span>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
       </li>
     </ul>
+    <div class="mt-3">
+      <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+        <button type="button" class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addExistingItemsModal" {% if not available_items %}disabled{% endif %}>
+          ➕ 加入已有物品
+        </button>
+        <a href="{{ url_for('add_item', loc_id=location.id) }}" class="btn btn-outline-success btn-sm">
+          🆕 新建物品并加入
+        </a>
+        <button type="button" class="btn btn-outline-danger btn-sm" data-bs-toggle="modal" data-bs-target="#removeItemsModal" {% if not items %}disabled{% endif %}>
+          ➖ 移除物品
+        </button>
+      </div>
+      <div class="small text-muted">
+        {% if not available_items %}
+          暂无可加入的现有物品。
+        {% endif %}
+        {% if not items %}
+          当前位置尚未包含物品。
+        {% endif %}
+      </div>
+    </div>
+    <div class="mt-4">
+      <a href="{{ url_for('edit_location', loc_id=location.id) }}" class="btn btn-primary mb-2 me-1">编辑</a>
+      <form action="{{ url_for('delete_location', loc_id=location.id) }}" method="post" class="d-inline mb-2 me-1" onsubmit="return confirm('确定删除该位置吗？此操作无法恢复。');">
+        <button type="submit" class="btn btn-danger">删除</button>
+      </form>
+      <a href="{{ url_for('locations_list') }}" class="btn btn-secondary mb-2">返回列表</a>
+    </div>
   </div>
   <div class="col-md-6">
     {% set image_urls = location_image_urls(location) %}
@@ -112,52 +174,6 @@
     </div>
   </div>
 </div>
-
-<h5 class="mt-4">包含的物品</h5>
-<form method="post" action="{{ url_for('manage_location_items', loc_id=location.id) }}" id="removeItemsForm" class="mb-3">
-  <input type="hidden" name="action" value="remove">
-  <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
-    <div class="d-flex flex-wrap align-items-center gap-2">
-      <button type="button" class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addExistingItemsModal" {% if not available_items %}disabled{% endif %}>
-        ➕ 加入已有物品
-      </button>
-      <a href="{{ url_for('add_item', loc_id=location.id) }}" class="btn btn-outline-success btn-sm">
-        🆕 新建物品并加入
-      </a>
-      {% if not available_items %}
-        <span class="text-muted small">暂无可加入的现有物品</span>
-      {% endif %}
-    </div>
-    <div class="d-flex align-items-center gap-2">
-      <button type="submit" class="btn btn-outline-danger btn-sm" id="removeSelectedBtn" disabled>移除选中物品</button>
-      <span class="text-muted small" id="selectedCountHint">未选择物品</span>
-    </div>
-  </div>
-  <ul class="list-group" id="locationItemsList">
-    {% for it in items %}
-      <li class="list-group-item">
-        <div class="d-flex align-items-center gap-3">
-          <div class="form-check mb-0">
-            <input class="form-check-input remove-item-checkbox" type="checkbox" name="remove_item_ids" value="{{ it.id }}" id="removeItem{{ it.id }}" aria-label="选择移除 {{ it.name }}">
-          </div>
-          <div class="flex-grow-1 d-flex justify-content-between align-items-center gap-3">
-            <a href="{{ url_for('item_detail', item_id=it.id) }}" class="text-decoration-none fw-semibold">{{ it.name }}</a>
-            <div class="text-end">
-              {% if it.stock_status %}
-                <span class="badge bg-secondary me-2">{{ it.stock_status }}</span>
-              {% endif %}
-              {% if it.responsible_member %}
-                <small class="text-muted">{{ it.responsible_member.name }}</small>
-              {% endif %}
-            </div>
-          </div>
-        </div>
-      </li>
-    {% else %}
-      <li class="list-group-item text-muted text-center">（此位置暂无物品）</li>
-    {% endfor %}
-  </ul>
-</form>
 
 <div class="modal fade" id="addExistingItemsModal" tabindex="-1" aria-labelledby="addExistingItemsLabel" aria-hidden="true">
   <div class="modal-dialog modal-dialog-scrollable modal-lg">
@@ -198,68 +214,115 @@
   </div>
 </div>
 
+<div class="modal fade" id="removeItemsModal" tabindex="-1" aria-labelledby="removeItemsLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable modal-lg">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('manage_location_items', loc_id=location.id) }}">
+        <input type="hidden" name="action" value="remove">
+        <div class="modal-header">
+          <h5 class="modal-title" id="removeItemsLabel">移出位置的物品</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+        </div>
+        <div class="modal-body">
+          {% if items %}
+            <p class="text-muted small mb-2">勾选后点击“移除所选”即可完成移出，支持名称或负责人关键词搜索。</p>
+            <input type="text" class="form-control form-control-sm mb-3" id="removeItemsSearch" placeholder="搜索物品或负责人">
+            <div class="border rounded p-2 existing-items-container" style="max-height: 320px; overflow-y: auto;">
+              {% for it in items %}
+                <div class="form-check remove-item-row py-1" data-label="{{ it.name|lower }} {% if it.responsible_member %}{{ it.responsible_member.name|lower }}{% endif %}">
+                  <input class="form-check-input remove-item-checkbox" type="checkbox" value="{{ it.id }}" name="remove_item_ids" id="removeModalItem{{ it.id }}">
+                  <label class="form-check-label d-flex justify-content-between align-items-center gap-2" for="removeModalItem{{ it.id }}">
+                    <div>
+                      <span class="fw-semibold">{{ it.name }}</span>
+                      {% if it.responsible_member %}
+                        <span class="badge bg-light text-dark border ms-2">{{ it.responsible_member.name }}</span>
+                      {% endif %}
+                    </div>
+                    <div class="text-end">
+                      {% if it.stock_status %}
+                        <span class="badge bg-secondary">{{ it.stock_status }}</span>
+                      {% endif %}
+                      {% if it.category %}
+                        <small class="text-muted ms-2">{{ it.category }}</small>
+                      {% endif %}
+                    </div>
+                  </label>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="text-muted mb-0">当前位置暂无物品，无需移除。</p>
+          {% endif %}
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+          <button type="submit" class="btn btn-danger" id="confirmRemoveItemsBtn" {% if not items %}disabled{% endif %}>移除所选</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 <script>
 (function () {
-  var removeForm = document.getElementById('removeItemsForm');
-  if (removeForm) {
-    var removeButton = document.getElementById('removeSelectedBtn');
-    var selectedHint = document.getElementById('selectedCountHint');
-    var itemCheckboxes = Array.prototype.slice.call(removeForm.querySelectorAll('.remove-item-checkbox'));
-    var updateRemoveState = function () {
-      var selected = itemCheckboxes.filter(function (cb) { return cb.checked; }).length;
-      if (removeButton) {
-        removeButton.disabled = selected === 0;
-      }
-      if (selectedHint) {
-        selectedHint.textContent = selected ? ('已选择 ' + selected + ' 个物品') : '未选择物品';
-      }
-    };
-    itemCheckboxes.forEach(function (cb) {
-      cb.addEventListener('change', updateRemoveState);
-    });
-    updateRemoveState();
-    removeForm.addEventListener('submit', function (evt) {
-      if (removeButton && removeButton.disabled) {
-        evt.preventDefault();
-      }
-    });
-  }
-
-  var modalEl = document.getElementById('addExistingItemsModal');
-  if (modalEl) {
-    var confirmBtn = document.getElementById('confirmAddExistingBtn');
-    var existingSearch = document.getElementById('existingItemsSearch');
-    var existingCheckboxes = Array.prototype.slice.call(modalEl.querySelectorAll('.existing-item-checkbox'));
-    var existingRows = Array.prototype.slice.call(modalEl.querySelectorAll('.existing-item-row'));
+  var setupSelectionModal = function (config) {
+    var modalEl = document.getElementById(config.modalId);
+    if (!modalEl) {
+      return;
+    }
+    var confirmBtn = config.confirmBtnId ? document.getElementById(config.confirmBtnId) : null;
+    var searchInput = config.searchInputId ? document.getElementById(config.searchInputId) : null;
+    var checkboxes = Array.prototype.slice.call(modalEl.querySelectorAll(config.checkboxSelector));
+    var rows = config.rowSelector ? Array.prototype.slice.call(modalEl.querySelectorAll(config.rowSelector)) : [];
     var updateConfirmState = function () {
       if (confirmBtn) {
-        var anySelected = existingCheckboxes.some(function (cb) { return cb.checked; });
+        var anySelected = checkboxes.some(function (cb) { return cb.checked; });
         confirmBtn.disabled = !anySelected;
       }
     };
-    existingCheckboxes.forEach(function (cb) {
+    checkboxes.forEach(function (cb) {
       cb.addEventListener('change', updateConfirmState);
     });
     updateConfirmState();
-    if (existingSearch) {
-      existingSearch.addEventListener('input', function () {
-        var term = existingSearch.value.trim().toLowerCase();
-        existingRows.forEach(function (row) {
+    if (searchInput) {
+      searchInput.addEventListener('input', function () {
+        var term = searchInput.value.trim().toLowerCase();
+        rows.forEach(function (row) {
           var label = (row.getAttribute('data-label') || '').toLowerCase();
           row.style.display = term ? (label.indexOf(term) !== -1 ? '' : 'none') : '';
         });
       });
     }
     modalEl.addEventListener('hidden.bs.modal', function () {
-      existingCheckboxes.forEach(function (cb) { cb.checked = false; });
-      if (existingSearch) {
-        existingSearch.value = '';
+      if (config.resetOnClose) {
+        checkboxes.forEach(function (cb) { cb.checked = false; });
       }
-      existingRows.forEach(function (row) { row.style.display = ''; });
+      if (searchInput) {
+        searchInput.value = '';
+      }
+      rows.forEach(function (row) { row.style.display = ''; });
       updateConfirmState();
     });
-  }
+  };
+
+  setupSelectionModal({
+    modalId: 'addExistingItemsModal',
+    confirmBtnId: 'confirmAddExistingBtn',
+    searchInputId: 'existingItemsSearch',
+    checkboxSelector: '.existing-item-checkbox',
+    rowSelector: '.existing-item-row',
+    resetOnClose: true
+  });
+
+  setupSelectionModal({
+    modalId: 'removeItemsModal',
+    confirmBtnId: 'confirmRemoveItemsBtn',
+    searchInputId: 'removeItemsSearch',
+    checkboxSelector: '.remove-item-checkbox',
+    rowSelector: '.remove-item-row',
+    resetOnClose: true
+  });
 
   try {
     var url = document.getElementById('locPermalink').value || window.location.href;

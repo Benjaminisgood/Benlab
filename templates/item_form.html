@@ -40,20 +40,14 @@
     </select>
   </div>
   <div class="mb-3">
-    <label for="locations" class="form-label">存放位置（可多选）</label>
-    <select id="locations" name="location_ids" class="form-select" multiple size="6">
-      {% for loc in locations %}
-        <option value="{{ loc.id }}"
-          {% if item and item.locations and (loc in item.locations) %}
-            selected
-          {% elif not item and default_loc_id and loc.id == default_loc_id %}
-            selected
-          {% endif %}>
-          {{ loc.name }}
-        </option>
-      {% endfor %}
-    </select>
-    <div class="form-text">按住 Ctrl/Cmd 或 Shift 可多选；留空表示暂未指定。</div>
+    <label class="form-label">存放位置（可多选）</label>
+    <div class="d-flex flex-wrap align-items-center gap-2">
+      <div id="itemLocationsSummary" class="d-flex flex-wrap gap-2"></div>
+      <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#itemLocationsModal">
+        管理位置
+      </button>
+    </div>
+    <div class="form-text text-muted">通过弹窗批量选择地点，支持关键词搜索；关闭弹窗即可保存选择。</div>
   </div>
   <div class="mb-3">
     <label for="purchase_link" class="form-label">购买链接</label>
@@ -148,6 +142,37 @@
       </div>
     </div>
   </div>
+  <div class="modal fade" id="itemLocationsModal" tabindex="-1" aria-labelledby="itemLocationsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="itemLocationsModalLabel">选择存放位置</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+        </div>
+        <div class="modal-body">
+          <input type="search" class="form-control form-control-sm mb-3" id="itemLocationsSearch" placeholder="搜索位置名称">
+          <div class="border rounded p-2" style="max-height: 320px; overflow-y: auto;">
+            {% for loc in locations %}
+            <div class="form-check item-location-row py-1" data-label="{{ loc.name|lower }}">
+              <input class="form-check-input item-location-checkbox" type="checkbox" name="location_ids" value="{{ loc.id }}"
+                     id="itemLocation{{ loc.id }}" data-label="{{ loc.name }}"
+                     {% if item and item.locations and (loc in item.locations) %}
+                       checked
+                     {% elif not item and default_loc_id and loc.id == default_loc_id %}
+                       checked
+                     {% endif %}>
+              <label class="form-check-label" for="itemLocation{{ loc.id }}">{{ loc.name }}</label>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="itemLocationsClearBtn">清除全部</button>
+          <button type="button" class="btn btn-primary btn-sm" data-bs-dismiss="modal">完成</button>
+        </div>
+      </div>
+    </div>
+  </div>
   <button type="submit" class="btn btn-success">{{ item and '保存修改' or '添加物品' }}</button>
   <a href="{{ url_for('items') }}" class="btn btn-secondary">取消</a>
 </form>
@@ -166,15 +191,62 @@
       }
     });
   }
-  // 位置多选：显示选中数量（可选增强）
-  const locSelect = document.getElementById('locations');
-  if (locSelect) {
-    const updateCount = () => {
-      const count = Array.from(locSelect.options).filter(o => o.selected).length;
-      locSelect.title = count > 0 ? `已选择 ${count} 个位置` : '未选择位置';
+  // 位置多选：弹窗选择并展示摘要
+  (function initItemLocationsModal() {
+    const summary = document.getElementById('itemLocationsSummary');
+    const modal = document.getElementById('itemLocationsModal');
+    if (!summary || !modal) {
+      if (summary) {
+        summary.innerHTML = '<span class="text-muted">未选择</span>';
+      }
+      return;
+    }
+    const searchInput = document.getElementById('itemLocationsSearch');
+    const clearBtn = document.getElementById('itemLocationsClearBtn');
+    const checkboxes = Array.prototype.slice.call(modal.querySelectorAll('.item-location-checkbox'));
+    const rows = Array.prototype.slice.call(modal.querySelectorAll('.item-location-row'));
+    const renderSummary = function () {
+      const selected = checkboxes.filter(function (cb) { return cb.checked; });
+      if (!selected.length) {
+        summary.innerHTML = '<span class="text-muted">未选择</span>';
+      } else {
+        summary.innerHTML = selected.map(function (cb) {
+          const label = cb.getAttribute('data-label') || cb.value;
+          return '<span class="badge bg-light text-dark border me-1">' + label + '</span>';
+        }).join('');
+      }
     };
-    locSelect.addEventListener('change', updateCount);
-    updateCount();
-  }
+    checkboxes.forEach(function (cb) {
+      cb.addEventListener('change', renderSummary);
+    });
+    if (searchInput) {
+      searchInput.addEventListener('input', function () {
+        const term = searchInput.value.trim().toLowerCase();
+        rows.forEach(function (row) {
+          const label = (row.getAttribute('data-label') || '').toLowerCase();
+          row.style.display = term ? (label.indexOf(term) !== -1 ? '' : 'none') : '';
+        });
+      });
+    }
+    if (clearBtn) {
+      clearBtn.addEventListener('click', function () {
+        checkboxes.forEach(function (cb) { cb.checked = false; });
+        renderSummary();
+      });
+    }
+    modal.addEventListener('hidden.bs.modal', function () {
+      if (searchInput) {
+        searchInput.value = '';
+      }
+      rows.forEach(function (row) { row.style.display = ''; });
+      renderSummary();
+    });
+    modal.addEventListener('shown.bs.modal', function () {
+      if (searchInput) {
+        searchInput.focus();
+      }
+    });
+    renderSummary();
+  })();
 </script>
 {% endblock %}

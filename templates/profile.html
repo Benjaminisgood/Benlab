@@ -1,4 +1,56 @@
 {% extends "base.html" %}
+{% macro render_resource_entry(entry, kind) -%}
+  {% if kind == 'item' %}
+    <li class="list-group-item">
+      <div class="d-flex justify-content-between align-items-start gap-3">
+        <div>
+          <a href="{{ url_for('item_detail', item_id=entry.id) }}" class="fw-semibold text-decoration-none">{{ entry.name }}</a>
+          {% if entry.cas_no %}
+            <div class="small text-muted mt-1">CAS: {{ entry.cas_no }}</div>
+          {% endif %}
+        </div>
+        <div class="text-end">
+          <div class="d-flex flex-wrap justify-content-end gap-1">
+            {% if entry.stock_status %}
+              <span class="badge {% if '用完' in entry.stock_status %}bg-danger{% elif '少量' in entry.stock_status %}bg-warning text-dark{% else %}bg-secondary{% endif %}">{{ entry.stock_status }}</span>
+            {% endif %}
+            {% if entry.features %}
+              <span class="badge bg-light text-dark border">{{ entry.features }}</span>
+            {% endif %}
+          </div>
+          {% if entry.stock_status and '用完' in entry.stock_status %}
+            <a href="{{ url_for('edit_item', item_id=entry.id) }}" class="btn btn-outline-danger btn-sm mt-2">补货处理</a>
+          {% endif %}
+        </div>
+      </div>
+    </li>
+  {% else %}
+    {% set status = entry.clean_status or '未评估' %}
+    {% set is_dirty = status == '脏/报修' %}
+    {% set lead_members = entry.responsible_members[:2] if entry.responsible_members else [] %}
+    <li class="list-group-item">
+      <div class="d-flex justify-content-between align-items-start gap-3">
+        <div>
+          <a href="{{ url_for('view_location', loc_id=entry.id) }}" class="fw-semibold text-decoration-none">{{ entry.name }}</a>
+        </div>
+        <div class="text-end">
+          <div class="d-flex flex-wrap justify-content-end gap-1">
+            <span class="badge {% if is_dirty %}bg-danger{% elif status == '一般' %}bg-warning text-dark{% else %}bg-secondary{% endif %}">{{ status }}</span>
+            {% for member in lead_members %}
+              <a class="badge bg-light text-dark border text-decoration-none" href="{{ url_for('profile', member_id=member.id) }}">{{ member.name or member.username }}</a>
+            {% endfor %}
+            {% if entry.responsible_members and entry.responsible_members|length > 2 %}
+              <span class="badge bg-light text-muted border text-decoration-none">+{{ entry.responsible_members|length - 2 }}</span>
+            {% endif %}
+          </div>
+          {% if is_dirty %}
+            <a href="{{ url_for('edit_location', loc_id=entry.id) }}" class="btn btn-outline-danger btn-sm mt-2">去处理</a>
+          {% endif %}
+        </div>
+      </div>
+    </li>
+  {% endif %}
+{%- endmacro %}
 {% block content %}
 <div class="mb-4">
   <div class="row">
@@ -27,8 +79,7 @@
         {% endif %}
       </div>
       <p class="mb-0">
-        {% if profile_user.contact %}📞 <a href="tel:{{ profile_user.contact|replace(' ', '') }}">{{ profile_user.contact }}</a><br>{% endif %}
-        {% if profile_user.notes %}<small class="text-muted">{{ profile_user.notes }}</small>{% endif %}
+        {% if profile_user.contact %}📞 <a href="tel:{{ profile_user.contact|replace(' ', '') }}">{{ profile_user.contact }}</a>{% endif %}
       </p>
     </div>
   </div>
@@ -39,64 +90,81 @@
 {% if any_location_dirty %}
   <div class="alert alert-danger">你有卫生差或需维修的位置，请尽快处理！</div>
 {% endif %}
+<div class="card mb-4">
+  <div class="card-header fw-semibold">个人展示 / 备注</div>
+  <div class="card-body">
+    {% if profile_notes_html is defined %}
+      <div class="rich-text-content">{{ profile_notes_html|safe }}</div>
+    {% elif profile_user.notes %}
+      <p class="mb-0 text-muted" style="white-space: pre-wrap;">{{ profile_user.notes }}</p>
+    {% else %}
+      <p class="mb-0 text-muted">尚未填写个人展示，点击“编辑个人主页”补充介绍。</p>
+    {% endif %}
+  </div>
+</div>
+{% set preview_items = items_preview if items_preview is defined else items_resp[:5] %}
+{% set extra_items = items_extra if items_extra is defined else (items_resp[5:] if items_resp|length > 5 else []) %}
+{% set preview_locations = locations_preview if locations_preview is defined else locations_resp[:5] %}
+{% set extra_locations = locations_extra if locations_extra is defined else (locations_resp[5:] if locations_resp|length > 5 else []) %}
 <div class="row">
   <div class="col-md-6">
-    <h5>负责的物品</h5>
-    <ul class="list-group mb-4">
-      {% for it in items_resp %}
-      <li class="list-group-item d-flex justify-content-between align-items-center">
-        <div>
-          <div>
-            <a href="{{ url_for('item_detail', item_id=it.id) }}">{{ it.name }}</a>
-            {% if it.cas_no %}
-              <small class="text-muted ms-2">CAS: {{ it.cas_no }}</small>
-            {% endif %}
-            {% if it.stock_status %}
-              <span class="badge bg-secondary ms-2">{{ it.stock_status }}</span>
-            {% endif %}
-          </div>
-          <div class="mt-1">
-            {% if it.locations and it.locations|length > 0 %}
-              <small class="text-muted">位置：</small>
-              {% for loc in it.locations %}
-                <a href="{{ url_for('view_location', loc_id=loc.id) }}" class="badge bg-light text-dark border me-1">{{ loc.name }}</a>
-              {% endfor %}
-            {% else %}
-              <small class="text-muted">位置：未指定</small>
-            {% endif %}
-          </div>
-        </div>
-        {% if it.stock_status and '用完' in it.stock_status %}
-          <span class="badge bg-danger">⚠ 用完</span>
-          <a href="{{ url_for('edit_item', item_id=it.id) }}" class="btn btn-sm btn-outline-primary">去购买</a>
-        {% endif %}
-      </li>
-      {% else %}
-      <li class="list-group-item text-muted">无负责物品</li>
-      {% endfor %}
-    </ul>
+    <div class="card mb-4 h-100">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span class="fw-semibold">负责的物品</span>
+        <span class="badge bg-light text-dark border">{{ items_resp|length }}</span>
+      </div>
+      <ul class="list-group list-group-flush">
+        {% for it in preview_items %}
+          {{ render_resource_entry(it, 'item') }}
+        {% else %}
+          <li class="list-group-item text-muted">无负责物品</li>
+        {% endfor %}
+      </ul>
+      {% if extra_items %}
+      <div class="collapse" id="profileItemsMore">
+        <ul class="list-group list-group-flush">
+          {% for it in extra_items %}
+            {{ render_resource_entry(it, 'item') }}
+          {% endfor %}
+        </ul>
+      </div>
+      <div class="card-footer text-center">
+        <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#profileItemsMore" aria-expanded="false" aria-controls="profileItemsMore">
+          展开剩余 {{ extra_items|length }} 个
+        </button>
+      </div>
+      {% endif %}
+    </div>
   </div>
 
   <div class="col-md-6">
-    <h5>负责的位置</h5>
-    <ul class="list-group mb-4">
-      {% for loc in locations_resp %}
-      <li class="list-group-item d-flex justify-content-between align-items-center">
-        <div>
-          <a href="{{ url_for('view_location', loc_id=loc.id) }}">{{ loc.name }}</a>
-          {% if loc.clean_status %}
-            <span class="badge bg-secondary">{{ loc.clean_status }}</span>
-          {% endif %}
-        </div>
-        {% if loc.clean_status == '脏/报修' %}
-          <span class="badge bg-danger">⚠ 卫生差/损坏</span>
-          <a href="{{ url_for('edit_location', loc_id=loc.id) }}" class="btn btn-sm btn-outline-primary">去处理</a>
-        {% endif %}
-      </li>
-      {% else %}
-      <li class="list-group-item text-muted">无负责位置</li>
-      {% endfor %}
-    </ul>
+    <div class="card mb-4 h-100">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span class="fw-semibold">负责的位置</span>
+        <span class="badge bg-light text-dark border">{{ locations_resp|length }}</span>
+      </div>
+      <ul class="list-group list-group-flush">
+        {% for loc in preview_locations %}
+          {{ render_resource_entry(loc, 'location') }}
+        {% else %}
+          <li class="list-group-item text-muted">无负责位置</li>
+        {% endfor %}
+      </ul>
+      {% if extra_locations %}
+      <div class="collapse" id="profileLocationsMore">
+        <ul class="list-group list-group-flush">
+          {% for loc in extra_locations %}
+            {{ render_resource_entry(loc, 'location') }}
+          {% endfor %}
+        </ul>
+      </div>
+      <div class="card-footer text-center">
+        <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#profileLocationsMore" aria-expanded="false" aria-controls="profileLocationsMore">
+          展开剩余 {{ extra_locations|length }} 个
+        </button>
+      </div>
+      {% endif %}
+    </div>
   </div>
 </div>
 
@@ -231,41 +299,47 @@
   {% endif %}
 </div>
 {% endif %}
-<div class="mb-4">
-  <h5>留言板</h5>
-  {% set msg_total = messages|length %}
-  <ul class="list-group mb-3">
-    {% for msg in messages[:5] %}
-    <li class="list-group-item">
-      <strong>{{ msg.sender.name if msg.sender else '匿名' }}:</strong> {{ msg.content }}
-      <br><small class="text-muted">{{ msg.timestamp.strftime("%Y-%m-%d %H:%M") }}</small>
-    </li>
-    {% else %}
-    <li class="list-group-item text-muted">暂无留言</li>
-    {% endfor %}
-  </ul>
-  {% if msg_total > 5 %}
-  <button class="btn btn-sm btn-outline-secondary mb-3" type="button" data-bs-toggle="collapse" data-bs-target="#msgMore" aria-expanded="false" aria-controls="msgMore">
-    展开剩余 {{ msg_total - 5 }} 条
-  </button>
-  <div class="collapse" id="msgMore">
-    <ul class="list-group mb-3">
-      {% for msg in messages[5:] %}
-      <li class="list-group-item">
-        <strong>{{ msg.sender.name if msg.sender else '匿名' }}:</strong> {{ msg.content }}
-        <br><small class="text-muted">{{ msg.timestamp.strftime("%Y-%m-%d %H:%M") }}</small>
-      </li>
-      {% endfor %}
-    </ul>
+<div class="card mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span class="fw-semibold">他人评价 / 留言</span>
+    <span class="badge bg-light text-dark border">{{ (feedback_entries|default([]))|length }}</span>
   </div>
-  {% endif %}
-  <form method="post" action="{{ url_for('post_message', member_id=profile_user.id) }}">
-    <div class="mb-3">
-      <label for="newMessage" class="form-label">留言:</label>
-      <textarea id="newMessage" name="content" class="form-control" rows="2" required></textarea>
-    </div>
-    <button type="submit" class="btn btn-primary">发布留言</button>
-  </form>
+  <div class="list-group list-group-flush">
+    {% for fb in feedback_entries|default([]) %}
+      <div class="list-group-item">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            {% if fb.sender_url %}
+              <a href="{{ fb.sender_url }}" class="fw-semibold text-decoration-none">{{ fb.sender_name }}</a>
+            {% else %}
+              <span class="fw-semibold">{{ fb.sender_name }}</span>
+            {% endif %}
+            {% if fb.sentiment == 'positive' %}
+              <span class="badge bg-success ms-2">好评</span>
+            {% elif fb.sentiment == 'doubt' %}
+              <span class="badge bg-warning text-dark ms-2">需关注</span>
+            {% endif %}
+          </div>
+          <small class="text-muted">{{ fb.timestamp_display }}</small>
+        </div>
+        <div class="mt-2 rich-text-content">{{ fb.html|safe }}</div>
+      </div>
+    {% else %}
+      <div class="list-group-item text-muted">暂无留言</div>
+    {% endfor %}
+  </div>
+  <div class="card-footer">
+    <form method="post" action="{{ url_for('post_message', member_id=profile_user.id) }}">
+      <div class="mb-3">
+        <label for="newMessage" class="form-label">留下你的评价</label>
+        <textarea id="newMessage" name="content" class="form-control" rows="2" required placeholder="写下看法，支持链接、#标签、@提及、!!好评、??质疑等语法"></textarea>
+      </div>
+      <div class="d-flex justify-content-between align-items-center">
+        <small class="text-muted">留言发送后无法编辑或删除，请谨慎发布。</small>
+        <button type="submit" class="btn btn-primary">发布留言</button>
+      </div>
+    </form>
+  </div>
 </div>
 {% if current_user.id != profile_user.id %}
 <script>

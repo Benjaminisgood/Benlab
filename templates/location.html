@@ -134,12 +134,12 @@
         {% endif %}
       </div>
     </div>
-    <div class="mt-4">
-      <a href="{{ url_for('edit_location', loc_id=location.id) }}" class="btn btn-primary mb-2 me-1">编辑</a>
-      <form action="{{ url_for('delete_location', loc_id=location.id) }}" method="post" class="d-inline mb-2 me-1" onsubmit="return confirm('确定删除该位置吗？此操作无法恢复。');">
+    <div class="mt-4 d-flex flex-wrap align-items-center gap-2">
+      <a href="{{ url_for('edit_location', loc_id=location.id) }}" class="btn btn-primary">编辑</a>
+      <form action="{{ url_for('delete_location', loc_id=location.id) }}" method="post" class="d-inline" onsubmit="return confirm('确定删除该位置吗？此操作无法恢复。');">
         <button type="submit" class="btn btn-danger">删除</button>
       </form>
-      <a href="{{ url_for('locations_list') }}" class="btn btn-secondary mb-2">返回列表</a>
+      <a href="{{ url_for('locations_list') }}" class="btn btn-secondary">返回列表</a>
     </div>
   </div>
   <div class="col-md-6">

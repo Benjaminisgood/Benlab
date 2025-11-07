@@ -39,13 +39,21 @@
   </div>
 
   <div class="mb-3">
-    <label for="responsible" class="form-label">负责人</label>
-    <select id="responsible" name="responsible_id" class="form-select">
-      <option value="">(未指定)</option>
-      {% for m in members %}
-      <option value="{{ m.id }}" {% if item and item.responsible_id == m.id %}selected{% endif %}>{{ m.name }}</option>
-      {% endfor %}
-    </select>
+    <label class="form-label">负责人</label>
+    <div class="d-flex flex-wrap align-items-center gap-2">
+      <div id="itemResponsibleSummary" class="badge bg-light text-dark border">
+        {% if item and item.responsible_member %}
+          {{ item.responsible_member.name }}
+        {% else %}
+          未指定
+        {% endif %}
+      </div>
+      <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#itemResponsibleModal">
+        管理负责人
+      </button>
+    </div>
+    <input type="hidden" id="responsibleIdInput" name="responsible_id" value="{{ item.responsible_id if item and item.responsible_id else '' }}">
+    <div class="form-text text-muted">通过搜索快速定位成员；若不指定则留空，方便公共物品由团队协作维护。</div>
   </div>
   <div class="mb-3">
     <label class="form-label">存放位置（可多选）</label>
@@ -203,6 +211,44 @@
       </div>
     </div>
   </div>
+  <div class="modal fade" id="itemResponsibleModal" tabindex="-1" aria-labelledby="itemResponsibleModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="itemResponsibleModalLabel">选择负责人</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+        </div>
+        <div class="modal-body">
+          <input type="search" class="form-control form-control-sm mb-3" id="itemResponsibleSearch" placeholder="搜索姓名或用户名">
+          <div class="border rounded p-2" style="max-height: 320px; overflow-y: auto;">
+            <div class="form-check item-responsible-row py-1" data-label="未指定">
+              <input class="form-check-input item-responsible-radio" type="radio" name="item_responsible_select" value=""
+                     id="itemResponsibleNone" {% if not item or not item.responsible_id %}checked{% endif %}>
+              <label class="form-check-label" for="itemResponsibleNone">未指定</label>
+            </div>
+            {% for m in members %}
+            <div class="form-check item-responsible-row py-1" data-label="{{ (m.name or m.username)|lower }}">
+              <input class="form-check-input item-responsible-radio" type="radio" name="item_responsible_select" value="{{ m.id }}"
+                     id="itemResponsible{{ m.id }}"
+                     data-display="{{ m.name or m.username }}"
+                     {% if item and item.responsible_id == m.id %}checked{% endif %}>
+              <label class="form-check-label d-flex justify-content-between align-items-center" for="itemResponsible{{ m.id }}">
+                <span>{{ m.name or m.username }}</span>
+                {% if m.username and m.name and m.username != m.name %}
+                  <small class="text-muted">@{{ m.username }}</small>
+                {% endif %}
+              </label>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="itemResponsibleClearBtn">清除选择</button>
+          <button type="button" class="btn btn-primary btn-sm" data-bs-dismiss="modal">完成</button>
+        </div>
+      </div>
+    </div>
+  </div>
   <button type="submit" class="btn btn-success">{{ item and '保存修改' or '添加物品' }}</button>
   <a href="{{ url_for('items') }}" class="btn btn-secondary">取消</a>
 </form>
@@ -325,6 +371,68 @@
       }
     });
     renderSummary();
+  })();
+
+  (function initItemResponsibleModal() {
+    const modal = document.getElementById('itemResponsibleModal');
+    const hiddenInput = document.getElementById('responsibleIdInput');
+    const summary = document.getElementById('itemResponsibleSummary');
+    if (!modal || !hiddenInput || !summary) {
+      return;
+    }
+    const radios = Array.prototype.slice.call(modal.querySelectorAll('.item-responsible-radio'));
+    const rows = Array.prototype.slice.call(modal.querySelectorAll('.item-responsible-row'));
+    const searchInput = document.getElementById('itemResponsibleSearch');
+    const clearBtn = document.getElementById('itemResponsibleClearBtn');
+
+    const render = function () {
+      const checked = radios.find(function (radio) { return radio.checked; });
+      if (!checked) {
+        summary.textContent = '未指定';
+        hiddenInput.value = '';
+        return;
+      }
+      hiddenInput.value = checked.value || '';
+      if (!checked.value) {
+        summary.textContent = '未指定';
+        return;
+      }
+      const display = checked.getAttribute('data-display') || checked.nextElementSibling?.textContent || '';
+      summary.textContent = (display || '').trim() || '未指定';
+    };
+
+    radios.forEach(function (radio) {
+      radio.addEventListener('change', render);
+    });
+
+    if (searchInput) {
+      searchInput.addEventListener('input', function () {
+        const term = this.value.trim().toLowerCase();
+        rows.forEach(function (row) {
+          const label = (row.getAttribute('data-label') || '').toLowerCase();
+          row.style.display = term ? (label.indexOf(term) !== -1 ? '' : 'none') : '';
+        });
+      });
+    }
+
+    if (clearBtn) {
+      clearBtn.addEventListener('click', function () {
+        const noneRadio = document.getElementById('itemResponsibleNone');
+        if (noneRadio) {
+          noneRadio.checked = true;
+          render();
+        }
+      });
+    }
+
+    modal.addEventListener('hidden.bs.modal', function () {
+      if (searchInput) {
+        searchInput.value = '';
+        rows.forEach(function (row) { row.style.display = ''; });
+      }
+    });
+
+    render();
   })();
 </script>
 {% endblock %}

@@ -2,16 +2,30 @@
 {% block content %}
 
 {% macro render_location(loc, level=0) %}
+{% set loc_meta = location_meta_map.get(loc.id) %}
+{% set usage_tags = loc_meta.usage_tags if loc_meta else [] %}
 <tr class="{% if level == 0 %}table-primary{% else %}table-light{% endif %} indent-{{ level }}">
   <td>
     {% if level > 0 %}↳ {% endif %}
     <a href="{{ url_for('view_location', loc_id=loc.id) }}">{{ loc.name }}</a>
+    {% if loc_meta and loc_meta.is_public %}
+      <span class="badge bg-success-subtle text-success-emphasis border ms-1">公共</span>
+    {% endif %}
+    {% if usage_tags %}
+      <div class="d-inline-flex flex-wrap gap-1 mt-1">
+        {% for tag in usage_tags %}
+          <span class="badge bg-light text-dark border">{{ location_usage_labels.get(tag, tag) }}</span>
+        {% endfor %}
+      </div>
+    {% endif %}
   </td>
   <td>
     {% if loc.responsible_members and loc.responsible_members|length > 0 %}
       {%- for member in loc.responsible_members %}
         <a href="{{ url_for('profile', member_id=member.id) }}">{{ member.name }}</a>{% if not loop.last %}，{% endif %}
       {%- endfor %}
+    {% elif loc_meta and loc_meta.is_public %}
+      <span class="text-muted">公共空间</span>
     {% else %}
       -
     {% endif %}

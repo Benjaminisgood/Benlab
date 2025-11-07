@@ -14,13 +14,31 @@
         管理负责人
       </button>
     </div>
-    <div class="form-text text-muted">通过弹窗选择多个负责人，支持姓名搜索；若未选择，将默认由你负责。</div>
+    <div class="form-text text-muted">公共空间可不指定负责人；若为空且未标记为公共空间，将默认由当前用户负责。</div>
   </div>
   <div class="mb-3">
     <label for="detail_link" class="form-label">详情链接</label>
     <input type="url" class="form-control" id="detail_link" name="detail_link"
           value="{{ location.detail_link if location else '' }}" placeholder="https://example.com">
     <div class="form-text">可填写空间的相关详情链接（可选）</div>
+  </div>
+  <div class="mb-3">
+    <div class="form-check form-switch mb-2">
+      <input class="form-check-input" type="checkbox" role="switch" id="isPublicSwitch" name="is_public"
+             {% if location_meta.is_public %}checked{% endif %}>
+      <label class="form-check-label" for="isPublicSwitch">公共空间（无需明确负责人，可由社区共同维护）</label>
+    </div>
+    <label class="form-label d-block">空间属性</label>
+    <div class="d-flex flex-wrap gap-2">
+      {% for value, label in location_usage_choices %}
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="checkbox" id="usageTag{{ loop.index }}" name="usage_tags" value="{{ value }}"
+               {% if value in location_meta.usage_tags %}checked{% endif %}>
+        <label class="form-check-label" for="usageTag{{ loop.index }}">{{ label }}</label>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="form-text text-muted">用于描述空间的主要用途，可多选；示例：学习空间、休闲娱乐、活动场地等。</div>
   </div>
   <div class="mb-3">
     <label class="form-label">精准坐标</label>
@@ -79,8 +97,14 @@
     <img id="imgPreview" src="#" alt="预览" style="max-width: 120px; display: none; margin-top: 5px;">
   </div>
   <div class="mb-3">
-    <label for="notes" class="form-label">备注</label>
-    <textarea class="form-control" id="notes" name="notes" rows="3">{{ location.notes if location else '' }}</textarea>
+    <label for="description" class="form-label">空间简介</label>
+    <textarea class="form-control" id="description" name="description" rows="3"
+              placeholder="简要介绍空间的特色、可开展的活动等">{{ location_meta.description }}</textarea>
+  </div>
+  <div class="mb-3">
+    <label for="access_info" class="form-label">出入说明</label>
+    <input type="text" class="form-control" id="access_info" name="access_info"
+           value="{{ location_meta.access_info }}" placeholder="如：需提前预约 / 仅周末开放 / 联系前台办理通行证">
   </div>
   {% set loc_adv_open = location and (location.clean_status or location.parent_id) %}
   <div class="accordion mb-3" id="locationAdvancedAccordion">
@@ -139,7 +163,7 @@
                      id="locationResp{{ m.id }}" data-label="{{ m.name or m.username }}"
                      {% if location and m in location.responsible_members %}
                        checked
-                     {% elif not location and m.id == current_user.id %}
+                     {% elif not location and not location_meta.is_public and m.id == current_user.id %}
                        checked
                      {% endif %}>
               <label class="form-check-label d-flex justify-content-between align-items-center w-100" for="locationResp{{ m.id }}">
@@ -205,6 +229,7 @@
     checkboxes.forEach(function (cb) {
       cb.addEventListener('change', renderSummary);
     });
+    renderSummary();
     if (searchInput) {
       searchInput.addEventListener('input', function () {
         const term = searchInput.value.trim().toLowerCase();

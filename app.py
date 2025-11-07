@@ -152,6 +152,7 @@ _LOCATION_USAGE_CHOICES = [
     ('other', '其他')
 ]
 _LOCATION_USAGE_KEYS = {key for key, _ in _LOCATION_USAGE_CHOICES}
+_LOCATION_USAGE_LABELS = dict(_LOCATION_USAGE_CHOICES)
 
 
 def _ensure_string(value):
@@ -2164,7 +2165,12 @@ def locations_list():
             func.count(event_locations.c.event_id)
         ).group_by(event_locations.c.location_id).all()
     )
-    return render_template('locations.html', locations=locations, event_counts=event_counts)
+    meta_map = {loc.id: _parse_location_notes(loc.notes)[0] for loc in locations}
+    return render_template('locations.html',
+                           locations=locations,
+                           event_counts=event_counts,
+                           location_meta_map=meta_map,
+                           location_usage_labels=_LOCATION_USAGE_LABELS)
 
 
 @app.route('/api/locations/search')
@@ -2237,7 +2243,6 @@ def add_location():
         clean_status = request.form.get('clean_status') or None
         parent_id = request.form.get('parent_id')
         responsible_ids = request.form.getlist('responsible_ids')
-        notes = request.form.get('notes')
         detail_link = request.form.get('detail_link')
         latitude = _parse_coordinate(request.form.get('latitude'))
         longitude = _parse_coordinate(request.form.get('longitude'))
@@ -2246,6 +2251,17 @@ def add_location():
             latitude = None
             longitude = None
             coordinate_source = None
+        is_public = request.form.get('is_public') in {'1', 'on', 'true', 'yes'}
+        usage_tags = [tag for tag in request.form.getlist('usage_tags') if tag in _LOCATION_USAGE_KEYS]
+        description = request.form.get('description') or ''
+        access_info = request.form.get('access_info') or ''
+        notes_meta = {
+            'description': description,
+            'usage_tags': usage_tags,
+            'access_info': access_info,
+            'is_public': is_public
+        }
+        serialized_notes = _serialize_location_notes(notes_meta)
 
         uploaded_files = request.files.getlist('images')
         if not uploaded_files:
@@ -2263,7 +2279,7 @@ def add_location():
         new_loc = Location(
             name=name,
             parent_id=parent_id if parent_id else None,
-            notes=notes,
+            notes=serialized_notes,
             image=primary_image,
             clean_status=clean_status,
             detail_link=detail_link,
@@ -2285,7 +2301,7 @@ def add_location():
         member_objs = []
         if responsible_ids:
             member_objs = Member.query.filter(Member.id.in_([int(mid) for mid in responsible_ids])).all()
-        if not member_objs:
+        if not member_objs and not is_public:
             member_objs = [current_user]
         new_loc.responsible_members = member_objs
         db.session.commit()
@@ -2299,17 +2315,23 @@ def add_location():
     
     members = Member.query.all()
     parents = Location.query.all()
-    return render_template('location_form.html', members=members, location=None, parents=parents)
+    default_meta, _ = _parse_location_notes(None)
+    return render_template('location_form.html',
+                           members=members,
+                           location=None,
+                           parents=parents,
+                           location_meta=default_meta,
+                           location_usage_choices=_LOCATION_USAGE_CHOICES)
 
 @app.route('/locations/<int:loc_id>/edit', methods=['GET', 'POST'])
 @login_required
 def edit_location(loc_id):
     location = Location.query.get_or_404(loc_id)
+    current_meta, _ = _parse_location_notes(location.notes)
     if request.method == 'POST':
         # 更新位置信息
         location.name = request.form.get('name')
         responsible_ids = request.form.getlist('responsible_ids')
-        notes = request.form.get('notes')
         detail_link = request.form.get('detail_link')
         location.clean_status = request.form.get('clean_status') or None
         latitude = _parse_coordinate(request.form.get('latitude'))
@@ -2361,14 +2383,24 @@ def edit_location(loc_id):
             location.image = location.images[0].filename
         elif remove_primary:
             location.image = None
+        is_public = request.form.get('is_public') in {'1', 'on', 'true', 'yes'}
+        usage_tags = [tag for tag in request.form.getlist('usage_tags') if tag in _LOCATION_USAGE_KEYS]
+        description = request.form.get('description') or ''
+        access_info = request.form.get('access_info') or ''
+        notes_meta = {
+            'description': description,
+            'usage_tags': usage_tags,
+            'access_info': access_info,
+            'is_public': is_public
+        }
+        location.notes = _serialize_location_notes(notes_meta)
         # 多负责人
         member_objs = []
         if responsible_ids:
             member_objs = Member.query.filter(Member.id.in_([int(mid) for mid in responsible_ids])).all()
-        if not member_objs:
+        if not member_objs and not is_public:
             member_objs = [current_user]
         location.responsible_members = member_objs
-        location.notes = notes
         location.detail_link = detail_link
         location.latitude = latitude
         location.longitude = longitude
@@ -2383,7 +2415,12 @@ def edit_location(loc_id):
         return redirect(url_for('locations_list'))
     members = Member.query.all()
     parents = Location.query.filter(Location.id != location.id).all()
-    return render_template('location_form.html', members=members, location=location, parents=parents)
+    return render_template('location_form.html',
+                           members=members,
+                           location=location,
+                           parents=parents,
+                           location_meta=current_meta,
+                           location_usage_choices=_LOCATION_USAGE_CHOICES)
 
 @app.route('/locations/<int:loc_id>/delete', methods=['POST'])
 @login_required
@@ -2456,6 +2493,12 @@ def view_location(loc_id):
     )
     event_bundle = _build_event_summary(events)
 
+    location_meta, _ = _parse_location_notes(location.notes)
+    usage_badges = [
+        {'key': tag, 'label': _LOCATION_USAGE_LABELS.get(tag, tag)}
+        for tag in location_meta['usage_tags']
+    ]
+
     return render_template('location.html', location=location, 
                            items=items_at_location,
                            status_counter=status_counter,
@@ -2469,7 +2512,9 @@ def view_location(loc_id):
                            upcoming_events=event_bundle['upcoming'],
                            unscheduled_events=event_bundle['unscheduled'],
                            recent_past_events=event_bundle['recent_past'],
-                           past_events_total=event_bundle['past_total'])
+                           past_events_total=event_bundle['past_total'],
+                           location_meta=location_meta,
+                           location_usage_badges=usage_badges)
 
 
 @app.route('/locations/<int:loc_id>/items/manage', methods=['POST'])

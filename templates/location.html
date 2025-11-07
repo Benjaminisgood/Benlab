@@ -32,17 +32,34 @@
 <div class="row">
   <div class="col-md-6">
     <ul class="list-group mb-3">
-      <li class="list-group-item"><strong>名称：</strong> {{ location.name }}</li>
+      <li class="list-group-item">
+        <strong>名称：</strong> {{ location.name }}
+        {% if location_meta.is_public %}
+          <span class="badge bg-success-subtle text-success-emphasis border ms-2">公共共享</span>
+        {% endif %}
+      </li>
       <li class="list-group-item">
         <strong>负责人：</strong>
         {% if location.responsible_members %}
           {% for member in location.responsible_members %}
             <a href="{{ url_for('profile', member_id=member.id) }}">{{ member.name }}</a>{% if not loop.last %}，{% endif %}
           {% endfor %}
+        {% elif location_meta.is_public %}
+          <span class="text-muted">共享空间，社区共同维护</span>
         {% else %}
           无
         {% endif %}
       </li>
+      {% if location_usage_badges %}
+      <li class="list-group-item">
+        <strong>空间用途：</strong>
+        <div class="d-flex flex-wrap gap-2 mt-2">
+          {% for badge in location_usage_badges %}
+          <span class="badge bg-info-subtle text-info-emphasis border">{{ badge.label }}</span>
+          {% endfor %}
+        </div>
+      </li>
+      {% endif %}
       {% if location.children %}
       <li class="list-group-item">
         <strong>子区域：</strong>
@@ -67,8 +84,11 @@
         </span>
       </li>
       {% endif %}
-      {% if location.notes %}
-      <li class="list-group-item"><strong>备注：</strong> {{ location.notes }}</li>
+      {% if location_meta.description %}
+      <li class="list-group-item"><strong>空间简介：</strong> {{ location_meta.description }}</li>
+      {% endif %}
+      {% if location_meta.access_info %}
+      <li class="list-group-item"><strong>出入说明：</strong> {{ location_meta.access_info }}</li>
       {% endif %}
       {% if location.detail_link %}
       <li class="list-group-item">

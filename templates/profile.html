@@ -5,8 +5,22 @@
       <div class="d-flex justify-content-between align-items-start gap-3">
         <div>
           <a href="{{ url_for('item_detail', item_id=entry.id) }}" class="fw-semibold text-decoration-none">{{ entry.name }}</a>
-          {% if entry.cas_no %}
-            <div class="small text-muted mt-1">CAS: {{ entry.cas_no }}</div>
+          {% set detail_links = entry.detail_links %}
+          {% if detail_links %}
+            {% set first_link = detail_links[0] %}
+            {% set is_http = first_link.url and (first_link.url.startswith('http://') or first_link.url.startswith('https://')) %}
+            <div class="small mt-1">
+              {% if is_http %}
+                <a href="{{ first_link.url }}" target="_blank" rel="noopener" class="text-decoration-none text-muted">
+                  {{ first_link.label or '查看详情' }}
+                </a>
+              {% else %}
+                <span class="text-muted">{{ first_link.label or first_link.url }}</span>
+              {% endif %}
+              {% if detail_links|length > 1 %}
+                <span class="text-muted">等 {{ detail_links|length }} 个链接</span>
+              {% endif %}
+            </div>
           {% endif %}
         </div>
         <div class="text-end">
@@ -14,7 +28,7 @@
             {% if entry.stock_status %}
               <span class="badge {% if '用完' in entry.stock_status %}bg-danger{% elif '少量' in entry.stock_status %}bg-warning text-dark{% else %}bg-secondary{% endif %}">{{ entry.stock_status }}</span>
             {% endif %}
-            {% if entry.features %}
+            {% if entry.features in ['公共', '私人'] %}
               <span class="badge bg-light text-dark border">{{ entry.features }}</span>
             {% endif %}
           </div>
@@ -81,6 +95,15 @@
       <p class="mb-0">
         {% if profile_user.contact %}📞 <a href="tel:{{ profile_user.contact|replace(' ', '') }}">{{ profile_user.contact }}</a>{% endif %}
       </p>
+      {% if profile_social_links %}
+      <div class="d-flex flex-wrap gap-2 mt-2">
+        {% for link in profile_social_links %}
+          <a href="{{ link.url }}" target="_blank" rel="noopener" class="badge bg-light text-dark border text-decoration-none">
+            {{ link.label or link.url }}
+          </a>
+        {% endfor %}
+      </div>
+      {% endif %}
     </div>
   </div>
 </div>
@@ -93,15 +116,43 @@
 <div class="card mb-4">
   <div class="card-header fw-semibold">个人展示 / 备注</div>
   <div class="card-body">
-    {% if profile_notes_html is defined %}
+    {% if profile_notes_html %}
       <div class="rich-text-content">{{ profile_notes_html|safe }}</div>
-    {% elif profile_user.notes %}
-      <p class="mb-0 text-muted" style="white-space: pre-wrap;">{{ profile_user.notes }}</p>
+    {% elif profile_meta.bio %}
+      <p class="mb-0 text-muted" style="white-space: pre-wrap;">{{ profile_meta.bio }}</p>
     {% else %}
       <p class="mb-0 text-muted">尚未填写个人展示，点击“编辑个人主页”补充介绍。</p>
     {% endif %}
   </div>
 </div>
+{% if profile_affiliations %}
+<div class="card mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span class="fw-semibold">地点关联</span>
+    <span class="badge bg-light text-dark border">{{ profile_affiliations|length }}</span>
+  </div>
+  <ul class="list-group list-group-flush">
+    {% for entry in profile_affiliations %}
+    <li class="list-group-item">
+      <div class="d-flex justify-content-between align-items-start gap-3">
+        <div>
+          <a href="{{ url_for('view_location', loc_id=entry.location.id) }}" class="fw-semibold text-decoration-none">{{ entry.location.name }}</a>
+          <span class="badge bg-info-subtle text-info-emphasis border ms-2">{{ entry.relation_label }}</span>
+          {% if entry.note %}
+            <div class="text-muted small mt-1">{{ entry.note }}</div>
+          {% endif %}
+        </div>
+        <div class="text-end text-muted small">
+          {% if entry.location.clean_status %}
+            状态：{{ entry.location.clean_status }}
+          {% endif %}
+        </div>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
 {% set preview_items = items_preview if items_preview is defined else items_resp[:5] %}
 {% set extra_items = items_extra if items_extra is defined else (items_resp[5:] if items_resp|length > 5 else []) %}
 {% set preview_locations = locations_preview if locations_preview is defined else locations_resp[:5] %}

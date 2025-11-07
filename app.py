@@ -134,6 +134,347 @@ _HASHTAG_PATTERN = re.compile(r'(?<![\w#])#(?P<tag>[\w\u4e00-\u9fa5-]+)')
 _MENTION_PATTERN = re.compile(r'(?<![\w@])@(?P<handle>[\w\u4e00-\u9fa5-]+)')
 _SENTIMENT_GOOD_TOKEN = '__SENT_POS__'
 _SENTIMENT_DOUBT_TOKEN = '__SENT_QUEST__'
+_ALLOWED_ITEM_FEATURES = {'公共', '私人'}
+_MEMBER_RELATION_TYPES = {
+    'study': '上学',
+    'work': '工作',
+    'live': '居住',
+    'own': '拥有',
+    'other': '其他'
+}
+_LOCATION_USAGE_CHOICES = [
+    ('study', '学习空间'),
+    ('leisure', '休闲娱乐'),
+    ('event', '活动场地'),
+    ('public', '公共设施'),
+    ('rental', '出租空间'),
+    ('residence', '生活社区'),
+    ('other', '其他')
+]
+_LOCATION_USAGE_KEYS = {key for key, _ in _LOCATION_USAGE_CHOICES}
+
+
+def _ensure_string(value):
+    return value if isinstance(value, str) else ''
+
+
+def _parse_item_detail_links(raw):
+    """Return normalized list of {'label','url'} dicts from stored string/list."""
+    if not raw:
+        return []
+    data = raw
+    if isinstance(raw, str):
+        raw = raw.strip()
+        if not raw:
+            return []
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            lines = [part.strip() for part in raw.splitlines() if part.strip()]
+            entries = []
+            for token in lines:
+                if '|||' in token:
+                    label, url = token.split('|||', 1)
+                elif '|' in token:
+                    label, url = token.split('|', 1)
+                else:
+                    label, url = '', token
+                label = label.strip()
+                url = url.strip()
+                if url:
+                    entries.append({'label': label, 'url': url})
+            if entries:
+                return entries
+            chunks = [part.strip() for part in re.split(r'[\n,]', raw) if part.strip()]
+            data = [{'label': '', 'url': chunk} for chunk in chunks]
+    entries = []
+    if isinstance(data, dict) and 'url' in data:
+        data = [data]
+    if isinstance(data, list):
+        for entry in data:
+            if isinstance(entry, str):
+                url = entry.strip()
+                if url:
+                    entries.append({'label': '', 'url': url})
+            elif isinstance(entry, dict):
+                url = _ensure_string(entry.get('url')).strip()
+                label = _ensure_string(entry.get('label')).strip()
+                if url:
+                    entries.append({'label': label, 'url': url})
+    # 去重，保留顺序
+    seen = set()
+    normalized = []
+    for entry in entries:
+        key = entry['url']
+        if key not in seen:
+            normalized.append(entry)
+            seen.add(key)
+    return normalized
+
+
+def _serialize_item_detail_links(entries, max_length=64):
+    """Serialize list of {'label','url'} dicts into compact string, enforcing length."""
+    if not entries:
+        return None, False
+    payload = []
+    seen = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        url = _ensure_string(entry.get('url')).strip()
+        if not url or url in seen:
+            continue
+        label = _ensure_string(entry.get('label')).strip()
+        payload.append({'label': label, 'url': url})
+        seen.add(url)
+    trimmed = False
+    while payload:
+        lines = []
+        for entry in payload:
+            label = entry['label'].replace('\n', ' ').strip()
+            url = entry['url']
+            token = f"{label}|||{url}" if label else url
+            lines.append(token)
+        serialized = '\n'.join(lines)
+        if not serialized:
+            break
+        if max_length is None or len(serialized) <= max_length:
+            return serialized, trimmed
+        payload.pop()  # 移除最后一条，避免超长
+        trimmed = True
+    return None, trimmed
+
+
+def _normalize_item_feature(value):
+    value = (value or '').strip()
+    return value if value in _ALLOWED_ITEM_FEATURES else None
+
+
+def _collect_detail_links_from_form(form):
+    labels = form.getlist('detail_link_label')
+    urls = form.getlist('detail_link_url')
+    entries = []
+    for label, url in zip(labels, urls):
+        url = _ensure_string(url).strip()
+        label = _ensure_string(label).strip()
+        if url:
+            entries.append({'label': label, 'url': url})
+    if entries:
+        return entries
+    fallback = form.get('detail_link_text') or form.get('cas_no')
+    if fallback:
+        return _parse_item_detail_links(fallback)
+    return []
+
+
+def _parse_location_notes(raw):
+    empty = {
+        'description': '',
+        'usage_tags': [],
+        'access_info': '',
+        'is_public': False
+    }
+    if not raw:
+        return empty, False
+    if isinstance(raw, dict):
+        data = raw
+    else:
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            empty['description'] = _ensure_string(raw)
+            return empty, False
+    if isinstance(data, dict) and 'description' in data:
+        description = _ensure_string(data.get('description'))
+        usage_raw = data.get('usage_tags') or []
+        usage_tags = []
+        if isinstance(usage_raw, list):
+            for tag in usage_raw:
+                tag = _ensure_string(tag)
+                if tag in _LOCATION_USAGE_KEYS:
+                    usage_tags.append(tag)
+        access_info = _ensure_string(data.get('access_info'))
+        is_public = bool(data.get('is_public'))
+        meta = {
+            'description': description,
+            'usage_tags': usage_tags,
+            'access_info': access_info,
+            'is_public': is_public
+        }
+        return meta, True
+    empty['description'] = _ensure_string(raw if isinstance(raw, str) else '')
+    return empty, False
+
+
+def _serialize_location_notes(meta):
+    payload = {
+        'description': _ensure_string(meta.get('description')),
+        'usage_tags': [],
+        'access_info': _ensure_string(meta.get('access_info')),
+        'is_public': bool(meta.get('is_public'))
+    }
+    usage_tags = meta.get('usage_tags') or []
+    seen = set()
+    for tag in usage_tags:
+        tag = _ensure_string(tag)
+        if tag in _LOCATION_USAGE_KEYS and tag not in seen:
+            payload['usage_tags'].append(tag)
+            seen.add(tag)
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _parse_profile_notes(raw):
+    """Decode member.notes into structured profile meta."""
+    empty = {
+        'bio': '',
+        'social_links': [],
+        'location_relations': []
+    }
+    if not raw:
+        return empty, False
+    if isinstance(raw, dict):
+        data = raw
+        structured = True
+    else:
+        try:
+            data = json.loads(raw)
+            structured = isinstance(data, dict) and 'bio' in data
+        except json.JSONDecodeError:
+            structured = False
+            data = None
+    if structured and isinstance(data, dict):
+        meta = {
+            'bio': _ensure_string(data.get('bio')),
+            'social_links': [],
+            'location_relations': []
+        }
+        social = data.get('social_links') or []
+        if isinstance(social, list):
+            for entry in social:
+                if not isinstance(entry, dict):
+                    continue
+                label = _ensure_string(entry.get('label')).strip()
+                url = _ensure_string(entry.get('url')).strip()
+                if url:
+                    meta['social_links'].append({'label': label, 'url': url})
+        locs = data.get('location_relations') or []
+        if isinstance(locs, list):
+            for entry in locs:
+                if not isinstance(entry, dict):
+                    continue
+                loc_id = entry.get('location_id')
+                try:
+                    loc_id = int(loc_id)
+                except (TypeError, ValueError):
+                    continue
+                relation = _ensure_string(entry.get('relation')).strip()
+                if relation not in _MEMBER_RELATION_TYPES:
+                    relation = 'other'
+                note = _ensure_string(entry.get('note')).strip()
+                meta['location_relations'].append({
+                    'location_id': loc_id,
+                    'relation': relation,
+                    'note': note
+                })
+        return meta, True
+    # 兼容旧文本
+    empty['bio'] = _ensure_string(raw)
+    return empty, False
+
+
+def _serialize_profile_notes(meta):
+    """Serialize structured profile meta to JSON string."""
+    payload = {
+        'bio': _ensure_string(meta.get('bio')),
+        'social_links': [],
+        'location_relations': []
+    }
+    social = meta.get('social_links') or []
+    for entry in social:
+        if not isinstance(entry, dict):
+            continue
+        label = _ensure_string(entry.get('label')).strip()
+        url = _ensure_string(entry.get('url')).strip()
+        if url:
+            payload['social_links'].append({'label': label, 'url': url})
+    locs = meta.get('location_relations') or []
+    seen = set()
+    for entry in locs:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            loc_id = int(entry.get('location_id'))
+        except (TypeError, ValueError):
+            continue
+        relation = _ensure_string(entry.get('relation')).strip()
+        if relation not in _MEMBER_RELATION_TYPES:
+            relation = 'other'
+        note = _ensure_string(entry.get('note')).strip()
+        key = (loc_id, relation, note)
+        if key in seen:
+            continue
+        seen.add(key)
+        payload['location_relations'].append({
+            'location_id': loc_id,
+            'relation': relation,
+            'note': note
+        })
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _build_event_summary(events, recent_past_limit=5):
+    """Categorize events into ongoing/upcoming/etc and compute summary stats."""
+    now = datetime.utcnow()
+    ongoing = []
+    upcoming = []
+    unscheduled = []
+    past = []
+    for ev in events:
+        start = ev.start_time
+        end = ev.end_time
+        if start and end:
+            if end < now:
+                past.append(ev)
+            elif start > now:
+                upcoming.append(ev)
+            else:
+                ongoing.append(ev)
+        elif start:
+            if start >= now:
+                upcoming.append(ev)
+            else:
+                past.append(ev)
+        else:
+            unscheduled.append(ev)
+
+    def sort_key(ev):
+        if ev.start_time:
+            return ev.start_time
+        if ev.end_time:
+            return ev.end_time
+        return ev.created_at or datetime.utcnow()
+
+    ongoing.sort(key=sort_key)
+    upcoming.sort(key=sort_key)
+    unscheduled.sort(key=lambda ev: ev.updated_at or ev.created_at or datetime.utcnow(), reverse=True)
+    past.sort(key=lambda ev: ev.end_time or ev.start_time or ev.updated_at or ev.created_at or datetime.min, reverse=True)
+    recent_past = past[:recent_past_limit]
+    summary = {
+        'total': len(events),
+        'ongoing': len(ongoing),
+        'upcoming': len(upcoming),
+        'unscheduled': len(unscheduled),
+        'past': len(past),
+        'participants': sum(len(ev.participant_links) for ev in events)
+    }
+    return {
+        'summary': summary,
+        'ongoing': ongoing,
+        'upcoming': upcoming,
+        'unscheduled': unscheduled,
+        'recent_past': recent_past,
+        'past_total': len(past)
+    }
 
 
 def render_rich_text(raw_text, mention_lookup=None):
@@ -341,7 +682,7 @@ class Item(db.Model):
     __tablename__ = 'items'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)    # 物品名称
-    cas_no = db.Column(db.String(64), nullable=True)     # ✅ CAS 号（可为空）
+    cas_no = db.Column(db.String(64), nullable=True)     # 详情链接集合（JSON 字符串，兼容旧 CAS 数据）
     category = db.Column(db.String(50))                 # 类别/危险级别
     stock_status = db.Column(db.String(50))        # ✅ 新增字段：库存状态
     features = db.Column(db.String(200))           # ✅ 多选：用逗号分隔
@@ -370,6 +711,15 @@ class Item(db.Model):
         cascade='all, delete-orphan',
         order_by='ItemImage.created_at'
     )
+
+    @property
+    def detail_links(self):
+        return _parse_item_detail_links(self.cas_no)
+
+    def set_detail_links(self, entries):
+        serialized, trimmed = _serialize_item_detail_links(entries)
+        self.cas_no = serialized
+        return trimmed
 
     @property
     def image_filenames(self):
@@ -1442,6 +1792,12 @@ def items():
         .order_by(func.lower(Item.name))
         .all()
     )
+    event_counts = dict(
+        db.session.query(
+            event_items.c.item_id,
+            func.count(event_items.c.event_id)
+        ).group_by(event_items.c.item_id).all()
+    )
     category_map = {}
     uncategorized_bucket = []
     for item in items_list:
@@ -1467,7 +1823,8 @@ def items():
         items=items_list,
         categories=categories,
         category_payload=category_payload,
-        uncategorized_items=uncategorized_payload
+        uncategorized_items=uncategorized_payload,
+        item_event_counts=event_counts
     )
 
 @app.route('/items/<int:item_id>')
@@ -1475,7 +1832,29 @@ def items():
 def item_detail(item_id):
     # 查看物品详情
     item = Item.query.get_or_404(item_id)
-    return render_template('item_detail.html', item=item)
+    events = (
+        Event.query
+        .join(event_items)
+        .filter(event_items.c.item_id == item.id)
+        .options(
+            db.selectinload(Event.owner),
+            db.selectinload(Event.participant_links).selectinload(EventParticipant.member),
+            db.selectinload(Event.locations)
+        )
+        .all()
+    )
+    event_bundle = _build_event_summary(events)
+    return render_template(
+        'item_detail.html',
+        item=item,
+        detail_links=item.detail_links,
+        event_summary=event_bundle['summary'],
+        ongoing_events=event_bundle['ongoing'],
+        upcoming_events=event_bundle['upcoming'],
+        unscheduled_events=event_bundle['unscheduled'],
+        recent_past_events=event_bundle['recent_past'],
+        past_events_total=event_bundle['past_total']
+    )
 
 @app.route('/items/add', methods=['GET', 'POST'])
 @login_required
@@ -1485,10 +1864,8 @@ def add_item():
         # 获取表单数据
         name = request.form.get('name')
         category = request.form.get('category')
-        cas_no = request.form.get('cas_no')
-
         stock_status = request.form.get('stock_status')  # ✅ 单选字段
-        features_str = request.form.get('features')  # 返回单个字符串
+        features_str = _normalize_item_feature(request.form.get('features'))  # 统一为公共/私人
 
         value = request.form.get('value')
         value = float(value) if value else None          # ✅ 数字输入
@@ -1504,6 +1881,7 @@ def add_item():
         location_ids = request.form.getlist('location_ids')  # ✅ 支持多个位置
         notes = request.form.get('notes')
         purchase_link = request.form.get('purchase_link')
+        detail_links = _collect_detail_links_from_form(request.form)
 
         # 图片处理（支持多张）
         uploaded_files = request.files.getlist('images')
@@ -1523,7 +1901,6 @@ def add_item():
         # ✅ 创建新的 Item 实例（已更新字段）
         new_item = Item(
             name=name,
-            cas_no=cas_no or None,
             category=category,
             stock_status=stock_status,
             features=features_str,
@@ -1536,6 +1913,9 @@ def add_item():
             purchase_link=purchase_link,
             image=primary_image
         )
+        trimmed_links = new_item.set_detail_links(detail_links)
+        if trimmed_links:
+            flash('部分详情链接过长（字段限 64 字符），已保留前几条，请确认链接长度。', 'warning')
         # 绑定多个位置（若前端未选择则为空列表）
         loc_ids = [int(x) for x in location_ids] if location_ids else []
         if not loc_ids and default_loc_id:
@@ -1593,10 +1973,13 @@ def edit_item(item_id):
         # 更新物品信息
         item.name = request.form.get('name')
         item.category = request.form.get('category')
-        item.cas_no = request.form.get('cas_no') or None
-        
+        detail_links = _collect_detail_links_from_form(request.form)
+        trimmed_links = item.set_detail_links(detail_links)
+        if trimmed_links:
+            flash('部分详情链接过长（字段限 64 字符），已保留前几条，请确认链接长度。', 'warning')
+
         item.stock_status = request.form.get('stock_status')  # 单选库存状态
-        item.features = request.form.get('features')          # 单选物品特性
+        item.features = _normalize_item_feature(request.form.get('features'))          # 单选物品特性
         
         item.value = request.form.get('value', type=float)    # 新增：价值（数值）
         item.quantity = request.form.get('quantity', type=float)  # 数量（数字）
@@ -2071,49 +2454,7 @@ def view_location(loc_id):
         )
         .all()
     )
-    now = datetime.utcnow()
-    ongoing_events = []
-    upcoming_events = []
-    unscheduled_events = []
-    past_events = []
-    for ev in events:
-        start = ev.start_time
-        end = ev.end_time
-        if start and end:
-            if end < now:
-                past_events.append(ev)
-            elif start > now:
-                upcoming_events.append(ev)
-            else:
-                ongoing_events.append(ev)
-        elif start:
-            if start >= now:
-                upcoming_events.append(ev)
-            else:
-                past_events.append(ev)
-        else:
-            unscheduled_events.append(ev)
-
-    def _event_sort_key(ev):
-        if ev.start_time:
-            return ev.start_time
-        if ev.end_time:
-            return ev.end_time
-        return ev.created_at or datetime.utcnow()
-
-    ongoing_events.sort(key=_event_sort_key)
-    upcoming_events.sort(key=_event_sort_key)
-    unscheduled_events.sort(key=lambda ev: ev.updated_at or ev.created_at or datetime.utcnow(), reverse=True)
-    past_events.sort(key=lambda ev: ev.end_time or ev.start_time or ev.updated_at or ev.created_at or datetime.min, reverse=True)
-    recent_past_events = past_events[:5]
-    event_summary = {
-        'total': len(events),
-        'ongoing': len(ongoing_events),
-        'upcoming': len(upcoming_events),
-        'unscheduled': len(unscheduled_events),
-        'past': len(past_events),
-        'participants': sum(len(ev.participant_links) for ev in events)
-    }
+    event_bundle = _build_event_summary(events)
 
     return render_template('location.html', location=location, 
                            items=items_at_location,
@@ -2123,12 +2464,12 @@ def view_location(loc_id):
                            feature_stats=feature_stats,
                            responsible_stats=responsible_stats,
                            available_items=available_items,
-                           event_summary=event_summary,
-                           ongoing_events=ongoing_events,
-                           upcoming_events=upcoming_events,
-                           unscheduled_events=unscheduled_events,
-                           recent_past_events=recent_past_events,
-                           past_events_total=len(past_events))
+                           event_summary=event_bundle['summary'],
+                           ongoing_events=event_bundle['ongoing'],
+                           upcoming_events=event_bundle['upcoming'],
+                           unscheduled_events=event_bundle['unscheduled'],
+                           recent_past_events=event_bundle['recent_past'],
+                           past_events_total=event_bundle['past_total'])
 
 
 @app.route('/locations/<int:loc_id>/items/manage', methods=['POST'])
@@ -2300,9 +2641,31 @@ def profile(member_id):
                         .order_by(Log.timestamp.desc()).limit(5).all()
     member_index, mention_lookup = build_member_lookup()
     profile_notes_html = None
-    if member.notes:
-        profile_notes_html = render_rich_text(member.notes, mention_lookup)
+    profile_meta, _ = _parse_profile_notes(member.notes)
+    if profile_meta['bio']:
+        profile_notes_html = render_rich_text(profile_meta['bio'], mention_lookup)
     feedback_entries = prepare_feedback_entries(member.feedback_log, member_index, mention_lookup)
+
+    affiliation_entries = []
+    relation_lookup = dict(_MEMBER_RELATION_TYPES)
+    if profile_meta['location_relations']:
+        loc_ids = [entry['location_id'] for entry in profile_meta['location_relations']]
+        unique_ids = {lid for lid in loc_ids}
+        if unique_ids:
+            loc_map = {loc.id: loc for loc in Location.query.filter(Location.id.in_(unique_ids)).all()}
+            for entry in profile_meta['location_relations']:
+                loc = loc_map.get(entry['location_id'])
+                if not loc:
+                    continue
+                relation = entry.get('relation', 'other')
+                if relation not in relation_lookup:
+                    relation = 'other'
+                affiliation_entries.append({
+                    'location': loc,
+                    'relation': relation,
+                    'relation_label': relation_lookup[relation],
+                    'note': entry.get('note', '').strip()
+                })
 
     # 当前用户自己的操作记录（仅查看自己的主页时显示）
     user_logs = []
@@ -2328,7 +2691,11 @@ def profile(member_id):
                            any_location_dirty=any_location_dirty,
                            events_upcoming=events_upcoming,
                            events_past=events_past,
-                           is_following=is_following)
+                           is_following=is_following,
+                           profile_meta=profile_meta,
+                           profile_social_links=profile_meta['social_links'],
+                           profile_affiliations=affiliation_entries,
+                           relation_lookup=relation_lookup)
 
 @app.route('/member/<int:member_id>/edit', methods=['GET', 'POST'])
 @login_required
@@ -2337,11 +2704,48 @@ def edit_profile(member_id):
         flash('无权编辑他人信息', 'danger')
         return redirect(url_for('profile', member_id=member_id))
     member = Member.query.get_or_404(member_id)
+    profile_meta, structured = _parse_profile_notes(member.notes)
     if request.method == 'POST':
         # 更新个人信息
         member.name = request.form.get('name')
         member.contact = request.form.get('contact')
-        member.notes = request.form.get('notes')
+        bio = request.form.get('bio') or ''
+        social_labels = request.form.getlist('social_label')
+        social_urls = request.form.getlist('social_url')
+        social_links = []
+        for label, url in zip(social_labels, social_urls):
+            url = _ensure_string(url).strip()
+            if not url:
+                continue
+            if not re.match(r'^[a-zA-Z][a-zA-Z0-9+.-]*://', url):
+                if url.startswith('www.'):
+                    url = 'https://' + url
+            label = _ensure_string(label).strip()
+            social_links.append({'label': label, 'url': url})
+        aff_loc_ids = request.form.getlist('affiliation_location_id')
+        aff_relations = request.form.getlist('affiliation_relation')
+        aff_notes = request.form.getlist('affiliation_note')
+        location_relations = []
+        for loc_id_raw, relation_raw, note_raw in zip(aff_loc_ids, aff_relations, aff_notes):
+            try:
+                loc_id = int(loc_id_raw)
+            except (TypeError, ValueError):
+                continue
+            relation = _ensure_string(relation_raw).strip()
+            if relation not in _MEMBER_RELATION_TYPES:
+                relation = 'other'
+            note = _ensure_string(note_raw).strip()
+            location_relations.append({
+                'location_id': loc_id,
+                'relation': relation,
+                'note': note
+            })
+        profile_payload = {
+            'bio': bio,
+            'social_links': social_links,
+            'location_relations': location_relations
+        }
+        member.notes = _serialize_profile_notes(profile_payload)
         # 如填写了新密码则更新密码
         new_password = request.form.get('password')
         if new_password and new_password.strip() != '':
@@ -2357,7 +2761,13 @@ def edit_profile(member_id):
         db.session.commit()
         flash('个人信息已更新', 'success')
         return redirect(url_for('profile', member_id=member_id))
-    return render_template('edit_profile.html', member=member)
+    locations = Location.query.order_by(func.lower(Location.name)).all()
+    return render_template('edit_profile.html',
+                           member=member,
+                           profile_meta=profile_meta,
+                           structured_notes=structured,
+                           relation_lookup=_MEMBER_RELATION_TYPES,
+                           locations=locations)
 
 @app.route('/message/<int:member_id>', methods=['POST'])
 @login_required

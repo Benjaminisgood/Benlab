@@ -1,5 +1,38 @@
 {% extends "base.html" %}
 {% block content %}
+{% macro render_event_entry(event, status_label=None) -%}
+<li class="list-group-item d-flex justify-content-between align-items-start gap-3">
+  <div class="flex-grow-1">
+    <a href="{{ url_for('event_detail', event_id=event.id) }}" class="fw-semibold text-decoration-none">{{ event.title }}</a>
+    <div class="text-muted small mt-1">
+      {% if event.start_time %}
+        {{ event.start_time.strftime('%Y-%m-%d %H:%M') }}
+        {% if event.end_time %}&ndash;{{ event.end_time.strftime('%Y-%m-%d %H:%M') }}{% endif %}
+      {% else %}
+        时间待定
+      {% endif %}
+    </div>
+    {% if event.locations %}
+      <div class="small text-muted">
+        {% for loc in event.locations %}
+          <a href="{{ url_for('view_location', loc_id=loc.id) }}" class="text-decoration-none me-1">{{ loc.name }}</a>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </div>
+  <div class="text-end">
+    {% if status_label %}
+      <div><span class="badge bg-primary-subtle text-primary-emphasis border">{{ status_label }}</span></div>
+    {% endif %}
+    <div class="mt-2">
+      <span class="badge bg-light text-dark border me-1">参与 {{ event.participant_count() }}</span>
+      <span class="badge bg-secondary-subtle text-secondary-emphasis border">
+        {% if event.visibility == 'public' %}公开{% elif event.visibility == 'internal' %}社区{% else %}私享{% endif %}
+      </span>
+    </div>
+  </div>
+</li>
+{%- endmacro %}
 <h4 class="mb-3">物品详情</h4>
 <div class="row">
   <div class="col-md-6">
@@ -8,21 +41,45 @@
       <li class="list-group-item"><strong>类别:</strong> {{ item.category or '未分类' }}</li>
       <li class="list-group-item">
         <div class="d-flex justify-content-between align-items-center">
-          <strong>CAS 号</strong>
+          <strong>详情链接</strong>
           <button class="btn btn-sm btn-outline-secondary collapse-toggle"
                   type="button"
                   data-bs-toggle="collapse"
-                  data-bs-target="#itemCasCollapse{{ item.id }}"
+                  data-bs-target="#itemDetailLinksCollapse{{ item.id }}"
                   aria-expanded="false"
-                  aria-controls="itemCasCollapse{{ item.id }}"
+                  aria-controls="itemDetailLinksCollapse{{ item.id }}"
                   data-expand-text="展开"
                   data-collapse-text="收起">
             展开
           </button>
         </div>
-        <div id="itemCasCollapse{{ item.id }}" class="collapse mt-2">
-          <div class="text-muted small mb-1">标准化化学识别号</div>
-          <span class="fw-semibold">{{ item.cas_no or '未指定' }}</span>
+        <div id="itemDetailLinksCollapse{{ item.id }}" class="collapse mt-2">
+          {% if detail_links %}
+          <ul class="list-unstyled mb-0">
+            {% for link in detail_links %}
+            <li class="mb-2">
+              {% set display_label = link.label or link.url %}
+              {% set is_http = link.url and (link.url.startswith('http://') or link.url.startswith('https://')) %}
+              {% if is_http %}
+                <a href="{{ link.url }}" target="_blank" rel="noopener" class="d-inline-flex align-items-center gap-2 text-decoration-none">
+                  <span class="badge bg-primary-subtle text-primary-emphasis border">{{ loop.index }}</span>
+                  <span>{{ display_label }}</span>
+                </a>
+                {% if link.label and link.label != link.url %}
+                  <div class="small text-muted">{{ link.url }}</div>
+                {% endif %}
+              {% else %}
+                <div class="d-flex align-items-center gap-2">
+                  <span class="badge bg-primary-subtle text-primary-emphasis border">{{ loop.index }}</span>
+                  <span class="text-muted">{{ display_label }}</span>
+                </div>
+              {% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <span class="text-muted">未提供</span>
+          {% endif %}
         </div>
       </li>
       <li class="list-group-item"><strong>库存状态:</strong> {{ item.stock_status or '未指定' }}</li>
@@ -41,8 +98,14 @@
           </button>
         </div>
         <div id="itemFeatureCollapse{{ item.id }}" class="collapse mt-2">
-          <div class="text-muted small mb-1">适用范围、使用提醒等描述</div>
-          <span class="fw-semibold">{{ item.features or '未指定' }}</span>
+          <div class="text-muted small mb-1">共享范围提示</div>
+          <span class="fw-semibold">
+            {% if item.features in ['公共', '私人'] %}
+              {{ item.features }}
+            {% else %}
+              未指定
+            {% endif %}
+          </span>
         </div>
       </li>
       <li class="list-group-item"><strong>价值:</strong> {{ item.value if item.value is not none else '未指定' }}</li>
@@ -117,6 +180,77 @@
         <button type="button" class="btn btn-sm btn-outline-secondary mt-2" id="copyItemLinkBtn">复制链接</button>
       </div>
     </div>
+  </div>
+</div>
+<div class="card mt-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>活动概况</span>
+    <span class="badge bg-primary-subtle text-primary-emphasis border">共 {{ event_summary.total }} 场</span>
+  </div>
+  <div class="card-body">
+    {% if event_summary.total %}
+    <div class="d-flex flex-wrap gap-2 mb-3">
+      <span class="badge bg-success-subtle text-success-emphasis border">正在使用 {{ event_summary.ongoing }}</span>
+      <span class="badge bg-info-subtle text-info-emphasis border">计划使用 {{ event_summary.upcoming }}</span>
+      {% if event_summary.unscheduled %}
+      <span class="badge bg-warning-subtle text-warning-emphasis border">待安排 {{ event_summary.unscheduled }}</span>
+      {% endif %}
+      <span class="badge bg-secondary-subtle text-secondary-emphasis border">历史活动 {{ event_summary.past }}</span>
+      {% if event_summary.participants %}
+      <span class="badge bg-light text-dark border">累计参与 {{ event_summary.participants }}</span>
+      {% endif %}
+    </div>
+    {% if ongoing_events %}
+    <div class="mb-3">
+      <div class="text-muted small mb-1">正在进行</div>
+      <ul class="list-group list-group-flush border rounded">
+        {% for event in ongoing_events %}
+        {{ render_event_entry(event, '进行中') }}
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+    {% if upcoming_events %}
+    <div class="mb-3">
+      <div class="text-muted small mb-1">即将进行</div>
+      <ul class="list-group list-group-flush border rounded">
+        {% for event in upcoming_events %}
+        {{ render_event_entry(event, '即将开始') }}
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+    {% if unscheduled_events %}
+    <div class="mb-3">
+      <div class="text-muted small mb-1">待排期</div>
+      <ul class="list-group list-group-flush border rounded">
+        {% for event in unscheduled_events %}
+        {{ render_event_entry(event, '待安排时间') }}
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+    {% if recent_past_events %}
+    <div class="mb-0">
+      <div class="text-muted small mb-1">
+        最近结束
+        {% if past_events_total > (recent_past_events|length) %}
+          （共 {{ past_events_total }} 场）
+        {% endif %}
+      </div>
+      <ul class="list-group list-group-flush border rounded">
+        {% for event in recent_past_events %}
+        {{ render_event_entry(event, '已结束') }}
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+    {% if not (ongoing_events or upcoming_events or unscheduled_events or recent_past_events) %}
+    <div class="text-muted">当前没有关联的活动记录。</div>
+    {% endif %}
+    {% else %}
+    <div class="text-muted">该物品尚未参与活动，可在创建/编辑活动时关联。</div>
+    {% endif %}
   </div>
 </div>
 

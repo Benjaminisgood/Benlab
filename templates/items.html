@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-  <h3 class="mb-0">物品列表</h3>
+  <h3 class="mb-0">社区物品总览</h3>
   <a href="{{ url_for('add_item') }}" class="btn btn-primary">新增物品</a>
 </div>
 
 <div class="d-flex flex-column flex-md-row align-items-md-center gap-2 mb-3">
   <div class="flex-grow-1 position-relative">
-    <input type="text" id="itemsFilterInput" class="form-control" placeholder="输入名称 / 备注 / CAS 号 / 类别等 立即筛选">
+    <input type="text" id="itemsFilterInput" class="form-control" placeholder="输入名称 / 备注 / 详情链接 / 类别等 立即筛选">
     <div id="itemsSuggestions" class="list-group position-absolute w-100 shadow-sm d-none" style="z-index: 20;"></div>
   </div>
 </div>
@@ -20,6 +20,7 @@
       <th>库存状态 / 特性</th>
       <th>存放位置</th>
       <th>负责人</th>
+      <th>关联活动</th>
       <th>操作</th>
     </tr>
   </thead>
@@ -50,7 +51,8 @@
         {% endif %}
       {% endif %}
       {% set location_names = item.locations | map(attribute='name') | list %}
-      {% set search_blob = (item.name ~ ' ' ~ (item.category or '-') ~ ' ' ~ (item.stock_status or '-') ~ ' ' ~ (item.features or '-') ~ ' ' ~ (item.cas_no or '-') ~ ' ' ~ (item.notes or '-') ~ ' ' ~ ((item.responsible_member.name) if item.responsible_member else '-') ~ ' ' ~ (location_names|join(' '))) %}
+      {% set detail_links_blob = item.detail_links | map(attribute='url') | list %}
+      {% set search_blob = (item.name ~ ' ' ~ (item.category or '-') ~ ' ' ~ (item.stock_status or '-') ~ ' ' ~ (item.features or '-') ~ ' ' ~ (detail_links_blob|join(' ')) ~ ' ' ~ (item.notes or '-') ~ ' ' ~ ((item.responsible_member.name) if item.responsible_member else '-') ~ ' ' ~ (location_names|join(' '))) %}
 
       <tr class="{{ row_class }}" data-search="{{ search_blob|lower }}">
         <td>
@@ -73,10 +75,8 @@
           {% if item.stock_status %}
             <span class="badge bg-primary me-1">{{ item.stock_status }}</span>
           {% endif %}
-          {% if item.features %}
-            {% for f in item.features.split(',') %}
-              <span class="badge bg-info text-dark me-1">{{ f }}</span>
-            {% endfor %}
+          {% if item.features in ['公共', '私人'] %}
+            <span class="badge bg-info text-dark me-1">{{ item.features }}</span>
           {% endif %}
           {% if not item.stock_status and not item.features %}
             -
@@ -95,6 +95,14 @@
           {% else %}-{% endif %}
         </td>
         <td>
+          {% set event_total = item_event_counts.get(item.id, 0) %}
+          {% if event_total %}
+            <span class="badge bg-light text-dark border">{{ event_total }}</span>
+          {% else %}
+            <span class="text-muted">0</span>
+          {% endif %}
+        </td>
+        <td>
           <a href="{{ url_for('edit_item', item_id=item.id) }}" class="btn btn-sm btn-outline-primary">编辑</a>
           <form action="{{ url_for('delete_item', item_id=item.id) }}" method="post" class="d-inline" onsubmit="return confirm('确定删除该物品吗？');">
             <button type="submit" class="btn btn-sm btn-outline-danger">删除</button>
@@ -104,7 +112,7 @@
     {% endfor %}
 
     <tr id="itemsNoResultRow" class="text-center text-muted {% if items|length > 0 %}d-none{% endif %}">
-      <td colspan="6">没有找到物品</td>
+      <td colspan="7">没有找到物品</td>
     </tr>
   </tbody>
 </table>

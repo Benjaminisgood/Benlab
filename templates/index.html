@@ -12,23 +12,42 @@
   .graph-legend .badge {
     margin-right: 0.5rem;
   }
+  .graph-inline-legend {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    font-size: 0.85rem;
+    background: rgba(15, 23, 42, 0.7);
+    padding: 0.4rem 0.65rem;
+    border-radius: 999px;
+    color: #cbd5f5;
+  }
+  .graph-inline-legend .legend-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+  .graph-inline-legend .badge {
+    margin-right: 0;
+  }
 </style>
 
 <h3 class="mb-3">与我相关</h3>
 <div class="row g-4">
   <div class="col-lg-9">
-    <div id="graph-canvas"></div>
-  </div>
-  <div class="col-lg-3">
-    <div class="card mb-3 graph-legend">
-      <div class="card-header">图例</div>
-      <div class="card-body">
-        <p><span class="badge" style="background:#1f77b4;">成员</span> 成员</p>
-        <p><span class="badge" style="background:#2ca02c;">物品</span> 物品</p>
-        <p><span class="badge" style="background:#ff7f0e;">事项</span> 活动</p>
-        <p><span class="badge" style="background:#9467bd;">地点</span> 位置</p>
+    <div id="graph-canvas">
+      <div class="graph-inline-legend">
+        <span class="legend-chip"><span class="badge" style="background:#1f77b4;">&nbsp;</span>成员</span>
+        <span class="legend-chip"><span class="badge" style="background:#2ca02c;">&nbsp;</span>物品</span>
+        <span class="legend-chip"><span class="badge" style="background:#ff7f0e;">&nbsp;</span>活动</span>
+        <span class="legend-chip"><span class="badge" style="background:#9467bd;">&nbsp;</span>地点</span>
       </div>
     </div>
+  </div>
+  <div class="col-lg-3">
     <div class="card">
       <div class="card-header">提示</div>
       <div class="card-body">

@@ -11,8 +11,109 @@
     <input type="text" class="form-control" id="contact" name="contact" value="{{ member.contact or '' }}">
   </div>
   <div class="mb-3">
-    <label for="notes" class="form-label">个人展示/备注</label>
-    <textarea class="form-control" id="notes" name="notes" rows="3">{{ member.notes or '' }}</textarea>
+    <label for="bio" class="form-label">个人介绍</label>
+    <textarea class="form-control" id="bio" name="bio" rows="3" placeholder="向社区伙伴介绍自己、最近关注的项目等">{{ profile_meta.bio }}</textarea>
+    {% if not structured_notes and member.notes %}
+      <div class="form-text text-muted">已为你预加载原有备注，保存后将转换为新格式。</div>
+    {% endif %}
+  </div>
+  <div class="mb-3">
+    <div class="d-flex justify-content-between align-items-center">
+      <label class="form-label mb-0">社交链接</label>
+      <button type="button" class="btn btn-sm btn-outline-secondary" id="addSocialLinkBtn">新增链接</button>
+    </div>
+    <div id="socialLinksContainer" class="d-flex flex-column gap-2 mt-2">
+      {% if profile_meta.social_links %}
+        {% for link in profile_meta.social_links %}
+        <div class="input-group social-link-row">
+          <span class="input-group-text">平台</span>
+          <input type="text" class="form-control" name="social_label" value="{{ link.label }}" placeholder="例如：微博 / B站">
+          <span class="input-group-text">地址</span>
+          <input type="url" class="form-control" name="social_url" value="{{ link.url }}" placeholder="https://example.com/you">
+          <button class="btn btn-outline-danger social-link-remove" type="button">&times;</button>
+        </div>
+        {% endfor %}
+      {% else %}
+        <div class="input-group social-link-row">
+          <span class="input-group-text">平台</span>
+          <input type="text" class="form-control" name="social_label" placeholder="例如：微博 / B站">
+          <span class="input-group-text">地址</span>
+          <input type="url" class="form-control" name="social_url" placeholder="https://example.com/you">
+          <button class="btn btn-outline-danger social-link-remove" type="button">&times;</button>
+        </div>
+      {% endif %}
+    </div>
+    <div class="form-text">可添加多个链接，便于他人关注你的社交账号或作品主页。</div>
+  </div>
+  <div class="mb-3">
+    <div class="d-flex justify-content-between align-items-center">
+      <label class="form-label mb-0">地点关联</label>
+      <button type="button" class="btn btn-sm btn-outline-secondary" id="addAffiliationBtn">新增关联</button>
+    </div>
+    <div id="affiliationsContainer" class="d-flex flex-column gap-3 mt-2">
+      {% if profile_meta.location_relations %}
+        {% for entry in profile_meta.location_relations %}
+        <div class="affiliation-row border rounded p-3">
+          <div class="row g-2 align-items-end">
+            <div class="col-md-5">
+              <label class="form-label">地点</label>
+              <select class="form-select" name="affiliation_location_id">
+                <option value="">选择地点</option>
+                {% for loc in locations %}
+                <option value="{{ loc.id }}" {% if entry.location_id == loc.id %}selected{% endif %}>{{ loc.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-3 col-sm-6">
+              <label class="form-label">关联关系</label>
+              <select class="form-select" name="affiliation_relation">
+                {% for key, label in relation_lookup.items() %}
+                <option value="{{ key }}" {% if entry.relation == key %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-3 col-sm-6">
+              <label class="form-label">备注</label>
+              <input type="text" class="form-control" name="affiliation_note" value="{{ entry.note }}">
+            </div>
+            <div class="col-md-1 d-grid">
+              <button type="button" class="btn btn-outline-danger affiliation-remove">&times;</button>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      {% else %}
+        <div class="affiliation-row border rounded p-3">
+          <div class="row g-2 align-items-end">
+            <div class="col-md-5">
+              <label class="form-label">地点</label>
+              <select class="form-select" name="affiliation_location_id">
+                <option value="">选择地点</option>
+                {% for loc in locations %}
+                <option value="{{ loc.id }}">{{ loc.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-3 col-sm-6">
+              <label class="form-label">关联关系</label>
+              <select class="form-select" name="affiliation_relation">
+                {% for key, label in relation_lookup.items() %}
+                <option value="{{ key }}">{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-3 col-sm-6">
+              <label class="form-label">备注</label>
+              <input type="text" class="form-control" name="affiliation_note" placeholder="选填：班级 / 部门等">
+            </div>
+            <div class="col-md-1 d-grid">
+              <button type="button" class="btn btn-outline-danger affiliation-remove">&times;</button>
+            </div>
+          </div>
+        </div>
+      {% endif %}
+    </div>
+    <div class="form-text">说明你与地点的关系，例如“上学”“居住”“工作”等，帮助他人了解你与社区空间的联系。</div>
   </div>
   <div class="mb-3">
     <label for="password" class="form-label">新密码 (留空则不修改)</label>
@@ -46,5 +147,117 @@
       }
     });
   }
+  (function manageSocialLinks() {
+    const container = document.getElementById('socialLinksContainer');
+    const addBtn = document.getElementById('addSocialLinkBtn');
+    if (!container || !addBtn) {
+      return;
+    }
+    const createRow = function (labelValue, urlValue) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'input-group social-link-row';
+      wrapper.innerHTML = `
+        <span class="input-group-text">平台</span>
+        <input type="text" class="form-control" name="social_label" placeholder="例如：微博 / B站">
+        <span class="input-group-text">地址</span>
+        <input type="url" class="form-control" name="social_url" placeholder="https://example.com/you">
+        <button class="btn btn-outline-danger social-link-remove" type="button">&times;</button>
+      `;
+      const labelInput = wrapper.querySelector('input[name="social_label"]');
+      const urlInput = wrapper.querySelector('input[name="social_url"]');
+      if (labelValue) {
+        labelInput.value = labelValue;
+      }
+      if (urlValue) {
+        urlInput.value = urlValue;
+      }
+      wrapper.querySelector('.social-link-remove').addEventListener('click', function () {
+        if (container.children.length > 1) {
+          wrapper.remove();
+        } else {
+          labelInput.value = '';
+          urlInput.value = '';
+        }
+      });
+      return wrapper;
+    };
+    addBtn.addEventListener('click', function () {
+      container.appendChild(createRow('', ''));
+    });
+    Array.prototype.slice.call(container.querySelectorAll('.social-link-row')).forEach(function (row) {
+      row.querySelector('.social-link-remove').addEventListener('click', function () {
+        if (container.children.length > 1) {
+          row.remove();
+        } else {
+          row.querySelector('input[name="social_label"]').value = '';
+          row.querySelector('input[name="social_url"]').value = '';
+        }
+      });
+    });
+  })();
+  (function manageAffiliations() {
+    const container = document.getElementById('affiliationsContainer');
+    const addBtn = document.getElementById('addAffiliationBtn');
+    if (!container || !addBtn) {
+      return;
+    }
+    const template = function () {
+      return `
+        <div class="row g-2 align-items-end">
+          <div class="col-md-5">
+            <label class="form-label">地点</label>
+            <select class="form-select" name="affiliation_location_id">
+              <option value="">选择地点</option>
+              {% for loc in locations %}
+              <option value="{{ loc.id }}">{{ loc.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-3 col-sm-6">
+            <label class="form-label">关联关系</label>
+            <select class="form-select" name="affiliation_relation">
+              {% for key, label in relation_lookup.items() %}
+              <option value="{{ key }}">{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-3 col-sm-6">
+            <label class="form-label">备注</label>
+            <input type="text" class="form-control" name="affiliation_note" placeholder="选填：班级 / 部门等">
+          </div>
+          <div class="col-md-1 d-grid">
+            <button type="button" class="btn btn-outline-danger affiliation-remove">&times;</button>
+          </div>
+        </div>
+      `;
+    };
+    addBtn.addEventListener('click', function () {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'affiliation-row border rounded p-3';
+      wrapper.innerHTML = template();
+      attachRemove(wrapper);
+      container.appendChild(wrapper);
+    });
+    function attachRemove(row) {
+      const btn = row.querySelector('.affiliation-remove');
+      if (!btn) {
+        return;
+      }
+      btn.addEventListener('click', function () {
+        if (container.children.length > 1) {
+          row.remove();
+        } else {
+          row.querySelectorAll('input, select').forEach(function (input) {
+            if (input.tagName === 'SELECT') {
+              input.selectedIndex = 0;
+            } else {
+              input.value = '';
+            }
+          });
+        }
+      });
+    }
+    Array.prototype.slice.call(container.querySelectorAll('.affiliation-row')).forEach(attachRemove);
+  })();
 </script>
 {% endblock %}

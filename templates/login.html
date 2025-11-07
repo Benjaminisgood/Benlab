@@ -2,7 +2,7 @@
 {% block content %}
 <div class="row justify-content-center">
   <div class="col-md-4">
-    <h3 class="mb-4">用户登录</h3>
+    <h3 class="mb-4">哇！终于等到了长得这么漂亮（帅气）的你，登录即可加入哦，信息随便填也没事</h3>
     <form method="post" action="{{ url_for('login') }}">
       <div class="mb-3">
         <label for="username" class="form-label">用户名</label>
@@ -13,7 +13,7 @@
         <input type="password" class="form-control" id="password" name="password" required>
       </div>
       <button type="submit" class="btn btn-primary">登录</button>
-      <a href="{{ url_for('register') }}" class="btn btn-link">没有账号？注册</a>
+      <a href="{{ url_for('register') }}" class="btn btn-link">没有账号？几秒钟注册一下，信息也能随便填，出门在外身份是自己给的</a>
     </form>
   </div>
 </div>

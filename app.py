@@ -13,6 +13,11 @@ from sqlalchemy import or_, func, text, inspect
 from flask_migrate import Migrate
 from markupsafe import Markup, escape
 
+try:
+    import oss2
+except ImportError:
+    oss2 = None
+
 
 app = Flask(__name__)
 # Behind reverse proxy (e.g., Nginx) fix: trust X-Forwarded-* headers
@@ -34,6 +39,22 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # app.config['UPLOAD_FOLDER'] = os.path.join(BASE_DIR, 'static', 'images')
 app.config['UPLOAD_FOLDER'] = os.path.join(BASE_DIR, 'images')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 限制上传16MB以内的文件
+OSS_ENDPOINT = os.getenv('ALIYUN_OSS_ENDPOINT')
+OSS_ACCESS_KEY_ID = os.getenv('ALIYUN_OSS_ACCESS_KEY_ID')
+OSS_ACCESS_KEY_SECRET = os.getenv('ALIYUN_OSS_ACCESS_KEY_SECRET')
+OSS_BUCKET_NAME = os.getenv('ALIYUN_OSS_BUCKET')
+OSS_PREFIX = (os.getenv('ALIYUN_OSS_PREFIX') or '').strip('/ ')
+OSS_PUBLIC_BASE_URL = (os.getenv('ALIYUN_OSS_PUBLIC_BASE_URL') or '').rstrip('/')
+USE_OSS = bool(oss2 and OSS_ENDPOINT and OSS_ACCESS_KEY_ID and OSS_ACCESS_KEY_SECRET and OSS_BUCKET_NAME)
+app.config['USE_OSS'] = USE_OSS
+if USE_OSS:
+    app.config['OSS_ENDPOINT'] = OSS_ENDPOINT
+    app.config['OSS_ACCESS_KEY_ID'] = OSS_ACCESS_KEY_ID
+    app.config['OSS_ACCESS_KEY_SECRET'] = OSS_ACCESS_KEY_SECRET
+    app.config['OSS_BUCKET'] = OSS_BUCKET_NAME
+    app.config['OSS_PREFIX'] = OSS_PREFIX
+    app.config['OSS_PUBLIC_BASE_URL'] = OSS_PUBLIC_BASE_URL
+_oss_bucket = None
 
 # ---- SQLite 并发优化（仅在使用 sqlite 时启用）----
 # 启用 WAL、调整同步级别与 busy_timeout，提升多读单写体验
@@ -88,10 +109,34 @@ member_follows = db.Table(
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
-# 允许上传的图片扩展名
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
+# 允许上传的媒体扩展名
+IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
+VIDEO_EXTENSIONS = {'mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v'}
+AUDIO_EXTENSIONS = {'mp3', 'wav', 'aac', 'm4a', 'ogg', 'flac'}
+ALLOWED_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS | AUDIO_EXTENSIONS
+MEDIA_KIND_LABELS = {
+    'image': '图片',
+    'video': '视频',
+    'audio': '音频',
+    'file': '文件'
+}
+
+
+def _extract_file_extension(filename):
+    if not filename:
+        return ''
+    name = filename.rsplit('/', 1)[-1]
+    if '?' in name:
+        name = name.split('?', 1)[0]
+    if '#' in name:
+        name = name.split('#', 1)[0]
+    if '.' not in name:
+        return ''
+    return name.rsplit('.', 1)[1].lower()
+
+
 def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+    return _extract_file_extension(filename) in ALLOWED_EXTENSIONS
 
 
 def _parse_coordinate(raw_value):
@@ -104,11 +149,11 @@ def _parse_coordinate(raw_value):
         return None
 
 
-_EXTERNAL_IMAGE_PREFIXES = ('http://', 'https://', '//')
+_EXTERNAL_MEDIA_PREFIXES = ('http://', 'https://', '//')
 
 
-def _is_external_image(ref):
-    return isinstance(ref, str) and ref.startswith(_EXTERNAL_IMAGE_PREFIXES)
+def _is_external_media(ref):
+    return isinstance(ref, str) and ref.startswith(_EXTERNAL_MEDIA_PREFIXES)
 
 
 def _extract_external_urls(raw_value):
@@ -128,6 +173,19 @@ def _extract_external_urls(raw_value):
                 urls.append(candidate)
                 seen.add(candidate)
     return urls
+
+def determine_media_kind(ref):
+    """Return media kind string for the given filename or URL."""
+    ext = _extract_file_extension(ref)
+    if ext in IMAGE_EXTENSIONS:
+        return 'image'
+    if ext in VIDEO_EXTENSIONS:
+        return 'video'
+    if ext in AUDIO_EXTENSIONS:
+        return 'audio'
+    if _is_external_media(ref):
+        return 'image'
+    return 'file'
 
 _LINK_PATTERN = re.compile(r'(?P<url>https?://[^\s<>"\'`]+)', re.IGNORECASE)
 _HASHTAG_PATTERN = re.compile(r'(?<![\w#])#(?P<tag>[\w\u4e00-\u9fa5-]+)')
@@ -611,17 +669,39 @@ def build_member_lookup():
             mention_lookup[m.username.lower()] = m.id
     return member_index, mention_lookup
 
+def _get_oss_bucket():
+    """Lazy initialise and return OSS bucket instance when启用."""
+    global _oss_bucket
+    if not app.config.get('USE_OSS'):
+        return None
+    if _oss_bucket is None:
+        if not oss2:
+            raise RuntimeError('oss2 library not available but OSS is enabled.')
+        auth = oss2.Auth(
+            app.config['OSS_ACCESS_KEY_ID'],
+            app.config['OSS_ACCESS_KEY_SECRET']
+        )
+        _oss_bucket = oss2.Bucket(auth, app.config['OSS_ENDPOINT'], app.config['OSS_BUCKET'])
+    return _oss_bucket
 
-def save_uploaded_image(file_storage):
-    """Persist an uploaded image and return the stored filename."""
+
+def save_uploaded_media(file_storage):
+    """Persist an uploaded media file and return the stored filename."""
     if not file_storage or file_storage.filename == '':
         return None
     if not allowed_file(file_storage.filename):
         return None
-    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
     filename = secure_filename(file_storage.filename)
     timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
     stored_name = f"{timestamp}_{filename}"
+    if app.config.get('USE_OSS'):
+        bucket = _get_oss_bucket()
+        prefix = app.config.get('OSS_PREFIX')
+        object_key = f"{prefix}/{stored_name}" if prefix else stored_name
+        file_storage.stream.seek(0)
+        bucket.put_object(object_key, file_storage.stream.read())
+        return object_key
+    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], stored_name)
     file_storage.save(filepath)
     return stored_name
@@ -629,7 +709,32 @@ def save_uploaded_image(file_storage):
 
 def remove_uploaded_file(filename):
     """Delete a previously saved image file if it still exists."""
-    if not filename or _is_external_image(filename):
+    if not filename or _is_external_media(filename):
+        return
+    if app.config.get('USE_OSS'):
+        bucket = _get_oss_bucket()
+        prefix = app.config.get('OSS_PREFIX')
+        key = filename
+        if prefix and key and not key.startswith(prefix):
+            # legacy local path retained after切换：尝试删除本地文件
+            path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except OSError:
+                pass
+            return
+        if not prefix:
+            local_legacy_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            if os.path.exists(local_legacy_path):
+                try:
+                    os.remove(local_legacy_path)
+                except OSError:
+                    pass
+        try:
+            bucket.delete_object(key)
+        except oss2.exceptions.NoSuchKey:  # type: ignore[attr-defined]
+            pass
         return
     path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     try:
@@ -637,6 +742,17 @@ def remove_uploaded_file(filename):
             os.remove(path)
     except OSError:
         pass
+
+
+def _build_oss_url(key):
+    key = key.lstrip('/')
+    public_base = app.config.get('OSS_PUBLIC_BASE_URL')
+    if public_base:
+        return f"{public_base}/{key}"
+    endpoint = app.config.get('OSS_ENDPOINT', '')
+    endpoint = endpoint.replace('https://', '').replace('http://', '')
+    bucket = app.config.get('OSS_BUCKET')
+    return f"https://{bucket}.{endpoint}/{key}"
 
 # 数据模型定义
 class Member(UserMixin, db.Model):
@@ -1006,7 +1122,7 @@ def ensure_owner_participation(event):
 
 def add_event_images(event, file_storages):
     for image_file in file_storages:
-        stored_name = save_uploaded_image(image_file)
+        stored_name = save_uploaded_media(image_file)
         if stored_name:
             event.images.append(EventImage(filename=stored_name))
 
@@ -1892,7 +2008,7 @@ def add_item():
 
         saved_filenames = []
         for image_file in uploaded_files:
-            stored_name = save_uploaded_image(image_file)
+            stored_name = save_uploaded_media(image_file)
             if stored_name:
                 saved_filenames.append(stored_name)
 
@@ -2023,7 +2139,7 @@ def edit_item(item_id):
             fallback_file = request.files.get('image')
             uploaded_files = [fallback_file] if fallback_file else []
         for image_file in uploaded_files:
-            stored_name = save_uploaded_image(image_file)
+            stored_name = save_uploaded_media(image_file)
             if stored_name:
                 item.images.append(ItemImage(filename=stored_name))
 
@@ -2270,7 +2386,7 @@ def add_location():
 
         saved_filenames = []
         for image_file in uploaded_files:
-            stored_name = save_uploaded_image(image_file)
+            stored_name = save_uploaded_media(image_file)
             if stored_name:
                 saved_filenames.append(stored_name)
         external_urls = _extract_external_urls(request.form.get('external_image_urls'))
@@ -2365,7 +2481,7 @@ def edit_location(loc_id):
             fallback_file = request.files.get('image')
             uploaded_files = [fallback_file] if fallback_file else []
         for image_file in uploaded_files:
-            stored_name = save_uploaded_image(image_file)
+            stored_name = save_uploaded_media(image_file)
             if stored_name:
                 location.images.append(LocationImage(filename=stored_name))
 
@@ -2498,6 +2614,39 @@ def view_location(loc_id):
         {'key': tag, 'label': _LOCATION_USAGE_LABELS.get(tag, tag)}
         for tag in location_meta['usage_tags']
     ]
+    relation_members = {}
+    seen_pairs = set()
+    members = Member.query.options(load_only(Member.id, Member.name, Member.username, Member.notes)).all()
+    for mem in members:
+        meta, _ = _parse_profile_notes(mem.notes)
+        for rel in meta['location_relations']:
+            if rel.get('location_id') != location.id:
+                continue
+            relation = rel.get('relation', 'other')
+            if relation not in _MEMBER_RELATION_TYPES:
+                relation = 'other'
+            note = _ensure_string(rel.get('note')).strip()
+            identity = (mem.id, relation, note)
+            if identity in seen_pairs:
+                continue
+            seen_pairs.add(identity)
+            relation_members.setdefault(relation, []).append({
+                'member': mem,
+                'note': note
+            })
+    affiliation_summary = []
+    affiliation_total = 0
+    for relation, entries in relation_members.items():
+        entries.sort(key=lambda entry: ((entry['member'].name or entry['member'].username or '').lower()))
+        count = len(entries)
+        affiliation_total += count
+        affiliation_summary.append({
+            'relation': relation,
+            'label': _MEMBER_RELATION_TYPES.get(relation, relation),
+            'count': count,
+            'members': entries
+        })
+    affiliation_summary.sort(key=lambda entry: (-entry['count'], entry['label']))
 
     return render_template('location.html', location=location, 
                            items=items_at_location,
@@ -2514,7 +2663,9 @@ def view_location(loc_id):
                            recent_past_events=event_bundle['recent_past'],
                            past_events_total=event_bundle['past_total'],
                            location_meta=location_meta,
-                           location_usage_badges=usage_badges)
+                           location_usage_badges=usage_badges,
+                           affiliation_summary=affiliation_summary,
+                           affiliation_total=affiliation_total)
 
 
 @app.route('/locations/<int:loc_id>/items/manage', methods=['POST'])
@@ -2798,10 +2949,13 @@ def edit_profile(member_id):
         # 更新头像
         image_file = request.files.get('photo')
         if image_file and image_file.filename != '' and allowed_file(image_file.filename):
-            stored_name = save_uploaded_image(image_file)
-            if stored_name:
-                remove_uploaded_file(member.photo)
-                member.photo = stored_name
+            if determine_media_kind(image_file.filename) != 'image':
+                flash('头像仅支持图片格式，请选择 JPG / PNG 等常见格式。', 'warning')
+            else:
+                stored_name = save_uploaded_media(image_file)
+                if stored_name:
+                    remove_uploaded_file(member.photo)
+                    member.photo = stored_name
         member.last_modified = datetime.utcnow()
         db.session.commit()
         flash('个人信息已更新', 'success')
@@ -2852,40 +3006,90 @@ def export_data(datatype):
 
 @app.context_processor
 def inject_image_helpers():
-    def resolve_image_url(ref):
+    def resolve_media_url(ref):
         if not ref:
             return None
-        if _is_external_image(ref):
+        if _is_external_media(ref):
             return ref
+        if app.config.get('USE_OSS'):
+            prefix = app.config.get('OSS_PREFIX')
+            key = ref.lstrip('/')
+            looks_like_oss = False
+            if prefix and key.startswith(prefix):
+                looks_like_oss = True
+            elif '/' in key:
+                looks_like_oss = True
+            else:
+                local_path = os.path.join(app.config['UPLOAD_FOLDER'], ref)
+                looks_like_oss = not os.path.exists(local_path)
+            if looks_like_oss:
+                return _build_oss_url(key)
         return url_for('uploaded_file', filename=ref)
 
-    def item_image_urls(item):
+    def _build_media_entries(sources):
+        entries = []
+        seen = set()
+        for fname in sources or []:
+            if not fname or fname in seen:
+                continue
+            seen.add(fname)
+            resolved = resolve_media_url(fname)
+            if not resolved:
+                continue
+            base = ''
+            if isinstance(fname, str):
+                token = fname.split('?', 1)[0].split('#', 1)[0]
+                base = os.path.basename(token)
+            entries.append({
+                'url': resolved,
+                'kind': determine_media_kind(fname),
+                'filename': fname,
+                'display_name': base,
+                'is_remote': _is_external_media(fname)
+            })
+        return entries
+
+    def item_media_entries(item):
         if not item:
             return []
-        urls = []
-        for fname in getattr(item, 'image_filenames', []) or []:
-            resolved = resolve_image_url(fname)
-            if resolved:
-                urls.append(resolved)
-        return urls
+        return _build_media_entries(getattr(item, 'image_filenames', []) or [])
 
-    def location_image_urls(location):
+    def location_media_entries(location):
         if not location:
             return []
-        urls = []
-        for fname in getattr(location, 'image_filenames', []) or []:
-            resolved = resolve_image_url(fname)
-            if resolved:
-                urls.append(resolved)
-        return urls
+        return _build_media_entries(getattr(location, 'image_filenames', []) or [])
+
+    def event_media_entries(event):
+        if not event:
+            return []
+        filenames = []
+        for img in getattr(event, 'images', []) or []:
+            if img.filename:
+                filenames.append(img.filename)
+        return _build_media_entries(filenames)
+
+    def uploaded_media_url(filename):
+        return resolve_media_url(filename)
+
+    def item_image_urls(item):
+        return [entry['url'] for entry in item_media_entries(item) if entry['kind'] == 'image']
+
+    def location_image_urls(location):
+        return [entry['url'] for entry in location_media_entries(location) if entry['kind'] == 'image']
 
     def uploaded_image_url(filename):
-        return resolve_image_url(filename)
+        return uploaded_media_url(filename)
 
     return dict(
+        item_media_entries=item_media_entries,
+        location_media_entries=location_media_entries,
+        event_media_entries=event_media_entries,
+        uploaded_media_url=uploaded_media_url,
         item_image_urls=item_image_urls,
         location_image_urls=location_image_urls,
         uploaded_image_url=uploaded_image_url,
+        media_kind=determine_media_kind,
+        media_kind_labels=MEDIA_KIND_LABELS,
     )
 
 if __name__ == "__main__":

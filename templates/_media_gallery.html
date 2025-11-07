@@ -1,0 +1,54 @@
+{% macro render_media_gallery(entries, gallery_id, media_kind_labels, empty_text='暂无媒体文件') -%}
+  {% if entries %}
+  <div class="media-gallery" id="{{ gallery_id }}">
+    <div class="media-gallery-grid">
+      {% for media in entries %}
+      <div class="media-card" data-kind="{{ media.kind|default('file') }}">
+        {% if media.kind == 'image' %}
+        <img src="{{ media.url }}" alt="{{ media.display_name or '媒体文件' }}" class="media-card-img" loading="lazy">
+        {% elif media.kind == 'video' %}
+        <div class="media-placeholder" data-kind="video">
+          <div class="media-placeholder-header">
+            <span class="media-tag">{{ media_kind_labels.get('video', '视频') }}</span>
+            {% if media.display_name %}
+            <span class="media-name" title="{{ media.display_name }}">{{ media.display_name }}</span>
+            {% endif %}
+          </div>
+          <button type="button"
+                  class="btn btn-sm btn-primary media-play-btn"
+                  data-kind="video"
+                  data-src="{{ media.url }}"
+                  data-name="{{ media.display_name or '' }}">
+            点击播放
+          </button>
+        </div>
+        {% elif media.kind == 'audio' %}
+        <div class="media-placeholder" data-kind="audio">
+          <div class="media-placeholder-header">
+            <span class="media-tag">{{ media_kind_labels.get('audio', '音频') }}</span>
+            {% if media.display_name %}
+            <span class="media-name" title="{{ media.display_name }}">{{ media.display_name }}</span>
+            {% endif %}
+          </div>
+          <button type="button"
+                  class="btn btn-sm btn-outline-primary media-play-btn"
+                  data-kind="audio"
+                  data-src="{{ media.url }}"
+                  data-name="{{ media.display_name or '' }}">
+            播放音频
+          </button>
+        </div>
+        {% else %}
+        <a href="{{ media.url }}" target="_blank" rel="noopener" class="media-file-link">
+          <span class="media-tag">{{ media_kind_labels.get(media.kind, '文件') }}</span>
+          <span class="media-name">{{ media.display_name or media.url }}</span>
+        </a>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% else %}
+  <p class="text-muted">{{ empty_text }}</p>
+  {% endif %}
+{%- endmacro %}

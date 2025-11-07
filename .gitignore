@@ -19,3 +19,4 @@ images/**/*
 *.pot
 flask.log
 flask.pid
+.env

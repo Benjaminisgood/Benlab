@@ -63,6 +63,93 @@
       border-color: rgba(220, 53, 69, 0.35);
       color: #842029;
     }
+    .media-gallery {
+      width: 100%;
+    }
+    .media-gallery-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 1rem;
+    }
+    .media-card {
+      position: relative;
+      border: 1px solid var(--bs-border-color);
+      border-radius: 0.75rem;
+      padding: 0.75rem;
+      background-color: var(--bs-body-bg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 160px;
+      overflow: hidden;
+    }
+    .media-card-img {
+      max-width: 100%;
+      max-height: 240px;
+      border-radius: 0.5rem;
+      object-fit: contain;
+    }
+    .media-placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      width: 100%;
+      text-align: center;
+    }
+    .media-placeholder-header {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      width: 100%;
+      align-items: center;
+    }
+    .media-tag {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.25rem 0.6rem;
+      font-size: 0.8rem;
+      border-radius: 999px;
+      background-color: rgba(13, 110, 253, 0.12);
+      color: var(--bs-primary);
+      border: 1px solid rgba(13, 110, 253, 0.3);
+    }
+    .media-card[data-kind="audio"] .media-tag {
+      background-color: rgba(32, 201, 151, 0.12);
+      color: #198754;
+      border-color: rgba(32, 201, 151, 0.35);
+    }
+    .media-card[data-kind="video"] .media-tag {
+      background-color: rgba(111, 66, 193, 0.12);
+      color: #6f42c1;
+      border-color: rgba(111, 66, 193, 0.35);
+    }
+    .media-name {
+      font-size: 0.8rem;
+      color: var(--bs-secondary-color);
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .media-file-link {
+      display: flex;
+      width: 100%;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      text-decoration: none;
+    }
+    .media-card video,
+    .media-card audio {
+      width: 100%;
+      max-height: 260px;
+      border-radius: 0.5rem;
+      outline: none;
+    }
   </style>
 </head>
 <body>
@@ -138,6 +225,37 @@
     var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
       return new bootstrap.Tooltip(tooltipTriggerEl)
     })
+    document.addEventListener('click', function (event) {
+      var trigger = event.target.closest('.media-play-btn');
+      if (!trigger) {
+        return;
+      }
+      var kind = trigger.getAttribute('data-kind');
+      var src = trigger.getAttribute('data-src');
+      if (!kind || !src) {
+        return;
+      }
+      var card = trigger.closest('.media-card');
+      if (!card) {
+        return;
+      }
+      var player;
+      if (kind === 'video') {
+        player = document.createElement('video');
+        player.setAttribute('playsinline', '');
+      } else if (kind === 'audio') {
+        player = document.createElement('audio');
+      } else {
+        return;
+      }
+      player.classList.add('w-100');
+      player.controls = true;
+      player.preload = 'metadata';
+      player.src = src;
+      card.innerHTML = '';
+      card.appendChild(player);
+      player.focus();
+    }, false);
   </script>
 </body>
 </html>

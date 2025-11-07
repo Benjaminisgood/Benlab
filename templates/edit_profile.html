@@ -53,16 +53,25 @@
     <div id="affiliationsContainer" class="d-flex flex-column gap-3 mt-2">
       {% if profile_meta.location_relations %}
         {% for entry in profile_meta.location_relations %}
-        <div class="affiliation-row border rounded p-3">
+        {% set current_loc = (locations | selectattr('id','equalto', entry.location_id) | first) %}
+        <div class="affiliation-row border rounded p-3" data-affiliation-index="{{ loop.index0 }}">
           <div class="row g-2 align-items-end">
             <div class="col-md-5">
-              <label class="form-label">地点</label>
-              <select class="form-select" name="affiliation_location_id">
-                <option value="">选择地点</option>
-                {% for loc in locations %}
-                <option value="{{ loc.id }}" {% if entry.location_id == loc.id %}selected{% endif %}>{{ loc.name }}</option>
-                {% endfor %}
-              </select>
+              <label class="form-label d-block">地点</label>
+              <div class="d-flex flex-wrap align-items-center gap-2">
+                <div class="badge bg-light text-dark border affiliation-location-summary" data-default="选择地点">
+                  {{ current_loc.name if current_loc else '选择地点' }}
+                </div>
+                <button type="button"
+                        class="btn btn-outline-secondary btn-sm affiliation-location-picker"
+                        data-bs-toggle="modal"
+                        data-bs-target="#affiliationLocationModal"
+                        data-affiliation-index="{{ loop.index0 }}"
+                        data-selected="{{ entry.location_id if entry.location_id else '' }}">
+                  选择地点
+                </button>
+              </div>
+              <input type="hidden" name="affiliation_location_id" value="{{ entry.location_id if entry.location_id else '' }}">
             </div>
             <div class="col-md-3 col-sm-6">
               <label class="form-label">关联关系</label>
@@ -80,19 +89,27 @@
               <button type="button" class="btn btn-outline-danger affiliation-remove">&times;</button>
             </div>
           </div>
-        </div>
-        {% endfor %}
-      {% else %}
-        <div class="affiliation-row border rounded p-3">
-          <div class="row g-2 align-items-end">
+    </div>
+    {% endfor %}
+  {% else %}
+    <div class="affiliation-row border rounded p-3" data-affiliation-index="0">
+      <div class="row g-2 align-items-end">
             <div class="col-md-5">
-              <label class="form-label">地点</label>
-              <select class="form-select" name="affiliation_location_id">
-                <option value="">选择地点</option>
-                {% for loc in locations %}
-                <option value="{{ loc.id }}">{{ loc.name }}</option>
-                {% endfor %}
-              </select>
+              <label class="form-label d-block">地点</label>
+              <div class="d-flex flex-wrap align-items-center gap-2">
+                <div class="badge bg-light text-dark border affiliation-location-summary" data-default="选择地点">
+                  选择地点
+                </div>
+                <button type="button"
+                        class="btn btn-outline-secondary btn-sm affiliation-location-picker"
+                        data-bs-toggle="modal"
+                        data-bs-target="#affiliationLocationModal"
+                        data-affiliation-index="0"
+                        data-selected="">
+                  选择地点
+                </button>
+              </div>
+              <input type="hidden" name="affiliation_location_id" value="">
             </div>
             <div class="col-md-3 col-sm-6">
               <label class="form-label">关联关系</label>
@@ -109,11 +126,43 @@
             <div class="col-md-1 d-grid">
               <button type="button" class="btn btn-outline-danger affiliation-remove">&times;</button>
             </div>
-          </div>
-        </div>
-      {% endif %}
+      </div>
     </div>
-    <div class="form-text">说明你与地点的关系，例如“上学”“居住”“工作”等，帮助他人了解你与社区空间的联系。</div>
+  {% endif %}
+</div>
+<div class="form-text">说明你与地点的关系，例如“上学”“居住”“工作”等，帮助他人了解你与社区空间的联系。</div>
+
+<div class="modal fade" id="affiliationLocationModal" tabindex="-1" aria-labelledby="affiliationLocationModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="affiliationLocationModalLabel">选择关联地点</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+      </div>
+      <div class="modal-body">
+        <input type="search" class="form-control form-control-sm mb-3" id="affiliationLocationSearch" placeholder="搜索空间名称">
+        <div class="border rounded p-2" style="max-height: 320px; overflow-y: auto;">
+          <div class="form-check affiliation-location-row py-1" data-label="顶层空间">
+            <input class="form-check-input affiliation-location-radio" type="radio" name="affiliation_location_select" value=""
+                   id="affiliationLocationNone" data-name="选择地点">
+            <label class="form-check-label" for="affiliationLocationNone">未指定</label>
+          </div>
+          {% for loc in locations %}
+          <div class="form-check affiliation-location-row py-1" data-label="{{ loc.name|lower }}">
+            <input class="form-check-input affiliation-location-radio" type="radio" name="affiliation_location_select"
+                   value="{{ loc.id }}" id="affiliationLocation{{ loc.id }}" data-name="{{ loc.name }}">
+            <label class="form-check-label" for="affiliationLocation{{ loc.id }}">{{ loc.name }}</label>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="affiliationLocationClearBtn">清除选择</button>
+        <button type="button" class="btn btn-primary btn-sm" id="affiliationLocationConfirmBtn" data-bs-dismiss="modal">完成</button>
+      </div>
+    </div>
+  </div>
+</div>
   </div>
   <div class="mb-3">
     <label for="password" class="form-label">新密码 (留空则不修改)</label>
@@ -201,17 +250,32 @@
     if (!container || !addBtn) {
       return;
     }
-    const template = function () {
+    const locationModal = document.getElementById('affiliationLocationModal');
+    const locationSearch = document.getElementById('affiliationLocationSearch');
+    const locationClearBtn = document.getElementById('affiliationLocationClearBtn');
+    const locationConfirmBtn = document.getElementById('affiliationLocationConfirmBtn');
+    const modalRadios = locationModal ? Array.prototype.slice.call(locationModal.querySelectorAll('.affiliation-location-radio')) : [];
+    const modalRows = locationModal ? Array.prototype.slice.call(locationModal.querySelectorAll('.affiliation-location-row')) : [];
+    let activeAffiliationRow = null;
+
+    let affiliationIndex = container.querySelectorAll('.affiliation-row').length;
+    const template = function (index) {
       return `
         <div class="row g-2 align-items-end">
           <div class="col-md-5">
-            <label class="form-label">地点</label>
-            <select class="form-select" name="affiliation_location_id">
-              <option value="">选择地点</option>
-              {% for loc in locations %}
-              <option value="{{ loc.id }}">{{ loc.name }}</option>
-              {% endfor %}
-            </select>
+            <label class="form-label d-block">地点</label>
+            <div class="d-flex flex-wrap align-items-center gap-2">
+              <div class="badge bg-light text-dark border affiliation-location-summary" data-default="选择地点">选择地点</div>
+              <button type="button"
+                      class="btn btn-outline-secondary btn-sm affiliation-location-picker"
+                      data-bs-toggle="modal"
+                      data-bs-target="#affiliationLocationModal"
+                      data-affiliation-index="${index}"
+                      data-selected="">
+                选择地点
+              </button>
+            </div>
+            <input type="hidden" name="affiliation_location_id" value="">
           </div>
           <div class="col-md-3 col-sm-6">
             <label class="form-label">关联关系</label>
@@ -231,13 +295,24 @@
         </div>
       `;
     };
-    addBtn.addEventListener('click', function () {
-      const wrapper = document.createElement('div');
-      wrapper.className = 'affiliation-row border rounded p-3';
-      wrapper.innerHTML = template();
-      attachRemove(wrapper);
-      container.appendChild(wrapper);
-    });
+
+    function resetRow(row) {
+      row.querySelectorAll('select').forEach(function (select) { select.selectedIndex = 0; });
+      row.querySelectorAll('input[type="text"]').forEach(function (input) { input.value = ''; });
+      const hidden = row.querySelector('input[name="affiliation_location_id"]');
+      if (hidden) {
+        hidden.value = '';
+      }
+      const summary = row.querySelector('.affiliation-location-summary');
+      if (summary) {
+        summary.textContent = summary.getAttribute('data-default') || '选择地点';
+      }
+      const pickerBtn = row.querySelector('.affiliation-location-picker');
+      if (pickerBtn) {
+        pickerBtn.setAttribute('data-selected', '');
+      }
+    }
+
     function attachRemove(row) {
       const btn = row.querySelector('.affiliation-remove');
       if (!btn) {
@@ -247,17 +322,105 @@
         if (container.children.length > 1) {
           row.remove();
         } else {
-          row.querySelectorAll('input, select').forEach(function (input) {
-            if (input.tagName === 'SELECT') {
-              input.selectedIndex = 0;
-            } else {
-              input.value = '';
-            }
-          });
+          resetRow(row);
         }
       });
     }
-    Array.prototype.slice.call(container.querySelectorAll('.affiliation-row')).forEach(attachRemove);
+
+    function attachLocationPicker(row) {
+      if (!locationModal) {
+        return;
+      }
+      const button = row.querySelector('.affiliation-location-picker');
+      const hidden = row.querySelector('input[name="affiliation_location_id"]');
+      if (!button || !hidden) {
+        return;
+      }
+      button.addEventListener('click', function () {
+        activeAffiliationRow = row;
+        const current = hidden.value || '';
+        if (locationSearch) {
+          locationSearch.value = '';
+          modalRows.forEach(function (r) { r.style.display = ''; });
+        }
+        modalRadios.forEach(function (radio) {
+          radio.checked = radio.value === current;
+        });
+      });
+    }
+
+    Array.prototype.slice.call(container.querySelectorAll('.affiliation-row')).forEach(function (row, idx) {
+      if (!row.getAttribute('data-affiliation-index')) {
+        row.setAttribute('data-affiliation-index', String(idx));
+      }
+      const picker = row.querySelector('.affiliation-location-picker');
+      if (picker) {
+        picker.setAttribute('data-affiliation-index', row.getAttribute('data-affiliation-index'));
+      }
+      attachRemove(row);
+      attachLocationPicker(row);
+    });
+
+    addBtn.addEventListener('click', function () {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'affiliation-row border rounded p-3';
+      wrapper.setAttribute('data-affiliation-index', String(affiliationIndex));
+      wrapper.innerHTML = template(affiliationIndex);
+      attachRemove(wrapper);
+      attachLocationPicker(wrapper);
+      container.appendChild(wrapper);
+      affiliationIndex += 1;
+    });
+
+    if (locationModal) {
+      if (locationClearBtn) {
+        locationClearBtn.addEventListener('click', function () {
+          const noneRadio = document.getElementById('affiliationLocationNone');
+          if (noneRadio) {
+            noneRadio.checked = true;
+          }
+        });
+      }
+      if (locationConfirmBtn) {
+        locationConfirmBtn.addEventListener('click', function () {
+          if (!activeAffiliationRow) {
+            return;
+          }
+          const hidden = activeAffiliationRow.querySelector('input[name="affiliation_location_id"]');
+          const summary = activeAffiliationRow.querySelector('.affiliation-location-summary');
+          const pickerBtn = activeAffiliationRow.querySelector('.affiliation-location-picker');
+          const selected = modalRadios.find(function (radio) { return radio.checked; });
+          const defaultText = summary ? (summary.getAttribute('data-default') || '选择地点') : '选择地点';
+          const value = selected ? selected.value : '';
+          if (hidden) {
+            hidden.value = value;
+          }
+          if (summary) {
+            summary.textContent = value ? (selected.getAttribute('data-name') || defaultText) : defaultText;
+          }
+          if (pickerBtn) {
+            pickerBtn.setAttribute('data-selected', value || '');
+          }
+          activeAffiliationRow = null;
+        });
+      }
+      if (locationSearch) {
+        locationSearch.addEventListener('input', function () {
+          const term = this.value.trim().toLowerCase();
+          modalRows.forEach(function (row) {
+            const label = (row.getAttribute('data-label') || '').toLowerCase();
+            row.style.display = term ? (label.indexOf(term) !== -1 ? '' : 'none') : '';
+          });
+        });
+      }
+      locationModal.addEventListener('hidden.bs.modal', function () {
+        activeAffiliationRow = null;
+        if (locationSearch) {
+          locationSearch.value = '';
+          modalRows.forEach(function (row) { row.style.display = ''; });
+        }
+      });
+    }
   })();
 </script>
 {% endblock %}

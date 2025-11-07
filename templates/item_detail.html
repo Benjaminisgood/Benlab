@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_media_gallery.html" import render_media_gallery %}
 {% block content %}
 {% macro render_event_entry(event, status_label=None) -%}
 <li class="list-group-item d-flex justify-content-between align-items-start gap-3">
@@ -40,73 +41,39 @@
       <li class="list-group-item"><strong>名称:</strong> {{ item.name }}</li>
       <li class="list-group-item"><strong>类别:</strong> {{ item.category or '未分类' }}</li>
       <li class="list-group-item">
-        <div class="d-flex justify-content-between align-items-center">
-          <strong>详情链接</strong>
-          <button class="btn btn-sm btn-outline-secondary collapse-toggle"
-                  type="button"
-                  data-bs-toggle="collapse"
-                  data-bs-target="#itemDetailLinksCollapse{{ item.id }}"
-                  aria-expanded="false"
-                  aria-controls="itemDetailLinksCollapse{{ item.id }}"
-                  data-expand-text="展开"
-                  data-collapse-text="收起">
-            展开
-          </button>
-        </div>
-        <div id="itemDetailLinksCollapse{{ item.id }}" class="collapse mt-2">
-          {% if detail_links %}
-          <ul class="list-unstyled mb-0">
-            {% for link in detail_links %}
-            <li class="mb-2">
-              {% set display_label = link.label or link.url %}
-              {% set is_http = link.url and (link.url.startswith('http://') or link.url.startswith('https://')) %}
-              {% if is_http %}
-                <a href="{{ link.url }}" target="_blank" rel="noopener" class="d-inline-flex align-items-center gap-2 text-decoration-none">
-                  <span class="badge bg-primary-subtle text-primary-emphasis border">{{ loop.index }}</span>
-                  <span>{{ display_label }}</span>
-                </a>
-                {% if link.label and link.label != link.url %}
-                  <div class="small text-muted">{{ link.url }}</div>
-                {% endif %}
-              {% else %}
-                <div class="d-flex align-items-center gap-2">
-                  <span class="badge bg-primary-subtle text-primary-emphasis border">{{ loop.index }}</span>
-                  <span class="text-muted">{{ display_label }}</span>
-                </div>
+        <strong>详情链接：</strong>
+        {% if detail_links %}
+        <ul class="list-unstyled mt-2 mb-0">
+          {% for link in detail_links %}
+          <li class="mb-2">
+            {% set display_label = link.label or link.url %}
+            {% set is_http = link.url and (link.url.startswith('http://') or link.url.startswith('https://')) %}
+            {% if is_http %}
+              <a href="{{ link.url }}" target="_blank" rel="noopener" class="d-inline-flex align-items-center gap-2 text-decoration-none">
+                <span class="badge bg-primary-subtle text-primary-emphasis border">{{ loop.index }}</span>
+                <span>{{ display_label }}</span>
+              </a>
+              {% if link.label and link.label != link.url %}
+              <div class="small text-muted">{{ link.url }}</div>
               {% endif %}
-            </li>
-            {% endfor %}
-          </ul>
-          {% else %}
-          <span class="text-muted">未提供</span>
-          {% endif %}
-        </div>
+            {% else %}
+              <span class="badge bg-primary-subtle text-primary-emphasis border">{{ loop.index }}</span>
+              <span class="text-muted ms-2">{{ display_label }}</span>
+            {% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <span class="text-muted">未提供</span>
+        {% endif %}
       </li>
       <li class="list-group-item"><strong>库存状态:</strong> {{ item.stock_status or '未指定' }}</li>
-      <li class="list-group-item">
-        <div class="d-flex justify-content-between align-items-center">
-          <strong>物品特性</strong>
-          <button class="btn btn-sm btn-outline-secondary collapse-toggle"
-                  type="button"
-                  data-bs-toggle="collapse"
-                  data-bs-target="#itemFeatureCollapse{{ item.id }}"
-                  aria-expanded="false"
-                  aria-controls="itemFeatureCollapse{{ item.id }}"
-                  data-expand-text="展开"
-                  data-collapse-text="收起">
-            展开
-          </button>
-        </div>
-        <div id="itemFeatureCollapse{{ item.id }}" class="collapse mt-2">
-          <div class="text-muted small mb-1">共享范围提示</div>
-          <span class="fw-semibold">
-            {% if item.features in ['公共', '私人'] %}
-              {{ item.features }}
-            {% else %}
-              未指定
-            {% endif %}
-          </span>
-        </div>
+      <li class="list-group-item"><strong>物品特性:</strong>
+        {% if item.features in ['公共', '私人'] %}
+          {{ item.features }}
+        {% else %}
+          未指定
+        {% endif %}
       </li>
       <li class="list-group-item"><strong>价值:</strong> {{ item.value if item.value is not none else '未指定' }}</li>
       <li class="list-group-item"><strong>数量:</strong> 
@@ -155,29 +122,24 @@
   </div>
 
   <div class="col-md-6">
-    {% set image_urls = item_image_urls(item) %}
-    {% if image_urls %}
-      <div class="text-center">
-        <img src="{{ image_urls[0] }}" alt="物品图片" class="img-fluid img-thumbnail" id="itemGalleryImage">
+    {% set media_entries = item_media_entries(item) %}
+    <div class="card mb-3">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>相关媒体</span>
+        <span class="badge bg-light text-dark border">{{ media_entries|length }}</span>
       </div>
-      {% if image_urls|length > 1 %}
-      <div class="d-flex justify-content-between align-items-center mt-2">
-        <button type="button" class="btn btn-sm btn-outline-secondary" id="prevItemImage">上一张</button>
-        <small id="itemGalleryStatus">1 / {{ image_urls|length }}</small>
-        <button type="button" class="btn btn-sm btn-outline-secondary" id="nextItemImage">下一张</button>
+      <div class="card-body">
+        {{ render_media_gallery(media_entries, 'itemMediaGallery', media_kind_labels, '暂无图片或影音') }}
       </div>
-      {% endif %}
-    {% else %}
-      <p class="text-muted">无图片</p>
-    {% endif %}
-    <hr class="my-3">
-    <div>
-      <h6 class="mb-2">二维码（手机扫码打开本页）</h6>
-      <div id="itemQrBox" class="p-2 border rounded d-inline-block"></div>
-      <div class="mt-2">
-        <input type="text" id="itemPermalink" class="form-control form-control-sm" readonly
-              value="{{ request.url }}">
-        <button type="button" class="btn btn-sm btn-outline-secondary mt-2" id="copyItemLinkBtn">复制链接</button>
+    </div>
+    <div class="card">
+      <div class="card-header">二维码（手机扫码打开本页）</div>
+      <div class="card-body">
+        <div id="itemQrBox" class="p-2 border rounded d-inline-block"></div>
+        <div class="mt-2">
+          <input type="text" id="itemPermalink" class="form-control form-control-sm" readonly value="{{ request.url }}">
+          <button type="button" class="btn btn-sm btn-outline-secondary mt-2" id="copyItemLinkBtn">复制链接</button>
+        </div>
       </div>
     </div>
   </div>
@@ -276,59 +238,6 @@
       setTimeout(function(){ copyBtn.textContent = '复制链接'; }, 1200);
     });
   }
-
-  var itemImages = {{ item_image_urls(item)|tojson }};
-  var galleryImg = document.getElementById('itemGalleryImage');
-  if (galleryImg && itemImages.length > 1) {
-    var statusEl = document.getElementById('itemGalleryStatus');
-    var prevBtn = document.getElementById('prevItemImage');
-    var nextBtn = document.getElementById('nextItemImage');
-    var index = 0;
-    var updateGallery = function () {
-      galleryImg.src = itemImages[index];
-      if (statusEl) {
-        statusEl.textContent = (index + 1) + ' / ' + itemImages.length;
-      }
-    };
-    if (prevBtn) {
-      prevBtn.addEventListener('click', function () {
-        index = (index - 1 + itemImages.length) % itemImages.length;
-        updateGallery();
-      });
-    }
-    if (nextBtn) {
-      nextBtn.addEventListener('click', function () {
-        index = (index + 1) % itemImages.length;
-        updateGallery();
-      });
-    }
-  }
-
-  var collapsibleButtons = document.querySelectorAll('.collapse-toggle');
-  collapsibleButtons.forEach(function (btn) {
-    var targetSelector = btn.getAttribute('data-bs-target');
-    if (!targetSelector) {
-      return;
-    }
-    var target = document.querySelector(targetSelector);
-    if (!target) {
-      return;
-    }
-    var expandText = btn.getAttribute('data-expand-text') || '展开';
-    var collapseText = btn.getAttribute('data-collapse-text') || '收起';
-    var applyState = function (isOpen) {
-      btn.textContent = isOpen ? collapseText : expandText;
-      btn.classList.toggle('btn-outline-primary', isOpen);
-      btn.classList.toggle('btn-outline-secondary', !isOpen);
-    };
-    target.addEventListener('show.bs.collapse', function () {
-      applyState(true);
-    });
-    target.addEventListener('hide.bs.collapse', function () {
-      applyState(false);
-    });
-    applyState(target.classList.contains('show'));
-  });
 })();
 </script>
 {% endblock %}

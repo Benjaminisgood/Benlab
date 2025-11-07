@@ -41,31 +41,53 @@
         <div class="form-text">可选。如果有协作文档或活动公告，可贴上链接方便查阅。</div>
       </div>
       <div class="mb-3">
-        <label class="form-label" for="event_images">活动照片</label>
-        <input type="file" class="form-control" id="event_images" name="event_images" accept="image/*" multiple>
-        <div class="form-text">支持一次上传多张照片，建议使用小于 5MB 的图片。</div>
+        <label class="form-label" for="event_images">活动媒体（图片 / 视频 / 音频）</label>
+        <input type="file" class="form-control" id="event_images" name="event_images" accept="image/*,video/*,audio/*" multiple>
+        <div class="form-text">支持批量上传，单个文件建议小于 16 MB。</div>
         <div class="mt-3">
-          <label class="form-label" for="externalEventImageUrls">外部图片链接</label>
+          <label class="form-label" for="externalEventImageUrls">外部媒体链接</label>
           <textarea class="form-control" id="externalEventImageUrls" name="external_event_image_urls" rows="2" placeholder="每行一个 http(s):// 链接">{{ form_state.external_image_urls }}</textarea>
-          <div class="form-text">可粘贴 OSS / 图床地址，便于一次性加载大量照片。上传与外链的展示样式保持一致。</div>
+          <div class="form-text">可粘贴 OSS / 图床 / 视频或音频外链，上传与外链的展示样式保持一致。</div>
         </div>
       </div>
       {% if is_edit and event.images %}
       <div class="mb-3">
-        <label class="form-label">已上传的照片</label>
-        <div class="row g-2">
+        <label class="form-label">已上传媒资</label>
+        <div class="d-flex flex-wrap gap-3">
           {% for img in event.images %}
-          <div class="col-sm-4">
-            <div class="card h-100">
-              <img src="{{ uploaded_image_url(img.filename) }}" class="card-img-top" alt="活动照片">
-              <div class="card-body p-2">
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" value="{{ img.id }}" id="removeImg{{ img.id }}" name="remove_event_image_ids">
-                  <label class="form-check-label small" for="removeImg{{ img.id }}">删除该照片</label>
+            {% set media_kind_value = media_kind(img.filename) %}
+            {% set media_url = uploaded_media_url(img.filename) %}
+            {% set media_name = img.filename|default('')|split('?')|first|split('/')|last %}
+            <div class="media-card flex-column align-items-stretch" data-kind="{{ media_kind_value }}">
+              {% if media_kind_value == 'image' %}
+              <img src="{{ media_url }}" alt="活动媒资" class="media-card-img">
+              {% elif media_kind_value == 'video' %}
+              <div class="media-placeholder" data-kind="video">
+                <div class="media-placeholder-header">
+                  <span class="media-tag">{{ media_kind_labels.get('video', '视频') }}</span>
+                  {% if media_name %}<span class="media-name" title="{{ media_name }}">{{ media_name }}</span>{% endif %}
                 </div>
+                <button type="button" class="btn btn-sm btn-primary media-play-btn" data-kind="video" data-src="{{ media_url }}">预览视频</button>
+              </div>
+              {% elif media_kind_value == 'audio' %}
+              <div class="media-placeholder" data-kind="audio">
+                <div class="media-placeholder-header">
+                  <span class="media-tag">{{ media_kind_labels.get('audio', '音频') }}</span>
+                  {% if media_name %}<span class="media-name" title="{{ media_name }}">{{ media_name }}</span>{% endif %}
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-primary media-play-btn" data-kind="audio" data-src="{{ media_url }}">预览音频</button>
+              </div>
+              {% else %}
+              <a href="{{ media_url }}" target="_blank" rel="noopener" class="media-file-link">
+                <span class="media-tag">{{ media_kind_labels.get(media_kind_value, '文件') }}</span>
+                <span class="media-name">{{ media_name or media_url }}</span>
+              </a>
+              {% endif %}
+              <div class="form-check mt-2">
+                <input class="form-check-input" type="checkbox" value="{{ img.id }}" id="removeImg{{ img.id }}" name="remove_event_image_ids">
+                <label class="form-check-label small" for="removeImg{{ img.id }}">删除该媒资</label>
               </div>
             </div>
-          </div>
           {% endfor %}
         </div>
       </div>

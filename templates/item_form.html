@@ -77,7 +77,7 @@
       {% if legacy_only %}
         {% set legacy_kind = media_kind(item.image) %}
         {% set legacy_url = uploaded_media_url(item.image) %}
-        {% set legacy_name = item.image|default('')|split('?')|first|split('/')|last %}
+        {% set legacy_name = media_display_name(item.image) %}
         <div class="media-card flex-column align-items-stretch" data-kind="{{ legacy_kind }}">
           {% if legacy_kind == 'image' %}
           <img src="{{ legacy_url }}" alt="已上传媒体" class="media-card-img">
@@ -112,7 +112,7 @@
       {% for gallery_image in item.images %}
         {% set media_kind_value = media_kind(gallery_image.filename) %}
         {% set media_url = uploaded_media_url(gallery_image.filename) %}
-        {% set media_name = gallery_image.filename|default('')|split('?')|first|split('/')|last %}
+        {% set media_name = media_display_name(gallery_image.filename) %}
         <div class="media-card flex-column align-items-stretch" data-kind="{{ media_kind_value }}">
           {% if media_kind_value == 'image' %}
           <img src="{{ media_url }}" alt="已上传媒体" class="media-card-img">

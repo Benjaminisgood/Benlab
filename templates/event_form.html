@@ -57,7 +57,7 @@
           {% for img in event.images %}
             {% set media_kind_value = media_kind(img.filename) %}
             {% set media_url = uploaded_media_url(img.filename) %}
-            {% set media_name = img.filename|default('')|split('?')|first|split('/')|last %}
+            {% set media_name = media_display_name(img.filename) %}
             <div class="media-card flex-column align-items-stretch" data-kind="{{ media_kind_value }}">
               {% if media_kind_value == 'image' %}
               <img src="{{ media_url }}" alt="活动媒资" class="media-card-img">

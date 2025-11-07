@@ -3026,6 +3026,14 @@ def inject_image_helpers():
                 return _build_oss_url(key)
         return url_for('uploaded_file', filename=ref)
 
+    def media_display_name(ref):
+        if not ref:
+            return ''
+        token = str(ref)
+        token = token.split('?', 1)[0]
+        token = token.split('#', 1)[0]
+        return os.path.basename(token)
+
     def _build_media_entries(sources):
         entries = []
         seen = set()
@@ -3036,15 +3044,11 @@ def inject_image_helpers():
             resolved = resolve_media_url(fname)
             if not resolved:
                 continue
-            base = ''
-            if isinstance(fname, str):
-                token = fname.split('?', 1)[0].split('#', 1)[0]
-                base = os.path.basename(token)
             entries.append({
                 'url': resolved,
                 'kind': determine_media_kind(fname),
                 'filename': fname,
-                'display_name': base,
+                'display_name': media_display_name(fname),
                 'is_remote': _is_external_media(fname)
             })
         return entries
@@ -3090,6 +3094,7 @@ def inject_image_helpers():
         uploaded_image_url=uploaded_image_url,
         media_kind=determine_media_kind,
         media_kind_labels=MEDIA_KIND_LABELS,
+        media_display_name=media_display_name,
     )
 
 if __name__ == "__main__":

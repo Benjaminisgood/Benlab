@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>化学实验室管理系统</title>
+  <title>五天八小时社区</title>
   <!-- 引入 Bootstrap CSS -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
@@ -79,7 +79,7 @@
   <!-- 导航栏 -->
   <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
     <div class="container-fluid">
-      <a class="navbar-brand" href="{{ url_for('index') }}">实验室管理系统</a>
+      <a class="navbar-brand" href="{{ url_for('index') }}">五天八小时社区</a>
       <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
         <span class="navbar-toggler-icon"></span>
       </button>
@@ -87,16 +87,16 @@
         <ul class="navbar-nav me-auto">
           {% if current_user.is_authenticated %}
           <li class="nav-item">
-            <a class="nav-link" href="{{ url_for('items') }}">物品管理</a>
+            <a class="nav-link" href="{{ url_for('items') }}">物品</a>
           </li>
           <li class="nav-item">
-            <a class="nav-link" href="{{ url_for('locations_list') }}">实验室位置</a>
+            <a class="nav-link" href="{{ url_for('locations_list') }}">位置</a>
           </li>
           <li class="nav-item">
-            <a class="nav-link" href="{{ url_for('events_overview') }}">事项与活动</a>
+            <a class="nav-link" href="{{ url_for('events_overview') }}">活动</a>
           </li>
           <li class="nav-item">
-            <a class="nav-link" href="{{ url_for('members_list') }}">课题组成员</a>
+            <a class="nav-link" href="{{ url_for('members_list') }}">成员</a>
           </li>
           {% endif %}
         </ul>

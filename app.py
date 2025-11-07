@@ -1775,7 +1775,13 @@ def locations_list():
         # selectinload 用于加载多级 children 避免 N+1 查询问题
         db.selectinload(Location.children).selectinload(Location.children)
     ).order_by(Location.name).all()
-    return render_template('locations.html', locations=locations)
+    event_counts = dict(
+        db.session.query(
+            event_locations.c.location_id,
+            func.count(event_locations.c.event_id)
+        ).group_by(event_locations.c.location_id).all()
+    )
+    return render_template('locations.html', locations=locations, event_counts=event_counts)
 
 
 @app.route('/api/locations/search')
@@ -1905,7 +1911,7 @@ def add_location():
         db.session.add(log)
         db.session.commit()
 
-        flash('实验室位置已添加', 'success')
+        flash('社区空间已添加', 'success')
         return redirect(url_for('locations_list'))
     
     members = Member.query.all()
@@ -1990,7 +1996,7 @@ def edit_location(loc_id):
         log = Log(user_id=current_user.id, location_id=location.id, action_type="修改位置", details=f"Edited location {location.name}")
         db.session.add(log)
         db.session.commit()
-        flash('位置信息已更新', 'success')
+        flash('空间信息已更新', 'success')
         return redirect(url_for('locations_list'))
     members = Member.query.all()
     parents = Location.query.filter(Location.id != location.id).all()
@@ -2008,7 +2014,7 @@ def delete_location(loc_id):
     log = Log(user_id=current_user.id, location_id=loc_id, action_type="删除位置", details=f"Deleted location {location.name}")
     db.session.add(log)
     db.session.commit()
-    flash('实验室位置已删除', 'info')
+    flash('社区空间已删除', 'info')
     return redirect(url_for('locations_list'))
 
 @app.route('/locations/<int:loc_id>')
@@ -2055,6 +2061,60 @@ def view_location(loc_id):
     available_items = Item.query.filter(~Item.locations.any(Location.id == location.id)) \
                                 .order_by(Item.name.asc()).all()
 
+    events = (
+        Event.query
+        .join(event_locations)
+        .filter(event_locations.c.location_id == location.id)
+        .options(
+            db.selectinload(Event.owner),
+            db.selectinload(Event.participant_links).selectinload(EventParticipant.member)
+        )
+        .all()
+    )
+    now = datetime.utcnow()
+    ongoing_events = []
+    upcoming_events = []
+    unscheduled_events = []
+    past_events = []
+    for ev in events:
+        start = ev.start_time
+        end = ev.end_time
+        if start and end:
+            if end < now:
+                past_events.append(ev)
+            elif start > now:
+                upcoming_events.append(ev)
+            else:
+                ongoing_events.append(ev)
+        elif start:
+            if start >= now:
+                upcoming_events.append(ev)
+            else:
+                past_events.append(ev)
+        else:
+            unscheduled_events.append(ev)
+
+    def _event_sort_key(ev):
+        if ev.start_time:
+            return ev.start_time
+        if ev.end_time:
+            return ev.end_time
+        return ev.created_at or datetime.utcnow()
+
+    ongoing_events.sort(key=_event_sort_key)
+    upcoming_events.sort(key=_event_sort_key)
+    unscheduled_events.sort(key=lambda ev: ev.updated_at or ev.created_at or datetime.utcnow(), reverse=True)
+    past_events.sort(key=lambda ev: ev.end_time or ev.start_time or ev.updated_at or ev.created_at or datetime.min, reverse=True)
+    recent_past_events = past_events[:5]
+    event_summary = {
+        'total': len(events),
+        'ongoing': len(ongoing_events),
+        'upcoming': len(upcoming_events),
+        'unscheduled': len(unscheduled_events),
+        'past': len(past_events),
+        'participants': sum(len(ev.participant_links) for ev in events)
+    }
+
     return render_template('location.html', location=location, 
                            items=items_at_location,
                            status_counter=status_counter,
@@ -2062,7 +2122,13 @@ def view_location(loc_id):
                            category_stats=category_stats,
                            feature_stats=feature_stats,
                            responsible_stats=responsible_stats,
-                           available_items=available_items)
+                           available_items=available_items,
+                           event_summary=event_summary,
+                           ongoing_events=ongoing_events,
+                           upcoming_events=upcoming_events,
+                           unscheduled_events=unscheduled_events,
+                           recent_past_events=recent_past_events,
+                           past_events_total=len(past_events))
 
 
 @app.route('/locations/<int:loc_id>/items/manage', methods=['POST'])

@@ -18,8 +18,16 @@
   </td>
   <td>{{ loc.items|length }}</td>
   <td>
+    {% set event_total = event_counts.get(loc.id, 0) %}
+    {% if event_total %}
+      <span class="badge bg-light text-dark border">{{ event_total }}</span>
+    {% else %}
+      <span class="text-muted">0</span>
+    {% endif %}
+  </td>
+  <td>
     <a href="{{ url_for('edit_location', loc_id=loc.id) }}" class="btn btn-sm btn-outline-primary">编辑</a>
-    <form action="{{ url_for('delete_location', loc_id=loc.id) }}" method="post" class="d-inline" onsubmit="return confirm('确定删除该位置吗？');">
+    <form action="{{ url_for('delete_location', loc_id=loc.id) }}" method="post" class="d-inline" onsubmit="return confirm('确定删除该空间吗？');">
       <button type="submit" class="btn btn-sm btn-outline-danger">删除</button>
     </form>
   </td>
@@ -32,11 +40,11 @@
 {% endmacro %}
 
 <div class="d-flex justify-content-between align-items-center mb-3">
-  <h3 class="mb-0">实验室位置列表</h3>
-  <a href="{{ url_for('add_location') }}" class="btn btn-primary">新增位置</a>
+  <h3 class="mb-0">社区空间总览</h3>
+  <a href="{{ url_for('add_location') }}" class="btn btn-primary">新增空间</a>
 </div>
 <div class="position-relative mb-3">
-  <input type="text" id="filterInput" class="form-control" placeholder="按位置名称筛选 / 导航">
+  <input type="text" id="filterInput" class="form-control" placeholder="按空间名称筛选 / 导航">
   <div id="locationsSuggestions" class="list-group position-absolute w-100 shadow-sm d-none" style="z-index: 20;"></div>
 </div>
 <table class="table table-hover" id="locationsTable">
@@ -45,6 +53,7 @@
       <th>名称</th>
       <th>负责人</th>
       <th>包含物品数量</th>
+      <th>关联活动</th>
       <th>操作</th>
     </tr>
   </thead>
@@ -54,7 +63,7 @@
     {% endfor %}
     {% if locations|length == 0 %}
     <tr>
-      <td colspan="4" class="text-center text-muted">暂无位置记录</td>
+      <td colspan="5" class="text-center text-muted">暂无空间记录</td>
     </tr>
     {% endif %}
   </tbody>

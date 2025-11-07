@@ -6,10 +6,45 @@
     <ul class="list-group mb-3">
       <li class="list-group-item"><strong>名称:</strong> {{ item.name }}</li>
       <li class="list-group-item"><strong>类别:</strong> {{ item.category or '未分类' }}</li>
-      <li class="list-group-item"><strong>CAS号:</strong> {{ item.cas_no or '未指定' }}</li>
-      
+      <li class="list-group-item">
+        <div class="d-flex justify-content-between align-items-center">
+          <strong>CAS 号</strong>
+          <button class="btn btn-sm btn-outline-secondary collapse-toggle"
+                  type="button"
+                  data-bs-toggle="collapse"
+                  data-bs-target="#itemCasCollapse{{ item.id }}"
+                  aria-expanded="false"
+                  aria-controls="itemCasCollapse{{ item.id }}"
+                  data-expand-text="展开"
+                  data-collapse-text="收起">
+            展开
+          </button>
+        </div>
+        <div id="itemCasCollapse{{ item.id }}" class="collapse mt-2">
+          <div class="text-muted small mb-1">标准化化学识别号</div>
+          <span class="fw-semibold">{{ item.cas_no or '未指定' }}</span>
+        </div>
+      </li>
       <li class="list-group-item"><strong>库存状态:</strong> {{ item.stock_status or '未指定' }}</li>
-      <li class="list-group-item"><strong>物品特性:</strong> {{ item.features or '未指定' }}</li>
+      <li class="list-group-item">
+        <div class="d-flex justify-content-between align-items-center">
+          <strong>物品特性</strong>
+          <button class="btn btn-sm btn-outline-secondary collapse-toggle"
+                  type="button"
+                  data-bs-toggle="collapse"
+                  data-bs-target="#itemFeatureCollapse{{ item.id }}"
+                  aria-expanded="false"
+                  aria-controls="itemFeatureCollapse{{ item.id }}"
+                  data-expand-text="展开"
+                  data-collapse-text="收起">
+            展开
+          </button>
+        </div>
+        <div id="itemFeatureCollapse{{ item.id }}" class="collapse mt-2">
+          <div class="text-muted small mb-1">适用范围、使用提醒等描述</div>
+          <span class="fw-semibold">{{ item.features or '未指定' }}</span>
+        </div>
+      </li>
       <li class="list-group-item"><strong>价值:</strong> {{ item.value if item.value is not none else '未指定' }}</li>
       <li class="list-group-item"><strong>数量:</strong> 
         {% if item.quantity is not none and item.unit %}
@@ -134,6 +169,32 @@
       });
     }
   }
+
+  var collapsibleButtons = document.querySelectorAll('.collapse-toggle');
+  collapsibleButtons.forEach(function (btn) {
+    var targetSelector = btn.getAttribute('data-bs-target');
+    if (!targetSelector) {
+      return;
+    }
+    var target = document.querySelector(targetSelector);
+    if (!target) {
+      return;
+    }
+    var expandText = btn.getAttribute('data-expand-text') || '展开';
+    var collapseText = btn.getAttribute('data-collapse-text') || '收起';
+    var applyState = function (isOpen) {
+      btn.textContent = isOpen ? collapseText : expandText;
+      btn.classList.toggle('btn-outline-primary', isOpen);
+      btn.classList.toggle('btn-outline-secondary', !isOpen);
+    };
+    target.addEventListener('show.bs.collapse', function () {
+      applyState(true);
+    });
+    target.addEventListener('hide.bs.collapse', function () {
+      applyState(false);
+    });
+    applyState(target.classList.contains('show'));
+  });
 })();
 </script>
 {% endblock %}

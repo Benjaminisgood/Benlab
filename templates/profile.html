@@ -66,6 +66,57 @@
     </li>
   {% endif %}
 {%- endmacro %}
+{% macro render_notification_entry(log) -%}
+  {% set verb = '进行了操作' %}
+  {% if log.action_type %}
+    {% if '新增' in log.action_type %}
+      {% set verb = '添加了' %}
+    {% elif '修改' in log.action_type %}
+      {% set verb = '修改了' %}
+    {% elif '删除' in log.action_type %}
+      {% set verb = '删除了' %}
+    {% endif %}
+  {% endif %}
+  {% set actor_name = '某人' %}
+  {% if log.user %}
+    {% set actor_name = log.user.name or log.user.username %}
+  {% endif %}
+  <li class="list-group-item">
+    <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
+      <div>
+        <span class="text-muted">你的{% if log.item_id %}物品{% elif log.location_id %}位置{% elif log.event_id %}活动{% else %}事项{% endif %}</span>
+        {% if log.item %}
+          <a href="{{ url_for('item_detail', item_id=log.item.id) }}" class="fw-semibold text-decoration-none ms-1">{{ log.item.name }}</a>
+        {% elif log.location %}
+          <a href="{{ url_for('view_location', loc_id=log.location.id) }}" class="fw-semibold text-decoration-none ms-1">{{ log.location.name }}</a>
+        {% elif log.event %}
+          <a href="{{ url_for('event_detail', event_id=log.event.id) }}" class="fw-semibold text-decoration-none ms-1">{{ log.event.title }}</a>
+        {% endif %}
+        <span class="text-muted">被 {{ actor_name }} {{ verb }}</span>
+      </div>
+      <small class="text-muted">{{ log.timestamp.strftime("%Y-%m-%d %H:%M") }}</small>
+    </div>
+  </li>
+{%- endmacro %}
+{% macro render_user_log_entry(log) -%}
+  <li class="list-group-item">
+    <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
+      <div>
+        <span class="text-muted">{{ log.action_type or '操作' }}</span>
+        {% if log.item %}
+          ：<a href="{{ url_for('item_detail', item_id=log.item.id) }}" class="text-decoration-none">{{ log.item.name }}</a>
+        {% elif log.location %}
+          ：<a href="{{ url_for('view_location', loc_id=log.location.id) }}" class="text-decoration-none">{{ log.location.name }}</a>
+        {% elif log.event %}
+          ：<a href="{{ url_for('event_detail', event_id=log.event.id) }}" class="text-decoration-none">{{ log.event.title }}</a>
+        {% elif log.details %}
+          ：<span class="text-muted">{{ log.details }}</span>
+        {% endif %}
+      </div>
+      <small class="text-muted">{{ log.timestamp.strftime("%Y-%m-%d %H:%M") }}</small>
+    </div>
+  </li>
+{%- endmacro %}
 {% block content %}
 <style>
   .profile-header-card {
@@ -536,90 +587,70 @@
   {% endif %}
 </div>
 
-{% if current_user.id == profile_user.id %}
-<div class="mb-4">
-  <h5>通知</h5>
-  {% set notif_total = notifications|length %}
-  <ul class="list-group">
-    {% for log in notifications[:5] %}
-    {% set verb = '进行了操作' %}
-    {% if '新增' in log.action_type %}{% set verb = '添加了' %}{% elif '修改' in log.action_type %}{% set verb = '修改了' %}{% elif '删除' in log.action_type %}{% set verb = '删除了' %}{% endif %}
-    <li class="list-group-item">
-      你的{% if log.item_id %}物品{% elif log.location_id %}位置{% endif %}
-      <strong>
-      {% if log.item_id %}<a href="{{ url_for('item_detail', item_id=log.item.id) }}">{{ log.item.name }}</a>
-      {% elif log.location_id %}<a href="{{ url_for('view_location', loc_id=log.location.id) }}">{{ log.location.name }}</a>
-      {% endif %}
-      </strong>
-      被 {{ log.user.name if log.user else '某人' }} {{ verb }}
-      <small class="text-muted">({{ log.timestamp.strftime("%Y-%m-%d %H:%M") }})</small>
-    </li>
-    {% else %}
-    <li class="list-group-item text-muted">暂无通知</li>
+{% if is_self %}
+{% set notif_total = notifications|length %}
+<div class="card mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span class="fw-semibold">通知（仅自己可见）</span>
+    <span class="badge bg-light text-dark border">{{ notif_total }}</span>
+  </div>
+  {% if notif_total %}
+  {% set notif_limit = 5 %}
+  <ul class="list-group list-group-flush">
+    {% for log in notifications[:notif_limit] %}
+      {{ render_notification_entry(log) }}
     {% endfor %}
   </ul>
-  {% if notif_total > 5 %}
-  <button class="btn btn-sm btn-outline-secondary mt-2" type="button" data-bs-toggle="collapse" data-bs-target="#notifMore" aria-expanded="false" aria-controls="notifMore">
-    展开剩余 {{ notif_total - 5 }} 条
-  </button>
-  <div class="collapse mt-2" id="notifMore">
-    <ul class="list-group">
-      {% for log in notifications[5:] %}
-      {% set verb = '进行了操作' %}
-      {% if '新增' in log.action_type %}{% set verb = '添加了' %}{% elif '修改' in log.action_type %}{% set verb = '修改了' %}{% elif '删除' in log.action_type %}{% set verb = '删除了' %}{% endif %}
-      <li class="list-group-item">
-        你的{% if log.item_id %}物品{% elif log.location_id %}位置{% endif %}
-        <strong>
-        {% if log.item_id %}<a href="{{ url_for('item_detail', item_id=log.item.id) }}">{{ log.item.name }}</a>
-        {% elif log.location_id %}<a href="{{ url_for('view_location', loc_id=log.location.id) }}">{{ log.location.name }}</a>
-        {% endif %}
-        </strong>
-        被 {{ log.user.name if log.user else '某人' }} {{ verb }}
-        <small class="text-muted">({{ log.timestamp.strftime("%Y-%m-%d %H:%M") }})</small>
-      </li>
+  {% if notif_total > notif_limit %}
+  <div class="collapse" id="notifMore">
+    <ul class="list-group list-group-flush">
+      {% for log in notifications[notif_limit:] %}
+        {{ render_notification_entry(log) }}
       {% endfor %}
     </ul>
   </div>
+  <div class="card-footer text-center">
+    <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#notifMore" aria-expanded="false" aria-controls="notifMore">
+      展开剩余 {{ notif_total - notif_limit }} 条
+    </button>
+  </div>
+  {% endif %}
+  {% else %}
+  <div class="card-body">
+    <p class="mb-0 text-muted">暂无通知。</p>
+  </div>
   {% endif %}
 </div>
-<div class="mb-4">
-  <h5>我的操作记录</h5>
-  {% set logs_total = user_logs|length %}
-  <ul class="list-group">
-    {% for log in user_logs[:5] %}
-    <li class="list-group-item">
-      <small class="text-muted">{{ log.timestamp.strftime("%Y-%m-%d %H:%M") }}</small>
-      {% if log.item %}
-        - {{ log.action_type }}: <a href="{{ url_for('item_detail', item_id=log.item.id) }}">{{ log.item.name }}</a>
-      {% elif log.location %}
-        - {{ log.action_type }}: <a href="{{ url_for('view_location', loc_id=log.location.id) }}">{{ log.location.name }}</a>
-      {% else %}
-        - {{ log.action_type }}
-      {% endif %}
-    </li>
-    {% else %}
-    <li class="list-group-item text-muted">暂无操作记录</li>
+{% set logs_total = user_logs|length %}
+<div class="card mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span class="fw-semibold">我的操作记录（仅自己可见）</span>
+    <span class="badge bg-light text-dark border">{{ logs_total }}</span>
+  </div>
+  {% if logs_total %}
+  {% set logs_limit = 5 %}
+  <ul class="list-group list-group-flush">
+    {% for log in user_logs[:logs_limit] %}
+      {{ render_user_log_entry(log) }}
     {% endfor %}
   </ul>
-  {% if logs_total > 5 %}
-  <button class="btn btn-sm btn-outline-secondary mt-2" type="button" data-bs-toggle="collapse" data-bs-target="#logsMore" aria-expanded="false" aria-controls="logsMore">
-    展开剩余 {{ logs_total - 5 }} 条
-  </button>
-  <div class="collapse mt-2" id="logsMore">
-    <ul class="list-group">
-      {% for log in user_logs[5:] %}
-      <li class="list-group-item">
-        <small class="text-muted">{{ log.timestamp.strftime("%Y-%m-%d %H:%M") }}</small>
-        {% if log.item %}
-          - {{ log.action_type }}: <a href="{{ url_for('item_detail', item_id=log.item.id) }}">{{ log.item.name }}</a>
-        {% elif log.location %}
-          - {{ log.action_type }}: <a href="{{ url_for('view_location', loc_id=log.location.id) }}">{{ log.location.name }}</a>
-        {% else %}
-          - {{ log.action_type }}
-        {% endif %}
-      </li>
+  {% if logs_total > logs_limit %}
+  <div class="collapse" id="logsMore">
+    <ul class="list-group list-group-flush">
+      {% for log in user_logs[logs_limit:] %}
+        {{ render_user_log_entry(log) }}
       {% endfor %}
     </ul>
+  </div>
+  <div class="card-footer text-center">
+    <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#logsMore" aria-expanded="false" aria-controls="logsMore">
+      展开剩余 {{ logs_total - logs_limit }} 条
+    </button>
+  </div>
+  {% endif %}
+  {% else %}
+  <div class="card-body">
+    <p class="mb-0 text-muted">暂无操作记录。</p>
   </div>
   {% endif %}
 </div>

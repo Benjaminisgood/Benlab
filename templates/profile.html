@@ -241,10 +241,10 @@
     {% endif %}
   </div>
 </div>
-{% if any_item_empty %}
+{% if is_self and any_item_empty %}
   <div class="alert alert-danger">你有库存用完的物品，请尽快处理！</div>
 {% endif %}
-{% if any_location_dirty %}
+{% if is_self and any_location_dirty %}
   <div class="alert alert-danger">你有卫生差或需维修的位置，请尽快处理！</div>
 {% endif %}
 <div class="card mb-4">
@@ -323,13 +323,6 @@
   </div>
   {% endif %}
 </div>
-{% else %}
-<div class="card mb-4">
-  <div class="card-header fw-semibold">地点关联</div>
-  <div class="card-body">
-    <p class="mb-0 text-muted small">地点关联仅本人可见。</p>
-  </div>
-</div>
 {% endif %}
 
 {% if is_self %}
@@ -396,13 +389,6 @@
   </div>
   {% endif %}
 </div>
-{% else %}
-<div class="card mb-4">
-  <div class="card-header fw-semibold">兴趣清单</div>
-  <div class="card-body">
-    <p class="mb-0 text-muted small">兴趣清单仅本人可见。</p>
-  </div>
-</div>
 {% endif %}
 
 {% if is_self %}
@@ -468,13 +454,6 @@
     <p class="mb-0 text-muted">尚未记录活动关联。</p>
   </div>
   {% endif %}
-</div>
-{% else %}
-<div class="card mb-4">
-  <div class="card-header fw-semibold">活动关联</div>
-  <div class="card-body">
-    <p class="mb-0 text-muted small">活动关联仅本人可见。</p>
-  </div>
 </div>
 {% endif %}
 
@@ -567,8 +546,7 @@
       <span class="list-group-item text-muted">暂无进行中的事项</span>
     {% endfor %}
   </div>
-  {% if events_past %}
-    {% if is_self %}
+  {% if events_past and is_self %}
     <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#memberPastEvents" aria-expanded="false" aria-controls="memberPastEvents">
       查看历史事项 ({{ events_past|length }})
     </button>
@@ -582,9 +560,6 @@
         {% endfor %}
       </ul>
     </div>
-    {% else %}
-    <div class="text-muted small">历史事项仅本人可见。</div>
-    {% endif %}
   {% endif %}
   {% else %}
   <div class="text-muted">暂无相关事项。</div>

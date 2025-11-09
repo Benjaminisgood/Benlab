@@ -1,7 +1,11 @@
 import os
+import glob
 from datetime import datetime, timedelta
 import re
 import json
+from io import BytesIO
+import urllib.request
+from urllib.error import URLError, HTTPError
 from flask import Flask, render_template, request, redirect, url_for, flash, send_file, send_from_directory, abort, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
@@ -12,6 +16,18 @@ from sqlalchemy.orm import selectinload, load_only
 from sqlalchemy import or_, func, text, inspect
 from flask_migrate import Migrate
 from markupsafe import Markup, escape
+
+try:
+    from PIL import Image, ImageDraw, ImageFont, ImageOps
+except ImportError:  # pragma: no cover - runtime guard when Pillow missing
+    Image = ImageDraw = ImageFont = ImageOps = None
+
+try:
+    import qrcode
+    from qrcode.constants import ERROR_CORRECT_Q
+except ImportError:  # pragma: no cover - runtime guard when qrcode missing
+    qrcode = None
+    ERROR_CORRECT_Q = None
 
 try:
     import oss2
@@ -57,6 +73,333 @@ if USE_OSS:
     app.config['OSS_PREFIX'] = OSS_PREFIX
     app.config['OSS_PUBLIC_BASE_URL'] = OSS_PUBLIC_BASE_URL
 _oss_bucket = None
+
+# Poster/QR generation helpers -------------------------------------------------
+FONT_SEARCH_DIRECTORIES = [
+    os.path.join(BASE_DIR, 'static', 'fonts'),
+    os.path.join(BASE_DIR, 'fonts'),
+    '/System/Library/Fonts',
+    '/System/Library/Fonts/Supplemental',
+    '/Library/Fonts',
+    '/usr/share/fonts',
+    '/usr/share/fonts/truetype',
+    '/usr/share/fonts/opentype',
+    '/usr/local/share/fonts'
+]
+
+FONT_REGULAR_CANDIDATES = [
+    'LXGWWenKaiLite-Regular.ttf',
+    'PingFang.ttc',
+    'PingFang SC.ttc',
+    'SourceHanSansSC-Regular.otf',
+    'SourceHanSansCN-Regular.otf',
+    'NotoSansCJK-Regular.ttc',
+    'NotoSansSC-Regular.otf',
+    'NotoSans-Regular.ttf',
+    'HarmonyOS_Sans_SC_Regular.ttf',
+    'Alibaba-PuHuiTi-Regular.ttf',
+    'AlibabaPuHuiTi-2-55-Regular.ttf',
+    'AlibabaSans-Regular.otf',
+    'Arial Unicode.ttf',
+    'ArialUnicode.ttf',
+    'Arial.ttf',
+    'Helvetica.ttc',
+    'DejaVuSans.ttf',
+    'FreeSans.ttf'
+]
+
+FONT_BOLD_CANDIDATES = [
+    'LXGWWenKaiLite-Bold.ttf',
+    'PingFang.ttc',
+    'PingFang SC.ttc',
+    'SourceHanSansSC-Bold.otf',
+    'SourceHanSansCN-Bold.otf',
+    'NotoSansCJK-Bold.ttc',
+    'NotoSans-Bold.ttf',
+    'HarmonyOS_Sans_SC_Bold.ttf',
+    'AlibabaPuHuiTi-2-75-SemiBold.ttf',
+    'AlibabaSans-Bold.otf',
+    'Arial Bold.ttf',
+    'Arial-Bold.ttf',
+    'Arialbd.ttf',
+    'Helvetica.ttc',
+    'DejaVuSans-Bold.ttf',
+    'FreeSansBold.ttf'
+]
+
+
+def _resolve_font_path(candidates):
+    for candidate in candidates:
+        if not candidate:
+            continue
+        if os.path.isabs(candidate) and os.path.exists(candidate):
+            return candidate
+        for directory in FONT_SEARCH_DIRECTORIES:
+            if not directory or not os.path.isdir(directory):
+                continue
+            path = os.path.join(directory, candidate)
+            if os.path.exists(path):
+                return path
+            matches = glob.glob(os.path.join(directory, candidate))
+            if matches:
+                return matches[0]
+    return None
+
+
+def _load_font(size, bold=False):
+    if ImageFont is None:
+        return None
+    path = _resolve_font_path(FONT_BOLD_CANDIDATES if bold else FONT_REGULAR_CANDIDATES)
+    if path:
+        try:
+            layout_engine = getattr(ImageFont, 'LAYOUT_RAQM', None)
+            if layout_engine is not None:
+                return ImageFont.truetype(path, size, layout_engine=layout_engine)
+            return ImageFont.truetype(path, size)
+        except OSError:
+            pass
+    return ImageFont.load_default()
+
+
+def _poster_resample_filter():
+    if Image is None:
+        return None
+    resampling = getattr(Image, 'Resampling', None)
+    if resampling:
+        return getattr(resampling, 'LANCZOS', getattr(resampling, 'BICUBIC', None))
+    return getattr(Image, 'LANCZOS', getattr(Image, 'BICUBIC', getattr(Image, 'ANTIALIAS', None)))
+
+
+def _text_width(draw_ctx, text, font):
+    if hasattr(draw_ctx, 'textlength'):
+        return draw_ctx.textlength(text, font=font)
+    bbox = draw_ctx.textbbox((0, 0), text, font=font)
+    return bbox[2] - bbox[0]
+
+
+def _font_line_height(font):
+    if hasattr(font, 'getmetrics'):
+        ascent, descent = font.getmetrics()
+        return ascent + descent
+    if hasattr(font, 'size') and isinstance(font.size, (int, float)):
+        return int(font.size)
+    return 32
+
+
+def _wrap_text(draw_ctx, text, font, max_width, max_lines=None):
+    if not text:
+        return []
+    sanitized = text.replace('\r', '')
+    lines = []
+    current = ''
+    truncated = False
+    for char in sanitized:
+        if char == '\n':
+            lines.append(current)
+            current = ''
+            continue
+        candidate = f"{current}{char}"
+        if current and _text_width(draw_ctx, candidate, font) > max_width:
+            lines.append(current)
+            current = char
+        else:
+            current = candidate
+        if max_lines and len(lines) >= max_lines:
+            truncated = True
+            current = ''
+            break
+    if current:
+        if not max_lines or len(lines) < max_lines:
+            lines.append(current)
+        else:
+            truncated = True
+    if max_lines and len(lines) > max_lines:
+        lines = lines[:max_lines]
+        truncated = True
+    if truncated and lines:
+        last = lines[-1].rstrip(' …')
+        ellipsis = '…'
+        while last and _text_width(draw_ctx, f"{last}{ellipsis}", font) > max_width:
+            last = last[:-1]
+        lines[-1] = (last or '') + ellipsis
+    return lines
+
+
+def _format_event_time_range(event):
+    start = event.start_time
+    end = event.end_time
+    if start and end:
+        if start.date() == end.date():
+            return f"{start.strftime('%Y-%m-%d %H:%M')} - {end.strftime('%H:%M')}"
+        return f"{start.strftime('%Y-%m-%d %H:%M')} - {end.strftime('%Y-%m-%d %H:%M')}"
+    if start:
+        return start.strftime('%Y-%m-%d %H:%M')
+    return '时间待定'
+
+
+def _load_event_cover_image(event, target_size):
+    if Image is None:
+        return None
+    image_entry = next((img for img in (event.images or []) if img.filename), None)
+    if not image_entry:
+        return None
+    filename = image_entry.filename
+    data = None
+    try:
+        if _is_external_media(filename):
+            with urllib.request.urlopen(filename, timeout=5) as resp:
+                data = resp.read()
+        elif app.config.get('USE_OSS'):
+            url = _build_oss_url(filename)
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                data = resp.read()
+        else:
+            path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            if os.path.exists(path):
+                with open(path, 'rb') as fh:
+                    data = fh.read()
+    except (URLError, HTTPError, OSError):
+        data = None
+    if not data:
+        return None
+    try:
+        image = Image.open(BytesIO(data)).convert('RGB')
+    except (OSError, ValueError):
+        return None
+    if target_size:
+        resample = _poster_resample_filter() or Image.BICUBIC
+        try:
+            image = ImageOps.fit(image, target_size, method=resample, centering=(0.5, 0.5))
+        except Exception:
+            image = image.resize(target_size, resample=resample)
+    return image
+
+
+def _build_qr_image(data, box_size=10):
+    if not qrcode:
+        return None
+    qr = qrcode.QRCode(
+        version=None,
+        error_correction=ERROR_CORRECT_Q or qrcode.constants.ERROR_CORRECT_Q,
+        box_size=box_size,
+        border=2
+    )
+    qr.add_data(data)
+    qr.make(fit=True)
+    return qr.make_image(fill_color='#202020', back_color='white').convert('RGB')
+
+
+def generate_event_share_poster(event, detail_url):
+    if not (Image and ImageDraw and ImageFont and qrcode):
+        raise RuntimeError('海报生成依赖 Pillow 和 qrcode，请先安装相关依赖。')
+
+    poster_width, poster_height = 1080, 1600
+    outer_margin = 64
+    card_radius = 48
+    accent_color = (94, 110, 255)
+    background_color = (245, 246, 250)
+
+    base = Image.new('RGB', (poster_width, poster_height), background_color)
+    card_width = poster_width - outer_margin * 2
+    card_height = poster_height - outer_margin * 2
+    card = Image.new('RGB', (card_width, card_height), 'white')
+    card_draw = ImageDraw.Draw(card)
+
+    cover_height = 420
+    cover = _load_event_cover_image(event, (card_width, cover_height))
+    if cover:
+        card.paste(cover, (0, 0))
+        overlay = Image.new('RGBA', (card_width, cover_height), (0, 0, 0, 70))
+        card.paste(overlay, (0, 0), overlay)
+    else:
+        top_start = (86, 125, 255)
+        top_end = (137, 84, 255)
+        for y in range(cover_height):
+            ratio = y / max(cover_height - 1, 1)
+            color = tuple(
+                int(top_start[idx] * (1 - ratio) + top_end[idx] * ratio)
+                for idx in range(3)
+            )
+            card_draw.line([(0, y), (card_width, y)], fill=color)
+
+    content_x = 64
+    content_y = cover_height + 56
+    max_text_width = card_width - content_x * 2
+
+    title_font = _load_font(64, bold=True) or ImageFont.load_default()
+    info_font = _load_font(32) or ImageFont.load_default()
+    section_font = _load_font(36, bold=True) or ImageFont.load_default()
+    body_font = _load_font(30) or ImageFont.load_default()
+    hint_font = _load_font(26) or ImageFont.load_default()
+
+    loaded_fonts = [title_font, info_font, section_font, body_font, hint_font]
+    if any(not isinstance(getattr(font, 'path', None), str) or not os.path.exists(font.path) for font in loaded_fonts if font is not None):
+        raise RuntimeError('未找到可用的中文字体，请在 static/fonts 目录放置支持中文的字体文件或在系统层面安装后重试。')
+
+    title_lines = _wrap_text(card_draw, event.title or '活动', title_font, max_text_width, max_lines=2)
+    for line in title_lines:
+        card_draw.text((content_x, content_y), line, font=title_font, fill=(33, 33, 33))
+        content_y += _font_line_height(title_font) + 6
+
+    content_y += 12
+    time_text = _format_event_time_range(event)
+    location_text = '、'.join(loc.name for loc in event.locations if loc.name) or '地点待定'
+    owner_text = (event.owner.name if event.owner and event.owner.name else (event.owner.username if event.owner else '负责人待定'))
+
+    info_lines = [
+        f"时间：{time_text}",
+        f"地点：{location_text}",
+        f"联系人：{owner_text}"
+    ]
+    for line in info_lines:
+        card_draw.text((content_x, content_y), line, font=info_font, fill=(74, 74, 74))
+        content_y += _font_line_height(info_font) + 4
+
+    content_y += 24
+    card_draw.text((content_x, content_y), '活动亮点', font=section_font, fill=accent_color)
+    content_y += _font_line_height(section_font) + 12
+
+    description = (event.description or '').strip()
+    if not description:
+        description = '扫码了解事项详情，和更多伙伴一起准备与参与。'
+    highlight_lines = _wrap_text(card_draw, description, body_font, max_text_width, max_lines=6)
+    for line in highlight_lines:
+        card_draw.text((content_x, content_y), line, font=body_font, fill=(60, 60, 60))
+        content_y += _font_line_height(body_font) + 6
+
+    qr_size = 280
+    qr_margin_bottom = 56
+    qr_img = _build_qr_image(detail_url)
+    if qr_img:
+        resample = _poster_resample_filter() or Image.BICUBIC
+        qr_img = qr_img.resize((qr_size, qr_size), resample=resample)
+        qr_with_border = ImageOps.expand(qr_img, border=12, fill='white')
+        qr_box_size = qr_with_border.size[0]
+        qr_x = card_width - content_x - qr_box_size
+        qr_y = card_height - qr_margin_bottom - qr_box_size
+        card.paste(qr_with_border, (qr_x, qr_y))
+        card_draw.text((content_x, qr_y), '扫码加入事项', font=section_font, fill=(33, 33, 33))
+        guidance_width = min(max_text_width, max(qr_x - content_x - 24, 200))
+        guidance_lines = _wrap_text(card_draw, '长按识别二维码，直接进入活动详情页。', hint_font, guidance_width, max_lines=2)
+        line_y = qr_y + _font_line_height(section_font) + 12
+        for line in guidance_lines:
+            card_draw.text((content_x, line_y), line, font=hint_font, fill=(102, 102, 102))
+            line_y += _font_line_height(hint_font) + 2
+
+    else:
+        fallback_text = '二维码生成失败，请稍后重试。'
+        card_draw.text((content_x, card_height - qr_margin_bottom - _font_line_height(info_font)), fallback_text, font=info_font, fill=(180, 30, 30))
+
+    base.paste(card, (outer_margin, outer_margin))
+
+    header_font = _load_font(28, bold=True) or ImageFont.load_default()
+    base_draw = ImageDraw.Draw(base)
+    base_draw.text((outer_margin, 24), 'Benlab 活动分享海报', font=header_font, fill=(126, 128, 145))
+
+    output = BytesIO()
+    base.save(output, format='PNG', optimize=True)
+    output.seek(0)
+    return output
 
 # ---- SQLite 并发优化（仅在使用 sqlite 时启用）----
 # 启用 WAL、调整同步级别与 busy_timeout，提升多读单写体验
@@ -1838,6 +2181,36 @@ def event_detail(event_id):
         feedback_entries=feedback_entries,
         feedback_post_url=url_for('post_event_feedback', event_id=event.id)
     )
+
+
+@app.route('/events/<int:event_id>/poster.png')
+def event_share_poster(event_id):
+    event = Event.query.options(
+        selectinload(Event.owner),
+        selectinload(Event.locations),
+        selectinload(Event.images)
+    ).get_or_404(event_id)
+
+    if event.visibility != 'public':
+        if not current_user.is_authenticated or not event.can_view(current_user):
+            abort(403)
+
+    detail_url = url_for('event_detail', event_id=event.id, _external=True)
+    try:
+        output = generate_event_share_poster(event, detail_url)
+    except RuntimeError as exc:
+        abort(503, description=str(exc))
+
+    download = request.args.get('download') == '1'
+    filename = f"event-{event.id}-poster.png"
+    response = send_file(
+        output,
+        mimetype='image/png',
+        as_attachment=download,
+        download_name=filename
+    )
+    response.headers['Cache-Control'] = 'no-store'
+    return response
 
 
 @app.route('/events/<int:event_id>/feedback', methods=['POST'])

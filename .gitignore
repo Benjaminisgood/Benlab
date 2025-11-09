@@ -2,6 +2,10 @@ venv/
 instance/**/*
 __pycache__/
 static/**/*
+!static/fonts/
+!static/fonts/*.ttf
+!static/fonts/*.otf
+!static/fonts/*.ttc
 *.pyc
 *.sqlite3
 instance/

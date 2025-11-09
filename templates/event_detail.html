@@ -13,6 +13,7 @@
     {% if event.detail_link %}
     <a class="btn btn-outline-secondary" href="{{ event.detail_link }}" target="_blank" rel="noopener">查看活动链接</a>
     {% endif %}
+    <a class="btn btn-outline-success" href="{{ url_for('event_share_poster', event_id=event.id) }}" target="_blank" rel="noopener">生成分享海报</a>
     {% if event.can_edit(current_user) %}
     <a class="btn btn-outline-primary" href="{{ url_for('edit_event', event_id=event.id) }}">编辑</a>
     {% endif %}

@@ -1,6 +1,68 @@
 {% extends "base.html" %}
+{% from "_media_gallery.html" import render_media_gallery %}
 {% block content %}
 <h4 class="mb-3">编辑个人信息</h4>
+<style>
+  .avatar-editor {
+    max-width: 620px;
+  }
+  .avatar-preview-wrapper {
+    position: relative;
+    width: 220px;
+    max-width: 100%;
+    min-height: 220px;
+  }
+  .avatar-preview-wrapper .media-gallery,
+  .avatar-preview-wrapper .media-gallery-grid,
+  .avatar-preview-wrapper .media-card {
+    width: 100%;
+  }
+  .avatar-card .media-card-img {
+    aspect-ratio: 1 / 1;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .avatar-card .media-actions,
+  .avatar-card .media-description {
+    display: none !important;
+  }
+  .avatar-preview-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 1rem;
+    display: none;
+    box-shadow: 0 0.75rem 1.5rem rgba(0, 0, 0, 0.2);
+    z-index: 2;
+    background-color: var(--bs-body-bg, #fff);
+    border: 2px solid rgba(255, 255, 255, 0.65);
+  }
+  .avatar-preview-img.is-visible {
+    display: block;
+  }
+  .avatar-empty {
+    width: 100%;
+    height: 100%;
+    min-height: 220px;
+    border-radius: 1rem;
+    border: 2px dashed var(--bs-border-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--bs-secondary-color);
+    background-color: var(--bs-secondary-bg);
+    text-align: center;
+    padding: 1.5rem;
+  }
+  .avatar-empty .avatar-empty-icon {
+    font-size: 2.5rem;
+    display: block;
+    margin-bottom: 0.5rem;
+  }
+</style>
 <form method="post" enctype="multipart/form-data" action="{{ url_for('edit_profile', member_id=member.id) }}">
   <div class="mb-3">
     <label for="name" class="form-label">姓名</label>
@@ -362,15 +424,53 @@
     <label for="password" class="form-label">新密码 (留空则不修改)</label>
     <input type="password" class="form-control" id="password" name="password">
   </div>
-  <div class="mb-3">
-    <label for="photoInput" class="form-label">头像 (可选)</label>
-    {% if member.photo %}
-    <div class="mb-2">
-      <img src="{{ uploaded_image_url(member.photo) }}" alt="头像" class="img-thumbnail" style="max-width:100px;">
+  <div class="mb-4">
+    <label class="form-label">头像 (可选)</label>
+    <div class="card avatar-editor shadow-sm border-0">
+      <div class="card-body">
+        <div class="d-flex flex-column flex-md-row align-items-start gap-3">
+          <div class="avatar-preview-wrapper">
+            {% if member.photo %}
+              {% set avatar_entries = [{
+                'url': uploaded_image_url(member.photo),
+                'kind': 'image',
+                'display_name': (member.name or member.username or '当前头像') ~ '的头像'
+              }] %}
+              {{ render_media_gallery(
+                avatar_entries,
+                'editProfileAvatarGallery',
+                media_kind_labels,
+                '尚未上传头像',
+                {
+                  'gallery_class': 'media-gallery avatar-gallery m-0',
+                  'grid_class': 'media-gallery-grid',
+                  'card_class': 'media-card avatar-card mb-0 border-0 shadow-none',
+                  'card_extra_class': 'rounded-4 overflow-hidden',
+                  'enable_fullscreen': false
+                }
+              ) }}
+            {% else %}
+              <div class="avatar-empty">
+                <div>
+                  <span class="avatar-empty-icon">🖼️</span>
+                  <div>尚未上传头像</div>
+                </div>
+              </div>
+            {% endif %}
+            <img id="photoPreview" src="" alt="头像预览" class="avatar-preview-img" hidden>
+          </div>
+          <div class="d-flex flex-column gap-2 flex-grow-1">
+            <input type="file" id="photoInput" name="photo" accept="image/*" class="form-control">
+            <div class="form-text">
+              支持 JPG / PNG，建议选择清晰的方形图片，文件小于 5MB。选择后会立即预览，保存即可更新头像。
+            </div>
+            {% if member.photo %}
+              <a href="{{ uploaded_image_url(member.photo) }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary align-self-start">查看当前头像</a>
+            {% endif %}
+          </div>
+        </div>
+      </div>
     </div>
-    {% endif %}
-    <input type="file" id="photoInput" name="photo" accept="image/*" class="form-control">
-    <img id="photoPreview" src="#" alt="预览" style="max-width: 100px; display: none; margin-top: 5px;">
   </div>
   <button type="submit" class="btn btn-success">保存</button>
   <a href="{{ url_for('profile', member_id=member.id) }}" class="btn btn-secondary">取消</a>
@@ -379,13 +479,22 @@
   const photoInput = document.getElementById('photoInput');
   const photoPreview = document.getElementById('photoPreview');
   if (photoInput && photoPreview) {
+    let previewObjectUrl = null;
     photoInput.addEventListener('change', function (e) {
       const file = e.target.files[0];
+      if (previewObjectUrl) {
+        URL.revokeObjectURL(previewObjectUrl);
+        previewObjectUrl = null;
+      }
       if (file) {
-        photoPreview.src = URL.createObjectURL(file);
-        photoPreview.style.display = 'block';
+        previewObjectUrl = URL.createObjectURL(file);
+        photoPreview.src = previewObjectUrl;
+        photoPreview.hidden = false;
+        photoPreview.classList.add('is-visible');
       } else {
-        photoPreview.style.display = 'none';
+        photoPreview.removeAttribute('src');
+        photoPreview.hidden = true;
+        photoPreview.classList.remove('is-visible');
       }
     });
   }

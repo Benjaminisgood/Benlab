@@ -564,23 +564,27 @@
       <span class="badge bg-secondary">{{ evt.participant_count() }}</span>
     </a>
     {% else %}
-    <span class="list-group-item text-muted">暂无进行中的事项</span>
+      <span class="list-group-item text-muted">暂无进行中的事项</span>
     {% endfor %}
   </div>
   {% if events_past %}
-  <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#memberPastEvents" aria-expanded="false" aria-controls="memberPastEvents">
-    查看历史事项 ({{ events_past|length }})
-  </button>
-  <div class="collapse mt-2" id="memberPastEvents">
-    <ul class="list-group small">
-      {% for evt in events_past %}
-      <li class="list-group-item d-flex justify-content-between align-items-center">
-        <a href="{{ url_for('event_detail', event_id=evt.id) }}">{{ evt.title }}</a>
-        <span class="text-muted">{{ evt.start_time.strftime('%Y-%m-%d') if evt.start_time else '时间待定' }}</span>
-      </li>
-      {% endfor %}
-    </ul>
-  </div>
+    {% if is_self %}
+    <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#memberPastEvents" aria-expanded="false" aria-controls="memberPastEvents">
+      查看历史事项 ({{ events_past|length }})
+    </button>
+    <div class="collapse mt-2" id="memberPastEvents">
+      <ul class="list-group small">
+        {% for evt in events_past %}
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+          <a href="{{ url_for('event_detail', event_id=evt.id) }}">{{ evt.title }}</a>
+          <span class="text-muted">{{ evt.start_time.strftime('%Y-%m-%d') if evt.start_time else '时间待定' }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% else %}
+    <div class="text-muted small">历史事项仅本人可见。</div>
+    {% endif %}
   {% endif %}
   {% else %}
   <div class="text-muted">暂无相关事项。</div>

@@ -1,6 +1,6 @@
 import os
 import glob
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import re
 import json
 from io import BytesIO
@@ -33,6 +33,11 @@ try:
     import oss2
 except ImportError:
     oss2 = None
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover - Python < 3.9 fallback
+    ZoneInfo = None
 
 
 app = Flask(__name__)
@@ -70,9 +75,52 @@ if USE_OSS:
     app.config['OSS_ACCESS_KEY_ID'] = OSS_ACCESS_KEY_ID
     app.config['OSS_ACCESS_KEY_SECRET'] = OSS_ACCESS_KEY_SECRET
     app.config['OSS_BUCKET'] = OSS_BUCKET_NAME
-    app.config['OSS_PREFIX'] = OSS_PREFIX
-    app.config['OSS_PUBLIC_BASE_URL'] = OSS_PUBLIC_BASE_URL
+app.config['OSS_PREFIX'] = OSS_PREFIX
+app.config['OSS_PUBLIC_BASE_URL'] = OSS_PUBLIC_BASE_URL
 _oss_bucket = None
+
+UTC = timezone.utc
+if ZoneInfo:
+    try:
+        CHINA_TZ = ZoneInfo('Asia/Shanghai')
+    except Exception:  # pragma: no cover - fallback if zoneinfo data missing
+        CHINA_TZ = timezone(timedelta(hours=8))
+else:  # pragma: no cover - Python < 3.9 fallback
+    CHINA_TZ = timezone(timedelta(hours=8))
+
+
+def _as_utc(value):
+    """Return a timezone-aware datetime in UTC."""
+    if not value:
+        return None
+    if isinstance(value, str):
+        try:
+            sanitized = value.strip()
+            if sanitized.endswith('Z'):
+                sanitized = sanitized[:-1] + '+00:00'
+            value = datetime.fromisoformat(sanitized)
+        except ValueError:
+            return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def to_china_timezone(value):
+    """Convert a datetime (string/naive/aware) to Asia/Shanghai."""
+    dt = _as_utc(value)
+    if not dt:
+        return None
+    return dt.astimezone(CHINA_TZ)
+
+
+def format_china_time(value, fmt='%Y-%m-%d %H:%M'):
+    """Format datetime in Asia/Shanghai timezone, fallback to empty string."""
+    dt = to_china_timezone(value)
+    return dt.strftime(fmt) if dt else ''
+
+
+app.jinja_env.filters['china_time'] = format_china_time
 
 # Poster/QR generation helpers -------------------------------------------------
 FONT_SEARCH_DIRECTORIES = [
@@ -1077,7 +1125,7 @@ def append_feedback_entry(target, sender, content, limit=200):
     if not content or not content.strip():
         return None
     current = load_feedback_stream(getattr(target, 'feedback_log', '') or '')
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     entry = {
         'ts': now.isoformat(),
         'sid': sender.id if sender else None,
@@ -1093,12 +1141,7 @@ def append_feedback_entry(target, sender, content, limit=200):
 def _parse_iso_timestamp(raw):
     if not raw:
         return None
-    try:
-        if raw.endswith('Z'):
-            raw = raw[:-1] + '+00:00'
-        return datetime.fromisoformat(raw)
-    except (ValueError, TypeError):
-        return None
+    return _as_utc(raw)
 
 
 def prepare_feedback_entries(raw_text, member_index, mention_lookup):
@@ -1124,16 +1167,20 @@ def prepare_feedback_entries(raw_text, member_index, mention_lookup):
             sentiment = 'positive'
         elif '??' in content:
             sentiment = 'doubt'
+        timestamp_display = format_china_time(ts) if ts else ''
         entries.append({
             'html': render_rich_text(content, mention_lookup),
             'timestamp': ts,
-            'timestamp_display': ts.strftime('%Y-%m-%d %H:%M') if ts else '未知时间',
+            'timestamp_display': timestamp_display or '未知时间',
             'sender_id': sender_id,
             'sender_name': display_name,
             'sender_url': sender_url,
             'sentiment': sentiment
         })
-    entries.sort(key=lambda item: item['timestamp'] or datetime.min, reverse=True)
+    entries.sort(
+        key=lambda item: item['timestamp'] or datetime.min.replace(tzinfo=UTC),
+        reverse=True
+    )
     return entries
 
 

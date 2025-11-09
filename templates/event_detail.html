@@ -4,7 +4,7 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
   <div>
     <h2 class="mb-0">{{ event.title }}</h2>
-    <div class="text-muted small mt-1">由 {{ event.owner.name if event.owner else '未知成员' }} 创建于 {{ event.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+    <div class="text-muted small mt-1">由 {{ event.owner.name if event.owner else '未知成员' }} 创建于 {{ event.created_at|china_time }}</div>
   </div>
   <div class="d-flex gap-2">
     <span class="badge bg-{% if event.visibility == 'public' %}success{% elif event.visibility == 'internal' %}info{% else %}secondary{% endif %} align-self-center">
@@ -156,7 +156,7 @@
               <span class="badge bg-primary ms-2">负责人</span>
             {% endif %}
           </div>
-          <small class="text-muted">{{ link.joined_at.strftime('%m-%d %H:%M') if link.joined_at else '' }}</small>
+          <small class="text-muted">{{ link.joined_at|china_time('%m-%d %H:%M') if link.joined_at else '' }}</small>
         </li>
         {% else %}
         <li class="list-group-item text-muted">暂无成员</li>

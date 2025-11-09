@@ -55,41 +55,26 @@
       {% if profile_meta.location_relations %}
         {% for entry in profile_meta.location_relations %}
           {% set current_loc = (locations | selectattr('id','equalto', entry.location_id) | first) %}
-          <div class="affiliation-row border rounded p-3" data-affiliation-id="{{ entry.location_id }}" data-affiliation-index="{{ loop.index0 }}">
-            <div class="row g-2 align-items-end">
-              <div class="col-md-5">
-                <label class="form-label d-block">地点</label>
-                <div class="d-flex flex-wrap align-items-center gap-2">
-                  <div class="badge bg-light text-dark border affiliation-location-summary" data-default="选择地点">
-                    {{ current_loc.name if current_loc else '选择地点' }}
-                  </div>
-                  <button type="button"
-                          class="btn btn-outline-secondary btn-sm affiliation-location-picker"
-                          data-bs-toggle="modal"
-                          data-bs-target="#affiliationLocationModal"
-                          data-affiliation-index="{{ loop.index0 }}"
-                          data-selected="{{ entry.location_id if entry.location_id else '' }}">
-                    更改地点
-                  </button>
-                </div>
-                <input type="hidden" name="affiliation_location_id" value="{{ entry.location_id if entry.location_id else '' }}">
+          {% set relation_label = relation_lookup.get(entry.relation) %}
+          <div class="affiliation-row border rounded p-3 d-flex flex-column gap-2"
+               data-affiliation-id="{{ entry.location_id }}"
+               data-affiliation-index="{{ loop.index0 }}">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+              <div class="d-flex flex-wrap align-items-center gap-2">
+                <span class="fw-semibold">{{ current_loc.name if current_loc else '未指定地点' }}</span>
+                {% if relation_label %}
+                <span class="badge bg-light text-dark border">{{ relation_label }}</span>
+                {% endif %}
               </div>
-              <div class="col-md-3 col-sm-6">
-                <label class="form-label">关联标签</label>
-                <select class="form-select" name="affiliation_relation">
-                  {% for key, label in relation_lookup.items() %}
-                  <option value="{{ key }}" {% if entry.relation == key %}selected{% endif %}>{{ label }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-              <div class="col-md-3 col-sm-6">
-                <label class="form-label">备注</label>
-                <input type="text" class="form-control" name="affiliation_note" value="{{ entry.note }}" placeholder="选填：班级 / 部门等">
-              </div>
-              <div class="col-md-1 d-grid">
-                <button type="button" class="btn btn-outline-danger affiliation-remove">&times;</button>
-              </div>
+              <button type="button" class="btn btn-sm btn-outline-danger affiliation-remove">&times;</button>
             </div>
+            <input type="hidden" name="affiliation_location_id" value="{{ entry.location_id if entry.location_id else '' }}">
+            <input type="hidden" name="affiliation_relation" value="{{ entry.relation if entry.relation else '' }}">
+            <input type="text"
+                   class="form-control form-control-sm"
+                   name="affiliation_note"
+                   value="{{ entry.note or '' }}"
+                   placeholder="备注（选填）">
           </div>
         {% endfor %}
       {% else %}
@@ -108,41 +93,26 @@
       {% if profile_meta.item_relations %}
         {% for entry in profile_meta.item_relations %}
           {% set current_item = (items | selectattr('id','equalto', entry.item_id) | first) %}
-          <div class="interest-row border rounded p-3" data-interest-id="{{ entry.item_id }}" data-interest-index="{{ loop.index0 }}">
-            <div class="row g-2 align-items-end">
-              <div class="col-md-5">
-                <label class="form-label d-block">物品</label>
-                <div class="d-flex flex-wrap align-items-center gap-2">
-                  <div class="badge bg-light text-dark border interest-item-summary" data-default="选择物品">
-                    {{ current_item.name if current_item else '选择物品' }}
-                  </div>
-                  <button type="button"
-                          class="btn btn-outline-secondary btn-sm interest-item-picker"
-                          data-bs-toggle="modal"
-                          data-bs-target="#interestItemModal"
-                          data-interest-index="{{ loop.index0 }}"
-                          data-selected="{{ entry.item_id if entry.item_id else '' }}">
-                    更改物品
-                  </button>
-                </div>
-                <input type="hidden" name="interest_item_id" value="{{ entry.item_id if entry.item_id else '' }}">
+          {% set relation_label = item_relation_lookup.get(entry.relation) %}
+          <div class="interest-row border rounded p-3 d-flex flex-column gap-2"
+               data-interest-id="{{ entry.item_id }}"
+               data-interest-index="{{ loop.index0 }}">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+              <div class="d-flex flex-wrap align-items-center gap-2">
+                <span class="fw-semibold">{{ current_item.name if current_item else '未指定物品' }}</span>
+                {% if relation_label %}
+                <span class="badge bg-light text-dark border">{{ relation_label }}</span>
+                {% endif %}
               </div>
-              <div class="col-md-3 col-sm-6">
-                <label class="form-label">关联标签</label>
-                <select class="form-select" name="interest_item_relation">
-                  {% for key, label in item_relation_lookup.items() %}
-                  <option value="{{ key }}" {% if entry.relation == key %}selected{% endif %}>{{ label }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-              <div class="col-md-3 col-sm-6">
-                <label class="form-label">备注</label>
-                <input type="text" class="form-control" name="interest_item_note" value="{{ entry.note }}" placeholder="选填：出借人、购买渠道等">
-              </div>
-              <div class="col-md-1 d-grid">
-                <button type="button" class="btn btn-outline-danger interest-remove">&times;</button>
-              </div>
+              <button type="button" class="btn btn-sm btn-outline-danger interest-remove">&times;</button>
             </div>
+            <input type="hidden" name="interest_item_id" value="{{ entry.item_id if entry.item_id else '' }}">
+            <input type="hidden" name="interest_item_relation" value="{{ entry.relation if entry.relation else '' }}">
+            <input type="text"
+                   class="form-control form-control-sm"
+                   name="interest_item_note"
+                   value="{{ entry.note or '' }}"
+                   placeholder="备注（选填）">
           </div>
         {% endfor %}
       {% else %}
@@ -160,31 +130,26 @@
       {% if profile_meta.event_relations %}
         {% for entry in profile_meta.event_relations %}
           {% set current_event = (events | selectattr('id','equalto', entry.event_id) | first) %}
-          <div class="event-row border rounded p-3" data-event-id="{{ entry.event_id }}" data-event-index="{{ loop.index0 }}">
-            <div class="row g-2 align-items-end">
-              <div class="col-md-6">
-                <label class="form-label d-block">活动</label>
-                <div class="badge bg-light text-dark border event-summary" data-default="选择活动">
-                  {{ current_event.title if current_event else '选择活动' }}
-                </div>
-                <input type="hidden" name="event_relation_event_id" value="{{ entry.event_id if entry.event_id else '' }}">
+          {% set relation_label = event_relation_lookup.get(entry.relation) %}
+          <div class="event-row border rounded p-3 d-flex flex-column gap-2"
+               data-event-id="{{ entry.event_id }}"
+               data-event-index="{{ loop.index0 }}">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+              <div class="d-flex flex-wrap align-items-center gap-2">
+                <span class="fw-semibold">{{ current_event.title if current_event else '未指定活动' }}</span>
+                {% if relation_label %}
+                <span class="badge bg-light text-dark border">{{ relation_label }}</span>
+                {% endif %}
               </div>
-              <div class="col-md-3 col-sm-6">
-                <label class="form-label">关联标签</label>
-                <select class="form-select" name="event_relation_relation">
-                  {% for key, label in event_relation_lookup.items() %}
-                  <option value="{{ key }}" {% if entry.relation == key %}selected{% endif %}>{{ label }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-              <div class="col-md-3 col-sm-6">
-                <label class="form-label">备注</label>
-                <input type="text" class="form-control" name="event_relation_note" value="{{ entry.note }}" placeholder="选填：角色、合作说明等">
-              </div>
-              <div class="col-md-12 text-end mt-2">
-                <button type="button" class="btn btn-sm btn-outline-danger event-remove">移除</button>
-              </div>
+              <button type="button" class="btn btn-sm btn-outline-danger event-remove">移除</button>
             </div>
+            <input type="hidden" name="event_relation_event_id" value="{{ entry.event_id if entry.event_id else '' }}">
+            <input type="hidden" name="event_relation_relation" value="{{ entry.relation if entry.relation else '' }}">
+            <input type="text"
+                   class="form-control form-control-sm"
+                   name="event_relation_note"
+                   value="{{ entry.note or '' }}"
+                   placeholder="备注（选填）">
           </div>
         {% endfor %}
       {% else %}
@@ -474,33 +439,6 @@
   const ITEM_RELATION_OPTIONS = {{ item_relation_lookup | tojson | safe }};
   const EVENT_RELATION_OPTIONS = {{ event_relation_lookup | tojson | safe }};
 
-  function buildSelect(name, selected, optionsMap) {
-    const select = document.createElement('select');
-    select.className = 'form-select';
-    select.name = name;
-    const entries = Object.entries(optionsMap || {});
-    if (!entries.length) {
-      const opt = document.createElement('option');
-      opt.value = selected || '';
-      opt.textContent = selected || '';
-      select.appendChild(opt);
-      return select;
-    }
-    entries.forEach(function ([value, label]) {
-      const option = document.createElement('option');
-      option.value = value;
-      option.textContent = label;
-      if (value === selected) {
-        option.selected = true;
-      }
-      select.appendChild(option);
-    });
-    if (selected && !optionsMap[selected]) {
-      select.value = selected;
-    }
-    return select;
-  }
-
   function toggleEmptyMessage(container, hintId, message, selector) {
     const hint = document.getElementById(hintId);
     const hasRow = !!container.querySelector(selector);
@@ -525,127 +463,93 @@
     const bulkSearch = document.getElementById('affiliationBulkSearch');
     const bulkCheckboxes = bulkModal ? Array.from(bulkModal.querySelectorAll('.affiliation-bulk-checkbox')) : [];
     const bulkRows = bulkModal ? Array.from(bulkModal.querySelectorAll('.affiliation-bulk-row')) : [];
-    const locationModal = document.getElementById('affiliationLocationModal');
-    const locationSearch = document.getElementById('affiliationLocationSearch');
-    const locationClearBtn = document.getElementById('affiliationLocationClearBtn');
-    const locationConfirmBtn = document.getElementById('affiliationLocationConfirmBtn');
-    const locationRadios = locationModal ? Array.from(locationModal.querySelectorAll('.affiliation-location-radio')) : [];
-    const locationRows = locationModal ? Array.from(locationModal.querySelectorAll('.affiliation-location-row')) : [];
-    let activeRow = null;
     let nextIndex = container.querySelectorAll('.affiliation-row').length;
 
+    function resolveRelationKey(relation) {
+      if (relation) {
+        return relation;
+      }
+      const firstKey = Object.keys(relationOptions)[0];
+      return firstKey || 'other';
+    }
+
+    function relationDisplay(relationKey) {
+      const label = relationOptions[relationKey];
+      if (label) return label;
+      if (relationKey && relationKey !== 'other') return relationKey;
+      return '';
+    }
+
     function createRow(id, name, relation, note) {
+      const relationKey = resolveRelationKey(relation);
+      const labelText = relationDisplay(relationKey);
       const wrapper = document.createElement('div');
-      wrapper.className = 'affiliation-row border rounded p-3';
+      wrapper.className = 'affiliation-row border rounded p-3 d-flex flex-column gap-2';
       wrapper.setAttribute('data-affiliation-id', id || '');
       wrapper.setAttribute('data-affiliation-index', String(nextIndex++));
-      const row = document.createElement('div');
-      row.className = 'row g-2 align-items-end';
-      wrapper.appendChild(row);
 
-      const colLoc = document.createElement('div');
-      colLoc.className = 'col-md-5';
-      row.appendChild(colLoc);
+      const header = document.createElement('div');
+      header.className = 'd-flex flex-wrap justify-content-between align-items-center gap-2';
+      wrapper.appendChild(header);
 
-      const label = document.createElement('label');
-      label.className = 'form-label d-block';
-      label.textContent = '地点';
-      colLoc.appendChild(label);
+      const info = document.createElement('div');
+      info.className = 'd-flex flex-wrap align-items-center gap-2';
+      header.appendChild(info);
 
-      const wrap = document.createElement('div');
-      wrap.className = 'd-flex flex-wrap align-items-center gap-2';
-      colLoc.appendChild(wrap);
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'fw-semibold';
+      nameSpan.textContent = name || '未指定地点';
+      info.appendChild(nameSpan);
 
-      const summary = document.createElement('div');
-      summary.className = 'badge bg-light text-dark border affiliation-location-summary';
-      summary.setAttribute('data-default', '选择地点');
-      summary.textContent = name || '选择地点';
-      wrap.appendChild(summary);
+      if (labelText) {
+        const badge = document.createElement('span');
+        badge.className = 'badge bg-light text-dark border';
+        badge.textContent = labelText;
+        info.appendChild(badge);
+      }
 
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'btn btn-outline-secondary btn-sm affiliation-location-picker';
-      button.setAttribute('data-bs-toggle', 'modal');
-      button.setAttribute('data-bs-target', '#affiliationLocationModal');
-      button.setAttribute('data-affiliation-index', wrapper.getAttribute('data-affiliation-index'));
-      button.setAttribute('data-selected', id || '');
-      button.textContent = '更改地点';
-      wrap.appendChild(button);
-
-      const hidden = document.createElement('input');
-      hidden.type = 'hidden';
-      hidden.name = 'affiliation_location_id';
-      hidden.value = id || '';
-      colLoc.appendChild(hidden);
-
-      const colRelation = document.createElement('div');
-      colRelation.className = 'col-md-3 col-sm-6';
-      row.appendChild(colRelation);
-      const relationLabel = document.createElement('label');
-      relationLabel.className = 'form-label';
-      relationLabel.textContent = '关联标签';
-      colRelation.appendChild(relationLabel);
-      const relationSelect = buildSelect('affiliation_relation', relation || Object.keys(relationOptions)[0] || 'other', relationOptions);
-      colRelation.appendChild(relationSelect);
-
-      const colNote = document.createElement('div');
-      colNote.className = 'col-md-3 col-sm-6';
-      row.appendChild(colNote);
-      const noteLabel = document.createElement('label');
-      noteLabel.className = 'form-label';
-      noteLabel.textContent = '备注';
-      colNote.appendChild(noteLabel);
-      const noteInput = document.createElement('input');
-      noteInput.type = 'text';
-      noteInput.className = 'form-control';
-      noteInput.name = 'affiliation_note';
-      noteInput.placeholder = '选填：班级 / 部门等';
-      noteInput.value = note || '';
-      colNote.appendChild(noteInput);
-
-      const colRemove = document.createElement('div');
-      colRemove.className = 'col-md-1 d-grid';
-      row.appendChild(colRemove);
       const removeBtn = document.createElement('button');
       removeBtn.type = 'button';
-      removeBtn.className = 'btn btn-outline-danger affiliation-remove';
+      removeBtn.className = 'btn btn-sm btn-outline-danger affiliation-remove';
       removeBtn.textContent = '×';
-      colRemove.appendChild(removeBtn);
+      header.appendChild(removeBtn);
+
+      const hiddenId = document.createElement('input');
+      hiddenId.type = 'hidden';
+      hiddenId.name = 'affiliation_location_id';
+      hiddenId.value = id || '';
+      wrapper.appendChild(hiddenId);
+
+      const hiddenRelation = document.createElement('input');
+      hiddenRelation.type = 'hidden';
+      hiddenRelation.name = 'affiliation_relation';
+      hiddenRelation.value = relationKey || '';
+      wrapper.appendChild(hiddenRelation);
+
+      const noteInput = document.createElement('input');
+      noteInput.type = 'text';
+      noteInput.className = 'form-control form-control-sm';
+      noteInput.name = 'affiliation_note';
+      noteInput.placeholder = '备注（选填）';
+      noteInput.value = note || '';
+      wrapper.appendChild(noteInput);
 
       return wrapper;
     }
 
     function attachRow(row) {
       const removeBtn = row.querySelector('.affiliation-remove');
-      if (removeBtn) {
+      if (removeBtn && !removeBtn.dataset.bound) {
+        removeBtn.dataset.bound = 'true';
         removeBtn.addEventListener('click', function () {
           row.remove();
           toggleEmptyMessage(container, 'affiliationsEmptyHint', '尚未添加地点关联，点击“批量新增”选择。', '.affiliation-row');
-        });
-      }
-      const picker = row.querySelector('.affiliation-location-picker');
-      const hidden = row.querySelector('input[name="affiliation_location_id"]');
-      if (picker && hidden && locationModal) {
-        picker.addEventListener('click', function () {
-          activeRow = row;
-          const selected = hidden.value || '';
-          if (locationSearch) {
-            locationSearch.value = '';
-            locationRows.forEach(function (r) { r.style.display = ''; });
-          }
-          locationRadios.forEach(function (radio) {
-            radio.checked = radio.value === selected;
-          });
         });
       }
     }
 
     Array.from(container.querySelectorAll('.affiliation-row')).forEach(function (row, idx) {
       row.setAttribute('data-affiliation-index', row.getAttribute('data-affiliation-index') || String(idx));
-      const picker = row.querySelector('.affiliation-location-picker');
-      if (picker) {
-        picker.setAttribute('data-affiliation-index', row.getAttribute('data-affiliation-index'));
-      }
       attachRow(row);
     });
     nextIndex = container.querySelectorAll('.affiliation-row').length;
@@ -670,66 +574,13 @@
             cb.checked = false;
             return;
           }
-          const name = cb.getAttribute('data-name') || '选择地点';
+          const name = cb.getAttribute('data-name') || '未指定地点';
           const row = createRow(identifier, name, relation, '');
           container.appendChild(row);
           attachRow(row);
           cb.checked = false;
         });
         toggleEmptyMessage(container, 'affiliationsEmptyHint', '尚未添加地点关联，点击“批量新增”选择。', '.affiliation-row');
-      });
-    }
-
-    if (locationModal) {
-      if (locationClearBtn) {
-        locationClearBtn.addEventListener('click', function () {
-          const noneRadio = document.getElementById('affiliationLocationNone');
-          if (noneRadio) {
-            noneRadio.checked = true;
-          }
-        });
-      }
-      if (locationSearch) {
-        locationSearch.addEventListener('input', function () {
-          const term = this.value.trim().toLowerCase();
-          locationRows.forEach(function (row) {
-            const label = (row.getAttribute('data-label') || '').toLowerCase();
-            row.style.display = term ? (label.indexOf(term) !== -1 ? '' : 'none') : '';
-          });
-        });
-      }
-      if (locationConfirmBtn) {
-        locationConfirmBtn.addEventListener('click', function () {
-          if (!activeRow) return;
-          const hidden = activeRow.querySelector('input[name="affiliation_location_id"]');
-          const summary = activeRow.querySelector('.affiliation-location-summary');
-          const picker = activeRow.querySelector('.affiliation-location-picker');
-          const selectedRadio = locationRadios.find(function (radio) { return radio.checked; });
-          const defaultLabel = summary ? (summary.getAttribute('data-default') || '选择地点') : '选择地点';
-          const value = selectedRadio ? selectedRadio.value : '';
-          const label = selectedRadio ? (selectedRadio.getAttribute('data-name') || defaultLabel) : defaultLabel;
-          const current = hidden ? hidden.value : '';
-          if (value && value !== current) {
-            const dup = container.querySelector('.affiliation-row[data-affiliation-id="' + value + '"]');
-            if (dup && dup !== activeRow) {
-              window.alert('该地点已在清单中，无需重复添加。');
-              return;
-            }
-          }
-          if (hidden) hidden.value = value;
-          activeRow.setAttribute('data-affiliation-id', value || '');
-          if (summary) summary.textContent = label;
-          if (picker) picker.setAttribute('data-selected', value || '');
-          toggleEmptyMessage(container, 'affiliationsEmptyHint', '尚未添加地点关联，点击“批量新增”选择。', '.affiliation-row');
-          activeRow = null;
-        });
-      }
-      locationModal.addEventListener('hidden.bs.modal', function () {
-        activeRow = null;
-        if (locationSearch) {
-          locationSearch.value = '';
-        }
-        locationRows.forEach(function (row) { row.style.display = ''; });
       });
     }
   })();
@@ -744,122 +595,93 @@
     const bulkSearch = document.getElementById('interestBulkSearch');
     const bulkCheckboxes = bulkModal ? Array.from(bulkModal.querySelectorAll('.interest-bulk-checkbox')) : [];
     const bulkRows = bulkModal ? Array.from(bulkModal.querySelectorAll('.interest-bulk-row')) : [];
-    const selectModal = document.getElementById('interestItemModal');
-    const selectSearch = document.getElementById('interestItemSearch');
-    const selectClear = document.getElementById('interestItemClearBtn');
-    const selectConfirm = document.getElementById('interestItemConfirmBtn');
-    const selectRadios = selectModal ? Array.from(selectModal.querySelectorAll('.interest-item-radio')) : [];
-    const selectRows = selectModal ? Array.from(selectModal.querySelectorAll('.interest-item-row')) : [];
-    let activeRow = null;
     let nextIndex = container.querySelectorAll('.interest-row').length;
 
+    function resolveRelationKey(relation) {
+      if (relation) {
+        return relation;
+      }
+      const firstKey = Object.keys(relationOptions)[0];
+      return firstKey || 'other';
+    }
+
+    function relationDisplay(relationKey) {
+      const label = relationOptions[relationKey];
+      if (label) return label;
+      if (relationKey && relationKey !== 'other') return relationKey;
+      return '';
+    }
+
     function createRow(id, name, relation, note) {
+      const relationKey = resolveRelationKey(relation);
+      const labelText = relationDisplay(relationKey);
       const wrapper = document.createElement('div');
-      wrapper.className = 'interest-row border rounded p-3';
+      wrapper.className = 'interest-row border rounded p-3 d-flex flex-column gap-2';
       wrapper.setAttribute('data-interest-id', id || '');
       wrapper.setAttribute('data-interest-index', String(nextIndex++));
-      const row = document.createElement('div');
-      row.className = 'row g-2 align-items-end';
-      wrapper.appendChild(row);
 
-      const colItem = document.createElement('div');
-      colItem.className = 'col-md-5';
-      row.appendChild(colItem);
-      const label = document.createElement('label');
-      label.className = 'form-label d-block';
-      label.textContent = '物品';
-      colItem.appendChild(label);
-      const wrap = document.createElement('div');
-      wrap.className = 'd-flex flex-wrap align-items-center gap-2';
-      colItem.appendChild(wrap);
-      const summary = document.createElement('div');
-      summary.className = 'badge bg-light text-dark border interest-item-summary';
-      summary.setAttribute('data-default', '选择物品');
-      summary.textContent = name || '选择物品';
-      wrap.appendChild(summary);
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'btn btn-outline-secondary btn-sm interest-item-picker';
-      button.setAttribute('data-bs-toggle', 'modal');
-      button.setAttribute('data-bs-target', '#interestItemModal');
-      button.setAttribute('data-interest-index', wrapper.getAttribute('data-interest-index'));
-      button.setAttribute('data-selected', id || '');
-      button.textContent = '更改物品';
-      wrap.appendChild(button);
-      const hidden = document.createElement('input');
-      hidden.type = 'hidden';
-      hidden.name = 'interest_item_id';
-      hidden.value = id || '';
-      colItem.appendChild(hidden);
+      const header = document.createElement('div');
+      header.className = 'd-flex flex-wrap justify-content-between align-items-center gap-2';
+      wrapper.appendChild(header);
 
-      const colRelation = document.createElement('div');
-      colRelation.className = 'col-md-3 col-sm-6';
-      row.appendChild(colRelation);
-      const relationLabel = document.createElement('label');
-      relationLabel.className = 'form-label';
-      relationLabel.textContent = '关联标签';
-      colRelation.appendChild(relationLabel);
-      const relationSelect = buildSelect('interest_item_relation', relation || Object.keys(relationOptions)[0] || 'other', relationOptions);
-      colRelation.appendChild(relationSelect);
+      const info = document.createElement('div');
+      info.className = 'd-flex flex-wrap align-items-center gap-2';
+      header.appendChild(info);
 
-      const colNote = document.createElement('div');
-      colNote.className = 'col-md-3 col-sm-6';
-      row.appendChild(colNote);
-      const noteLabel = document.createElement('label');
-      noteLabel.className = 'form-label';
-      noteLabel.textContent = '备注';
-      colNote.appendChild(noteLabel);
-      const noteInput = document.createElement('input');
-      noteInput.type = 'text';
-      noteInput.className = 'form-control';
-      noteInput.name = 'interest_item_note';
-      noteInput.placeholder = '选填：出借人、购买渠道等';
-      noteInput.value = note || '';
-      colNote.appendChild(noteInput);
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'fw-semibold';
+      nameSpan.textContent = name || '未指定物品';
+      info.appendChild(nameSpan);
 
-      const colRemove = document.createElement('div');
-      colRemove.className = 'col-md-1 d-grid';
-      row.appendChild(colRemove);
+      if (labelText) {
+        const badge = document.createElement('span');
+        badge.className = 'badge bg-light text-dark border';
+        badge.textContent = labelText;
+        info.appendChild(badge);
+      }
+
       const removeBtn = document.createElement('button');
       removeBtn.type = 'button';
-      removeBtn.className = 'btn btn-outline-danger interest-remove';
+      removeBtn.className = 'btn btn-sm btn-outline-danger interest-remove';
       removeBtn.textContent = '×';
-      colRemove.appendChild(removeBtn);
+      header.appendChild(removeBtn);
+
+      const hiddenId = document.createElement('input');
+      hiddenId.type = 'hidden';
+      hiddenId.name = 'interest_item_id';
+      hiddenId.value = id || '';
+      wrapper.appendChild(hiddenId);
+
+      const hiddenRelation = document.createElement('input');
+      hiddenRelation.type = 'hidden';
+      hiddenRelation.name = 'interest_item_relation';
+      hiddenRelation.value = relationKey || '';
+      wrapper.appendChild(hiddenRelation);
+
+      const noteInput = document.createElement('input');
+      noteInput.type = 'text';
+      noteInput.className = 'form-control form-control-sm';
+      noteInput.name = 'interest_item_note';
+      noteInput.placeholder = '备注（选填）';
+      noteInput.value = note || '';
+      wrapper.appendChild(noteInput);
 
       return wrapper;
     }
 
     function attachRow(row) {
       const removeBtn = row.querySelector('.interest-remove');
-      if (removeBtn) {
+      if (removeBtn && !removeBtn.dataset.bound) {
+        removeBtn.dataset.bound = 'true';
         removeBtn.addEventListener('click', function () {
           row.remove();
           toggleEmptyMessage(container, 'interestsEmptyHint', '尚未记录兴趣物品，点击“批量新增”选择。', '.interest-row');
-        });
-      }
-      const picker = row.querySelector('.interest-item-picker');
-      const hidden = row.querySelector('input[name="interest_item_id"]');
-      if (picker && hidden && selectModal) {
-        picker.addEventListener('click', function () {
-          activeRow = row;
-          const selected = hidden.value || '';
-          if (selectSearch) {
-            selectSearch.value = '';
-            selectRows.forEach(function (r) { r.style.display = ''; });
-          }
-          selectRadios.forEach(function (radio) {
-            radio.checked = radio.value === selected;
-          });
         });
       }
     }
 
     Array.from(container.querySelectorAll('.interest-row')).forEach(function (row, idx) {
       row.setAttribute('data-interest-index', row.getAttribute('data-interest-index') || String(idx));
-      const picker = row.querySelector('.interest-item-picker');
-      if (picker) {
-        picker.setAttribute('data-interest-index', row.getAttribute('data-interest-index'));
-      }
       attachRow(row);
     });
     nextIndex = container.querySelectorAll('.interest-row').length;
@@ -880,11 +702,11 @@
         bulkCheckboxes.forEach(function (cb) {
           if (!cb.checked) return;
           const identifier = cb.value;
-          if (!identifier || container.querySelector('.interest-row[data-interest-id="' + identifier + '"]')) {
+          if (!identifier || container.querySelector('.interest-row[data-interest-id=\"' + identifier + '\"]')) {
             cb.checked = false;
             return;
           }
-          const name = cb.getAttribute('data-name') || '选择物品';
+          const name = cb.getAttribute('data-name') || '未指定物品';
           const row = createRow(identifier, name, relation, '');
           container.appendChild(row);
           attachRow(row);
@@ -893,61 +715,7 @@
         toggleEmptyMessage(container, 'interestsEmptyHint', '尚未记录兴趣物品，点击“批量新增”选择。', '.interest-row');
       });
     }
-
-    if (selectModal) {
-      if (selectClear) {
-        selectClear.addEventListener('click', function () {
-          const noneRadio = document.getElementById('interestItemNone');
-          if (noneRadio) {
-            noneRadio.checked = true;
-          }
-        });
-      }
-      if (selectSearch) {
-        selectSearch.addEventListener('input', function () {
-          const term = this.value.trim().toLowerCase();
-          selectRows.forEach(function (row) {
-            const label = (row.getAttribute('data-label') || '').toLowerCase();
-            row.style.display = term ? (label.indexOf(term) !== -1 ? '' : 'none') : '';
-          });
-        });
-      }
-      if (selectConfirm) {
-        selectConfirm.addEventListener('click', function () {
-          if (!activeRow) return;
-          const hidden = activeRow.querySelector('input[name="interest_item_id"]');
-          const summary = activeRow.querySelector('.interest-item-summary');
-          const picker = activeRow.querySelector('.interest-item-picker');
-          const selectedRadio = selectRadios.find(function (radio) { return radio.checked; });
-          const defaultLabel = summary ? (summary.getAttribute('data-default') || '选择物品') : '选择物品';
-          const value = selectedRadio ? selectedRadio.value : '';
-          const label = selectedRadio ? (selectedRadio.getAttribute('data-name') || defaultLabel) : defaultLabel;
-          const current = hidden ? hidden.value : '';
-          if (value && value !== current) {
-            const dup = container.querySelector('.interest-row[data-interest-id="' + value + '"]');
-            if (dup && dup !== activeRow) {
-              window.alert('该物品已在兴趣清单中。');
-              return;
-            }
-          }
-          if (hidden) hidden.value = value;
-          activeRow.setAttribute('data-interest-id', value || '');
-          if (summary) summary.textContent = label;
-          if (picker) picker.setAttribute('data-selected', value || '');
-          toggleEmptyMessage(container, 'interestsEmptyHint', '尚未记录兴趣物品，点击“批量新增”选择。', '.interest-row');
-          activeRow = null;
-        });
-      }
-      selectModal.addEventListener('hidden.bs.modal', function () {
-        activeRow = null;
-        if (selectSearch) {
-          selectSearch.value = '';
-        }
-        selectRows.forEach(function (row) { row.style.display = ''; });
-      });
-    }
   })();
-
   (function manageEvents() {
     const container = document.getElementById('eventsContainer');
     if (!container) return;
@@ -960,73 +728,82 @@
     const bulkRows = bulkModal ? Array.from(bulkModal.querySelectorAll('.event-bulk-row')) : [];
     let nextIndex = container.querySelectorAll('.event-row').length;
 
+    function resolveRelationKey(relation) {
+      if (relation) {
+        return relation;
+      }
+      const firstKey = Object.keys(relationOptions)[0];
+      return firstKey || 'other';
+    }
+
+    function relationDisplay(relationKey) {
+      const label = relationOptions[relationKey];
+      if (label) return label;
+      if (relationKey && relationKey !== 'other') return relationKey;
+      return '';
+    }
+
     function createRow(id, name, relation, note) {
+      const relationKey = resolveRelationKey(relation);
+      const labelText = relationDisplay(relationKey);
       const wrapper = document.createElement('div');
-      wrapper.className = 'event-row border rounded p-3';
+      wrapper.className = 'event-row border rounded p-3 d-flex flex-column gap-2';
       wrapper.setAttribute('data-event-id', id || '');
       wrapper.setAttribute('data-event-index', String(nextIndex++));
-      const row = document.createElement('div');
-      row.className = 'row g-2 align-items-end';
-      wrapper.appendChild(row);
 
-      const colEvent = document.createElement('div');
-      colEvent.className = 'col-md-6';
-      row.appendChild(colEvent);
-      const label = document.createElement('label');
-      label.className = 'form-label d-block';
-      label.textContent = '活动';
-      colEvent.appendChild(label);
-      const summary = document.createElement('div');
-      summary.className = 'badge bg-light text-dark border event-summary';
-      summary.setAttribute('data-default', '选择活动');
-      summary.textContent = name || '选择活动';
-      colEvent.appendChild(summary);
-      const hidden = document.createElement('input');
-      hidden.type = 'hidden';
-      hidden.name = 'event_relation_event_id';
-      hidden.value = id || '';
-      colEvent.appendChild(hidden);
+      const header = document.createElement('div');
+      header.className = 'd-flex flex-wrap justify-content-between align-items-center gap-2';
+      wrapper.appendChild(header);
 
-      const colRelation = document.createElement('div');
-      colRelation.className = 'col-md-3 col-sm-6';
-      row.appendChild(colRelation);
-      const relationLabel = document.createElement('label');
-      relationLabel.className = 'form-label';
-      relationLabel.textContent = '关联标签';
-      colRelation.appendChild(relationLabel);
-      const relationSelect = buildSelect('event_relation_relation', relation || Object.keys(relationOptions)[0] || 'other', relationOptions);
-      colRelation.appendChild(relationSelect);
+      const info = document.createElement('div');
+      info.className = 'd-flex flex-wrap align-items-center gap-2';
+      header.appendChild(info);
 
-      const colNote = document.createElement('div');
-      colNote.className = 'col-md-3 col-sm-6';
-      row.appendChild(colNote);
-      const noteLabel = document.createElement('label');
-      noteLabel.className = 'form-label';
-      noteLabel.textContent = '备注';
-      colNote.appendChild(noteLabel);
-      const noteInput = document.createElement('input');
-      noteInput.type = 'text';
-      noteInput.className = 'form-control';
-      noteInput.name = 'event_relation_note';
-      noteInput.placeholder = '选填：角色、合作说明等';
-      noteInput.value = note || '';
-      colNote.appendChild(noteInput);
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'fw-semibold';
+      nameSpan.textContent = name || '未指定活动';
+      info.appendChild(nameSpan);
 
-      const colRemove = document.createElement('div');
-      colRemove.className = 'col-md-12 text-end mt-2';
-      row.appendChild(colRemove);
+      if (labelText) {
+        const badge = document.createElement('span');
+        badge.className = 'badge bg-light text-dark border';
+        badge.textContent = labelText;
+        info.appendChild(badge);
+      }
+
       const removeBtn = document.createElement('button');
       removeBtn.type = 'button';
       removeBtn.className = 'btn btn-sm btn-outline-danger event-remove';
       removeBtn.textContent = '移除';
-      colRemove.appendChild(removeBtn);
+      header.appendChild(removeBtn);
+
+      const hiddenId = document.createElement('input');
+      hiddenId.type = 'hidden';
+      hiddenId.name = 'event_relation_event_id';
+      hiddenId.value = id || '';
+      wrapper.appendChild(hiddenId);
+
+      const hiddenRelation = document.createElement('input');
+      hiddenRelation.type = 'hidden';
+      hiddenRelation.name = 'event_relation_relation';
+      hiddenRelation.value = relationKey || '';
+      wrapper.appendChild(hiddenRelation);
+
+      const noteInput = document.createElement('input');
+      noteInput.type = 'text';
+      noteInput.className = 'form-control form-control-sm';
+      noteInput.name = 'event_relation_note';
+      noteInput.placeholder = '备注（选填）';
+      noteInput.value = note || '';
+      wrapper.appendChild(noteInput);
 
       return wrapper;
     }
 
     function attachRow(row) {
       const removeBtn = row.querySelector('.event-remove');
-      if (removeBtn) {
+      if (removeBtn && !removeBtn.dataset.bound) {
+        removeBtn.dataset.bound = 'true';
         removeBtn.addEventListener('click', function () {
           row.remove();
           toggleEmptyMessage(container, 'eventsEmptyHint', '尚未记录活动关联，点击“批量新增”选择。', '.event-row');
@@ -1034,7 +811,8 @@
       }
     }
 
-    Array.from(container.querySelectorAll('.event-row')).forEach(function (row) {
+    Array.from(container.querySelectorAll('.event-row')).forEach(function (row, idx) {
+      row.setAttribute('data-event-index', row.getAttribute('data-event-index') || String(idx));
       attachRow(row);
     });
     nextIndex = container.querySelectorAll('.event-row').length;
@@ -1059,7 +837,7 @@
             cb.checked = false;
             return;
           }
-          const name = cb.getAttribute('data-name') || '选择活动';
+          const name = cb.getAttribute('data-name') || '未指定活动';
           const row = createRow(identifier, name, relation, '');
           container.appendChild(row);
           attachRow(row);

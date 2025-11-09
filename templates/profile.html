@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_media_gallery.html" import render_media_gallery %}
 {% macro render_resource_entry(entry, kind) -%}
   {% if kind == 'item' %}
     <li class="list-group-item">
@@ -66,45 +67,127 @@
   {% endif %}
 {%- endmacro %}
 {% block content %}
-<div class="mb-4">
-  <div class="row">
-    <div class="col-auto">
+<style>
+  .profile-header-card {
+    border: none;
+    background: var(--bs-body-bg);
+    box-shadow: 0 0.75rem 1.75rem rgba(33, 37, 41, 0.08);
+  }
+  .profile-avatar-gallery .media-gallery-grid {
+    display: flex;
+    justify-content: center;
+  }
+  .profile-avatar-gallery .media-card {
+    border: none;
+    padding: 0;
+    min-height: auto;
+    background: transparent;
+    box-shadow: none;
+    transition: none;
+  }
+  .profile-avatar-gallery .media-card:hover {
+    box-shadow: none;
+    transform: none;
+  }
+  .profile-avatar-gallery .media-card-figure {
+    padding: 0;
+  }
+  .profile-avatar-gallery .media-card-img {
+    width: 220px;
+    height: 220px;
+    max-width: none;
+    max-height: none;
+    border-radius: 50%;
+    object-fit: cover;
+    background-color: transparent;
+    box-shadow: 0 1rem 2.5rem rgba(33, 37, 41, 0.18);
+  }
+  .profile-avatar-gallery .media-actions,
+  .profile-avatar-gallery .media-description {
+    display: none;
+  }
+  .profile-avatar-placeholder {
+    width: 220px;
+    height: 220px;
+    border-radius: 50%;
+    margin: 0 auto 1.5rem;
+    background: var(--bs-secondary-bg-subtle, rgba(108, 117, 125, 0.12));
+    color: rgba(73, 80, 87, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 1rem 2.5rem rgba(33, 37, 41, 0.12);
+  }
+  .profile-avatar-icon {
+    font-size: 4.5rem;
+    line-height: 1;
+  }
+  .profile-contact,
+  .profile-social-links {
+    display: flex;
+    justify-content: center;
+  }
+  .profile-social-links {
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+</style>
+<div class="card profile-header-card mb-4">
+  <div class="card-body text-center">
+    <div class="profile-avatar mb-3">
       {% if profile_user.photo %}
-      <img src="{{ uploaded_image_url(profile_user.photo) }}" alt="头像" class="img-thumbnail" style="width:100px; height:100px; object-fit: cover;">
+        {% set avatar_entries = [{
+          'url': uploaded_image_url(profile_user.photo),
+          'kind': 'image',
+          'display_name': (profile_user.name or profile_user.username) ~ '的头像'
+        }] %}
+        {{ render_media_gallery(
+            avatar_entries,
+            'profileAvatarGallery',
+            media_kind_labels,
+            '尚未上传头像',
+            {
+              'gallery_class': 'media-gallery profile-avatar-gallery mx-auto',
+              'grid_class': 'media-gallery-grid justify-content-center',
+              'card_class': 'media-card profile-avatar-card border-0 shadow-none bg-transparent p-0',
+              'enable_fullscreen': true
+            }
+          )
+        }}
       {% else %}
-      <div class="bg-secondary text-white d-flex align-items-center justify-content-center rounded" style="width:100px; height:100px;">
-        <span style="font-size:50px;">&#128100;</span>
+      <div class="profile-avatar-placeholder">
+        <span class="profile-avatar-icon">&#128100;</span>
       </div>
       {% endif %}
     </div>
-    <div class="col">
-      <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
-        <h4 class="mb-0">{{ profile_user.name }}</h4>
-        {% if current_user.id == profile_user.id %}
-          <a href="{{ url_for('edit_profile', member_id=profile_user.id) }}" class="btn btn-sm btn-outline-primary">编辑个人主页</a>
-        {% else %}
-          <button type="button"
-                  class="btn btn-sm {% if is_following %}btn-outline-secondary{% else %}btn-outline-primary{% endif %}"
-                  id="profileFollowBtn"
-                  data-url="{{ url_for('toggle_follow', member_id=profile_user.id) }}"
-                  data-followed="{{ '1' if is_following else '0' }}">
-            {% if is_following %}取消关注{% else %}关注 TA{% endif %}
-          </button>
-        {% endif %}
-      </div>
-      <p class="mb-0">
-        {% if profile_user.contact %}📞 <a href="tel:{{ profile_user.contact|replace(' ', '') }}">{{ profile_user.contact }}</a>{% endif %}
-      </p>
-      {% if profile_social_links %}
-      <div class="d-flex flex-wrap gap-2 mt-2">
-        {% for link in profile_social_links %}
-          <a href="{{ link.url }}" target="_blank" rel="noopener" class="badge bg-light text-dark border text-decoration-none">
-            {{ link.label or link.url }}
-          </a>
-        {% endfor %}
-      </div>
+    <div class="d-flex flex-wrap justify-content-center align-items-center gap-2 mb-3">
+      <h4 class="mb-0">{{ profile_user.name or profile_user.username }}</h4>
+      {% if current_user.id == profile_user.id %}
+        <a href="{{ url_for('edit_profile', member_id=profile_user.id) }}" class="btn btn-sm btn-outline-primary">编辑个人主页</a>
+      {% else %}
+        <button type="button"
+                class="btn btn-sm {% if is_following %}btn-outline-secondary{% else %}btn-outline-primary{% endif %}"
+                id="profileFollowBtn"
+                data-url="{{ url_for('toggle_follow', member_id=profile_user.id) }}"
+                data-followed="{{ '1' if is_following else '0' }}">
+          {% if is_following %}取消关注{% else %}关注 TA{% endif %}
+        </button>
       {% endif %}
     </div>
+    {% if profile_user.contact %}
+    <div class="profile-contact mt-2">
+      <span>📞 <a href="tel:{{ profile_user.contact|replace(' ', '') }}">{{ profile_user.contact }}</a></span>
+    </div>
+    {% endif %}
+    {% if profile_social_links %}
+    <div class="profile-social-links mt-3">
+      {% for link in profile_social_links %}
+        <a href="{{ link.url }}" target="_blank" rel="noopener" class="badge bg-light text-dark border text-decoration-none">
+          {{ link.label or link.url }}
+        </a>
+      {% endfor %}
+    </div>
+    {% endif %}
   </div>
 </div>
 {% if any_item_empty %}

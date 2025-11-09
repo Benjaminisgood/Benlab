@@ -19,7 +19,7 @@
 
   <div class="mb-3">
     <label for="features" class="form-label">物品特性</label>
-    <select name="features" class="form-select">
+    <select name="features" class="form-select" required>
       <option value="">-- 请选择 --</option>
       {% for opt in allowed_features %}
       <option value="{{ opt }}" {% if item and item.features == opt %}selected{% endif %}>{{ opt }}</option>
@@ -31,6 +31,7 @@
     {% if item and item.features and item.features not in allowed_features %}
     <div class="form-text text-warning">保存后将恢复为空，请选择“公共”或“私人”。</div>
     {% endif %}
+    <div class="form-text text-muted">私人物品仅负责人可编辑，请谨慎调整。</div>
   </div>
 
   <div class="mb-3">
@@ -41,19 +42,20 @@
   <div class="mb-3">
     <label class="form-label">负责人</label>
     <div class="d-flex flex-wrap align-items-center gap-2">
-      <div id="itemResponsibleSummary" class="badge bg-light text-dark border">
-        {% if item and item.responsible_member %}
-          {{ item.responsible_member.name }}
+      <div id="itemResponsibleSummary" class="d-flex flex-wrap gap-2">
+        {% if item and item.responsible_members %}
+          {% for member in item.responsible_members %}
+            <span class="badge bg-light text-dark border">{{ member.name or member.username }}</span>
+          {% endfor %}
         {% else %}
-          未指定
+          <span class="badge bg-light text-muted border">未指定</span>
         {% endif %}
       </div>
       <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#itemResponsibleModal">
         管理负责人
       </button>
     </div>
-    <input type="hidden" id="responsibleIdInput" name="responsible_id" value="{{ item.responsible_id if item and item.responsible_id else '' }}">
-    <div class="form-text text-muted">通过搜索快速定位成员；若不指定则留空，方便公共物品由团队协作维护。</div>
+    <div class="form-text text-muted">通过搜索快速定位成员；私人物品需要至少一位负责人，若未指定将默认由当前编辑者负责。</div>
   </div>
   <div class="mb-3">
     <label class="form-label">存放位置（可多选）</label>
@@ -273,17 +275,12 @@
         <div class="modal-body">
           <input type="search" class="form-control form-control-sm mb-3" id="itemResponsibleSearch" placeholder="搜索姓名或用户名">
           <div class="border rounded p-2" style="max-height: 320px; overflow-y: auto;">
-            <div class="form-check item-responsible-row py-1" data-label="未指定">
-              <input class="form-check-input item-responsible-radio" type="radio" name="item_responsible_select" value=""
-                     id="itemResponsibleNone" {% if not item or not item.responsible_id %}checked{% endif %}>
-              <label class="form-check-label" for="itemResponsibleNone">未指定</label>
-            </div>
             {% for m in members %}
             <div class="form-check item-responsible-row py-1" data-label="{{ (m.name or m.username)|lower }}">
-              <input class="form-check-input item-responsible-radio" type="radio" name="item_responsible_select" value="{{ m.id }}"
+              <input class="form-check-input item-responsible-checkbox" type="checkbox" name="responsible_ids" value="{{ m.id }}"
                      id="itemResponsible{{ m.id }}"
                      data-display="{{ m.name or m.username }}"
-                     {% if item and item.responsible_id == m.id %}checked{% endif %}>
+                     {% if item and item.responsible_members and (m in item.responsible_members) %}checked{% endif %}>
               <label class="form-check-label d-flex justify-content-between align-items-center" for="itemResponsible{{ m.id }}">
                 <span>{{ m.name or m.username }}</span>
                 {% if m.username and m.name and m.username != m.name %}
@@ -295,7 +292,7 @@
           </div>
         </div>
         <div class="modal-footer">
-          <button type="button" class="btn btn-outline-secondary btn-sm" id="itemResponsibleClearBtn">清除选择</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="itemResponsibleClearBtn">清除全部</button>
           <button type="button" class="btn btn-primary btn-sm" data-bs-dismiss="modal">完成</button>
         </div>
       </div>
@@ -426,37 +423,29 @@
   })();
 
   (function initItemResponsibleModal() {
-    const modal = document.getElementById('itemResponsibleModal');
-    const hiddenInput = document.getElementById('responsibleIdInput');
     const summary = document.getElementById('itemResponsibleSummary');
-    if (!modal || !hiddenInput || !summary) {
+    const modal = document.getElementById('itemResponsibleModal');
+    if (!summary || !modal) {
       return;
     }
-    const radios = Array.prototype.slice.call(modal.querySelectorAll('.item-responsible-radio'));
-    const rows = Array.prototype.slice.call(modal.querySelectorAll('.item-responsible-row'));
     const searchInput = document.getElementById('itemResponsibleSearch');
     const clearBtn = document.getElementById('itemResponsibleClearBtn');
-
-    const render = function () {
-      const checked = radios.find(function (radio) { return radio.checked; });
-      if (!checked) {
-        summary.textContent = '未指定';
-        hiddenInput.value = '';
+    const checkboxes = Array.prototype.slice.call(modal.querySelectorAll('.item-responsible-checkbox'));
+    const rows = Array.prototype.slice.call(modal.querySelectorAll('.item-responsible-row'));
+    const renderSummary = function () {
+      const selected = checkboxes.filter(function (cb) { return cb.checked; });
+      if (!selected.length) {
+        summary.innerHTML = '<span class="badge bg-light text-muted border">未指定</span>';
         return;
       }
-      hiddenInput.value = checked.value || '';
-      if (!checked.value) {
-        summary.textContent = '未指定';
-        return;
-      }
-      const display = checked.getAttribute('data-display') || checked.nextElementSibling?.textContent || '';
-      summary.textContent = (display || '').trim() || '未指定';
+      summary.innerHTML = selected.map(function (cb) {
+        const label = cb.getAttribute('data-display') || cb.getAttribute('data-label') || cb.value;
+        return '<span class="badge bg-light text-dark border me-1">' + label + '</span>';
+      }).join('');
     };
-
-    radios.forEach(function (radio) {
-      radio.addEventListener('change', render);
+    checkboxes.forEach(function (cb) {
+      cb.addEventListener('change', renderSummary);
     });
-
     if (searchInput) {
       searchInput.addEventListener('input', function () {
         const term = this.value.trim().toLowerCase();
@@ -466,25 +455,25 @@
         });
       });
     }
-
     if (clearBtn) {
       clearBtn.addEventListener('click', function () {
-        const noneRadio = document.getElementById('itemResponsibleNone');
-        if (noneRadio) {
-          noneRadio.checked = true;
-          render();
-        }
+        checkboxes.forEach(function (cb) { cb.checked = false; });
+        renderSummary();
       });
     }
-
     modal.addEventListener('hidden.bs.modal', function () {
       if (searchInput) {
         searchInput.value = '';
         rows.forEach(function (row) { row.style.display = ''; });
       }
+      renderSummary();
     });
-
-    render();
+    modal.addEventListener('shown.bs.modal', function () {
+      if (searchInput) {
+        searchInput.focus();
+      }
+    });
+    renderSummary();
   })();
 </script>
 {% endblock %}

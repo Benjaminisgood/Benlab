@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="d-flex align-items-center justify-content-center py-5">
+  <div class="text-center" style="max-width: 520px;">
+    <div class="display-3 fw-bold text-danger mb-3">403</div>
+    <h2 class="fw-semibold mb-3">没有权限访问这个页面</h2>
+    <p class="text-muted mb-4">
+      {{ description or '该资源仅向负责人开放，请联系负责人授予权限。' }}
+    </p>
+    <div class="d-flex flex-wrap justify-content-center gap-2">
+      <a href="{{ back_url }}" class="btn btn-primary">返回上一页</a>
+      <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">回到首页</a>
+    </div>
+  </div>
+</section>
+{% endblock %}

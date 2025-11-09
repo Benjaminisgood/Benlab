@@ -17,7 +17,6 @@
     <tr>
       <th>名称</th>
       <th>类别</th>
-      <th>库存状态 / 特性</th>
       <th>存放位置</th>
       <th>负责人</th>
       <th>关联活动</th>
@@ -52,7 +51,11 @@
       {% endif %}
       {% set location_names = item.locations | map(attribute='name') | list %}
       {% set detail_links_blob = item.detail_links | map(attribute='url') | list %}
-      {% set search_blob = (item.name ~ ' ' ~ (item.category or '-') ~ ' ' ~ (item.stock_status or '-') ~ ' ' ~ (item.features or '-') ~ ' ' ~ (detail_links_blob|join(' ')) ~ ' ' ~ (item.notes or '-') ~ ' ' ~ ((item.responsible_member.name) if item.responsible_member else '-') ~ ' ' ~ (location_names|join(' '))) %}
+      {% set responsible_labels = [] %}
+      {% for member in item.responsible_members %}
+        {% set _ = responsible_labels.append(member.name or member.username) %}
+      {% endfor %}
+      {% set search_blob = (item.name ~ ' ' ~ (item.category or '-') ~ ' ' ~ (item.stock_status or '-') ~ ' ' ~ (item.features or '-') ~ ' ' ~ (detail_links_blob|join(' ')) ~ ' ' ~ (item.notes or '-') ~ ' ' ~ (responsible_labels|join(' ')) ~ ' ' ~ (location_names|join(' '))) %}
 
       <tr class="{{ row_class }}" data-search="{{ search_blob|lower }}">
         <td>
@@ -72,17 +75,6 @@
           {% endif %}
         </td>
         <td>
-          {% if item.stock_status %}
-            <span class="badge bg-primary me-1">{{ item.stock_status }}</span>
-          {% endif %}
-          {% if item.features in ['公共', '私人'] %}
-            <span class="badge bg-info text-dark me-1">{{ item.features }}</span>
-          {% endif %}
-          {% if not item.stock_status and not item.features %}
-            -
-          {% endif %}
-        </td>
-        <td>
           {% if item.locations and item.locations|length > 0 %}
             {% for loc in item.locations %}
               <a href="{{ url_for('view_location', loc_id=loc.id) }}" class="me-1">{{ loc.name }}</a>{% if not loop.last %}, {% endif %}
@@ -90,8 +82,10 @@
           {% else %}-{% endif %}
         </td>
         <td>
-          {% if item.responsible_member %}
-            <a href="{{ url_for('profile', member_id=item.responsible_member.id) }}">{{ item.responsible_member.name }}</a>
+          {% if item.responsible_members %}
+            {% for member in item.responsible_members %}
+              <a href="{{ url_for('profile', member_id=member.id) }}">{{ member.name or member.username }}</a>{% if not loop.last %}, {% endif %}
+            {% endfor %}
           {% else %}-{% endif %}
         </td>
         <td>
@@ -112,7 +106,7 @@
     {% endfor %}
 
     <tr id="itemsNoResultRow" class="text-center text-muted {% if items|length > 0 %}d-none{% endif %}">
-      <td colspan="7">没有找到物品</td>
+      <td colspan="6">没有找到物品</td>
     </tr>
   </tbody>
 </table>

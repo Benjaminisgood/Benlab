@@ -33,13 +33,14 @@
 </div>
 <table class="table table-hover align-middle" id="membersTable">
   <thead class="table-light">
-    <tr><th>姓名</th><th>用户名</th><th>联系方式</th><th>负责物品数</th><th>负责位置数</th></tr>
+    <tr><th>姓名</th><th>用户名</th><th>联系方式</th><th>负责物品数</th><th>负责位置数</th><th>举办活动数</th></tr>
   </thead>
   <tbody>
     {% for mem in members %}
     {% set items_count = mem.items|length %}
-    {% set locations_count = mem.locations|length %}
-    {% set search_blob = ((mem.name or mem.username) ~ ' ' ~ mem.username ~ ' ' ~ (mem.contact or '') ~ ' ' ~ items_count ~ ' ' ~ locations_count) %}
+    {% set locations_count = mem.responsible_locations|length %}
+    {% set events_count = mem.events_owned.count() %}
+    {% set search_blob = ((mem.name or mem.username) ~ ' ' ~ mem.username ~ ' ' ~ (mem.contact or '') ~ ' ' ~ items_count ~ ' ' ~ locations_count ~ ' ' ~ events_count) %}
     {% set row_class = '' %}
     {% if mem.id == current_user.id %}
       {% set row_class = 'table-primary' %}
@@ -54,12 +55,13 @@
       </td>
       <td>{{ mem.username }}</td>
       <td>{{ mem.contact or '-' }}</td>
-      <td>{{ mem.items|length }}</td>
-      <td>{{ mem.locations|length }}</td>
+      <td>{{ items_count }}</td>
+      <td>{{ locations_count }}</td>
+      <td>{{ events_count }}</td>
     </tr>
     {% endfor %}
     <tr id="membersEmptyRow" class="text-center text-muted {% if members|length > 0 %}d-none{% endif %}">
-      <td colspan="5">暂无成员</td>
+      <td colspan="6">暂无成员</td>
     </tr>
   </tbody>
 </table>

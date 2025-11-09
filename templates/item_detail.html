@@ -1,45 +1,26 @@
 {% extends "base.html" %}
 {% from "_media_gallery.html" import render_media_gallery %}
 {% block content %}
-{% macro render_event_entry(event, status_label=None) -%}
-<li class="list-group-item d-flex justify-content-between align-items-start gap-3">
-  <div class="flex-grow-1">
-    <a href="{{ url_for('event_detail', event_id=event.id) }}" class="fw-semibold text-decoration-none">{{ event.title }}</a>
-    <div class="text-muted small mt-1">
-      {% if event.start_time %}
-        {{ event.start_time.strftime('%Y-%m-%d %H:%M') }}
-        {% if event.end_time %}&ndash;{{ event.end_time.strftime('%Y-%m-%d %H:%M') }}{% endif %}
-      {% else %}
-        时间待定
-      {% endif %}
-    </div>
-    {% if event.locations %}
-      <div class="small text-muted">
-        {% for loc in event.locations %}
-          <a href="{{ url_for('view_location', loc_id=loc.id) }}" class="text-decoration-none me-1">{{ loc.name }}</a>
-        {% endfor %}
-      </div>
-    {% endif %}
-  </div>
-  <div class="text-end">
-    {% if status_label %}
-      <div><span class="badge bg-primary-subtle text-primary-emphasis border">{{ status_label }}</span></div>
-    {% endif %}
-    <div class="mt-2">
-      <span class="badge bg-light text-dark border me-1">参与 {{ event.participant_count() }}</span>
-      <span class="badge bg-secondary-subtle text-secondary-emphasis border">
-        {% if event.visibility == 'public' %}公开{% elif event.visibility == 'internal' %}社区{% else %}私享{% endif %}
-      </span>
-    </div>
-  </div>
-</li>
-{%- endmacro %}
-<h4 class="mb-3">物品详情</h4>
+<h4 class="mb-3">{{ item.name }}</h4>
+
+<div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+  <button type="button" class="btn btn-outline-secondary" id="shareItemLinkBtn" data-url="{{ request.url }}">分享链接</button>
+  <a href="{{ url_for('edit_item', item_id=item.id) }}" class="btn btn-primary">编辑</a>
+  <form action="{{ url_for('delete_item', item_id=item.id) }}" method="post" class="d-inline" onsubmit="return confirm('确定删除该物品吗？');">
+    <button type="submit" class="btn btn-danger">删除</button>
+  </form>
+  <a href="{{ url_for('items') }}" class="btn btn-secondary">返回列表</a>
+</div>
+
 <div class="row">
   <div class="col-md-6">
     <ul class="list-group mb-3">
-      <li class="list-group-item"><strong>名称:</strong> {{ item.name }}</li>
-      <li class="list-group-item"><strong>类别:</strong> {{ item.category or '未分类' }}</li>
+      <li class="list-group-item"><strong>类别：</strong>{{ item.category or '未分类' }}</li>
+      <li class="list-group-item"><strong>库存状态：</strong>{{ item.stock_status or '未指定' }}</li>
+      <li class="list-group-item"><strong>物品特性：</strong>{{ item.features if item.features in ['公共','私人'] else '未指定' }}</li>
+      <li class="list-group-item"><strong>价值：</strong>{{ item.value if item.value is not none else '未指定' }}</li>
+      <li class="list-group-item"><strong>数量：</strong>{% if item.quantity is not none and item.unit %}{{ item.quantity }} {{ item.unit }}{% else %}未指定{% endif %}</li>
+      <li class="list-group-item"><strong>购入时间：</strong>{{ item.purchase_date.strftime('%Y-%m-%d') if item.purchase_date else '未指定' }}</li>
       <li class="list-group-item">
         <strong>详情链接：</strong>
         {% if detail_links %}
@@ -67,65 +48,67 @@
         <span class="text-muted">未提供</span>
         {% endif %}
       </li>
-      <li class="list-group-item"><strong>库存状态:</strong> {{ item.stock_status or '未指定' }}</li>
-      <li class="list-group-item"><strong>物品特性:</strong>
-        {% if item.features in ['公共', '私人'] %}
-          {{ item.features }}
-        {% else %}
-          未指定
-        {% endif %}
-      </li>
-      <li class="list-group-item"><strong>价值:</strong> {{ item.value if item.value is not none else '未指定' }}</li>
-      <li class="list-group-item"><strong>数量:</strong> 
-        {% if item.quantity is not none and item.unit %}
-          {{ item.quantity }} {{ item.unit }}
-        {% else %}
-          未指定
-        {% endif %}
-      </li>
-      <li class="list-group-item"><strong>购入时间:</strong> 
-        {{ item.purchase_date.strftime('%Y-%m-%d') if item.purchase_date else '未指定' }}
-      </li>
-
-      <li class="list-group-item"><strong>负责人:</strong>
-        {% if item.responsible_member %}
-          <a href="{{ url_for('profile', member_id=item.responsible_member.id) }}">{{ item.responsible_member.name }}</a>
-        {% else %} 无 {% endif %}
-      </li>
-      <li class="list-group-item"><strong>存放位置:</strong>
-        {% if item.locations and item.locations|length > 0 %}
-          {% for loc in item.locations %}
-            <a href="{{ url_for('view_location', loc_id=loc.id) }}">{{ loc.name }}</a>{% if not loop.last %}, {% endif %}
+      <li class="list-group-item">
+        <strong>负责人：</strong>
+        {% if item.responsible_members %}
+          {% for member in item.responsible_members %}
+            <a href="{{ url_for('profile', member_id=member.id) }}">{{ member.name or member.username }}</a>{% if not loop.last %}，{% endif %}
           {% endfor %}
-        {% else %} 未指定 {% endif %}
+        {% else %}
+          无
+        {% endif %}
       </li>
-      <li class="list-group-item"><strong>最近更新时间:</strong> 
-        {{ item.last_modified.strftime("%Y-%m-%d %H:%M:%S") if item.last_modified else '' }}
+      <li class="list-group-item">
+        <strong>存放位置：</strong>
+        {% if item.locations %}
+          {% for loc in item.locations %}
+            <a href="{{ url_for('view_location', loc_id=loc.id) }}">{{ loc.name }}</a>{% if not loop.last %}，{% endif %}
+          {% endfor %}
+        {% else %}
+          未指定
+        {% endif %}
       </li>
-      
+      <li class="list-group-item"><strong>最近更新时间：</strong>{{ item.last_modified.strftime("%Y-%m-%d %H:%M:%S") if item.last_modified else '未设置' }}</li>
       {% if item.purchase_link %}
-      <li class="list-group-item"><strong>购买链接:</strong> 
-        <a href="{{ item.purchase_link }}" target="_blank">点击打开</a>
-      </li>
+      <li class="list-group-item"><strong>购买链接：</strong><a href="{{ item.purchase_link }}" target="_blank">点击打开</a></li>
       {% endif %}
-      
       {% if item.notes %}
-      <li class="list-group-item"><strong>备注:</strong><br>{{ item.notes }}</li>
+      <li class="list-group-item"><strong>备注：</strong><br>{{ item.notes }}</li>
       {% endif %}
     </ul>
-
-    <a href="{{ url_for('edit_item', item_id=item.id) }}" class="btn btn-primary">编辑</a>
-    <form action="{{ url_for('delete_item', item_id=item.id) }}" method="post" class="d-inline" onsubmit="return confirm('确定删除该物品吗？');">
-      <button type="submit" class="btn btn-danger">删除</button>
-    </form>
-    <a href="{{ url_for('items') }}" class="btn btn-secondary">返回列表</a>
   </div>
-
   <div class="col-md-6">
+    <div class="card mb-3">
+      <div class="card-header">统计</div>
+      <div class="card-body">
+        <div class="d-flex flex-wrap gap-2 mb-2">
+          <span class="badge bg-primary-subtle text-primary-emphasis border">活动 {{ event_summary.total }}</span>
+          <span class="badge bg-success-subtle text-success-emphasis border">进行中 {{ event_summary.ongoing }}</span>
+          <span class="badge bg-info-subtle text-info-emphasis border">将开始 {{ event_summary.upcoming }}</span>
+          <span class="badge bg-warning-subtle text-warning-emphasis border">待安排 {{ event_summary.unscheduled }}</span>
+          <span class="badge bg-secondary-subtle text-secondary-emphasis border">历史 {{ event_summary.past }}</span>
+          {% if event_summary.participants %}
+          <span class="badge bg-light text-dark border">参与 {{ event_summary.participants }}</span>
+          {% endif %}
+          <span class="badge bg-light text-dark border">负责人 {{ item.responsible_members|length }}</span>
+          <span class="badge bg-light text-dark border">关联位置 {{ item.locations|length }}</span>
+          <span class="badge bg-light text-dark border">兴趣关注 {{ interest_total }}</span>
+        </div>
+        {% if interest_summary %}
+        <hr class="my-3">
+        <div class="text-muted small mb-2">兴趣清单标签</div>
+        <div class="d-flex flex-wrap gap-2">
+          {% for entry in interest_summary %}
+          <span class="badge bg-secondary-subtle text-secondary-emphasis border">{{ entry.label }} {{ entry.count }}</span>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+    </div>
     {% set media_entries = item_media_entries(item) %}
     <div class="card mb-3">
       <div class="card-header d-flex justify-content-between align-items-center">
-        <span>相关媒体</span>
+        <span>媒体</span>
         <span class="badge bg-light text-dark border">{{ media_entries|length }}</span>
       </div>
       <div class="card-body">
@@ -133,89 +116,17 @@
       </div>
     </div>
     <div class="card">
-      <div class="card-header">二维码（手机扫码打开本页）</div>
+      <div class="card-header">二维码</div>
       <div class="card-body">
         <div id="itemQrBox" class="p-2 border rounded d-inline-block"></div>
         <div class="mt-2">
           <input type="text" id="itemPermalink" class="form-control form-control-sm" readonly value="{{ request.url }}">
-          <button type="button" class="btn btn-sm btn-outline-secondary mt-2" id="copyItemLinkBtn">复制链接</button>
+          <div class="form-text">可复制链接或扫描二维码分享。</div>
         </div>
       </div>
     </div>
   </div>
 </div>
-<div class="card mt-4">
-  <div class="card-header d-flex justify-content-between align-items-center">
-    <span>活动概况</span>
-    <span class="badge bg-primary-subtle text-primary-emphasis border">共 {{ event_summary.total }} 场</span>
-  </div>
-  <div class="card-body">
-    {% if event_summary.total %}
-    <div class="d-flex flex-wrap gap-2 mb-3">
-      <span class="badge bg-success-subtle text-success-emphasis border">正在使用 {{ event_summary.ongoing }}</span>
-      <span class="badge bg-info-subtle text-info-emphasis border">计划使用 {{ event_summary.upcoming }}</span>
-      {% if event_summary.unscheduled %}
-      <span class="badge bg-warning-subtle text-warning-emphasis border">待安排 {{ event_summary.unscheduled }}</span>
-      {% endif %}
-      <span class="badge bg-secondary-subtle text-secondary-emphasis border">历史活动 {{ event_summary.past }}</span>
-      {% if event_summary.participants %}
-      <span class="badge bg-light text-dark border">累计参与 {{ event_summary.participants }}</span>
-      {% endif %}
-    </div>
-    {% if ongoing_events %}
-    <div class="mb-3">
-      <div class="text-muted small mb-1">正在进行</div>
-      <ul class="list-group list-group-flush border rounded">
-        {% for event in ongoing_events %}
-        {{ render_event_entry(event, '进行中') }}
-        {% endfor %}
-      </ul>
-    </div>
-    {% endif %}
-    {% if upcoming_events %}
-    <div class="mb-3">
-      <div class="text-muted small mb-1">即将进行</div>
-      <ul class="list-group list-group-flush border rounded">
-        {% for event in upcoming_events %}
-        {{ render_event_entry(event, '即将开始') }}
-        {% endfor %}
-      </ul>
-    </div>
-    {% endif %}
-    {% if unscheduled_events %}
-    <div class="mb-3">
-      <div class="text-muted small mb-1">待排期</div>
-      <ul class="list-group list-group-flush border rounded">
-        {% for event in unscheduled_events %}
-        {{ render_event_entry(event, '待安排时间') }}
-        {% endfor %}
-      </ul>
-    </div>
-    {% endif %}
-    {% if recent_past_events %}
-    <div class="mb-0">
-      <div class="text-muted small mb-1">
-        最近结束
-        {% if past_events_total > (recent_past_events|length) %}
-          （共 {{ past_events_total }} 场）
-        {% endif %}
-      </div>
-      <ul class="list-group list-group-flush border rounded">
-        {% for event in recent_past_events %}
-        {{ render_event_entry(event, '已结束') }}
-        {% endfor %}
-      </ul>
-    </div>
-    {% endif %}
-    {% if not (ongoing_events or upcoming_events or unscheduled_events or recent_past_events) %}
-    <div class="text-muted">当前没有关联的活动记录。</div>
-    {% endif %}
-    {% else %}
-    <div class="text-muted">该物品尚未参与活动，可在创建/编辑活动时关联。</div>
-    {% endif %}
-  </div>
-</div>
-
 
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 <script>
@@ -227,16 +138,55 @@
       new QRCode(box, { text: url, width: 160, height: 160 });
     }
   } catch (e) { console.warn('QR init failed', e); }
-  var copyBtn = document.getElementById('copyItemLinkBtn');
-  if (copyBtn) {
-    copyBtn.addEventListener('click', function () {
-      var inp = document.getElementById('itemPermalink');
-      inp.select();
-      inp.setSelectionRange(0, 99999);
-      document.execCommand('copy');
-      copyBtn.textContent = '已复制';
-      setTimeout(function(){ copyBtn.textContent = '复制链接'; }, 1200);
+  var shareBtn = document.getElementById('shareItemLinkBtn');
+  if (shareBtn) {
+    shareBtn.addEventListener('click', function () {
+      var linkInput = document.getElementById('itemPermalink');
+      var shareUrl = linkInput ? linkInput.value : window.location.href;
+      if (navigator.share) {
+        navigator.share({
+          title: document.title || '社区物品',
+          url: shareUrl
+        }).catch(function (err) {
+          if (err && err.name === 'AbortError') {
+            return;
+          }
+          fallbackCopy(shareUrl);
+        });
+      } else {
+        fallbackCopy(shareUrl);
+      }
     });
+  }
+  function fallbackCopy(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () {
+        showShareFeedback('链接已复制');
+      }).catch(function () {
+        legacyCopy(text);
+      });
+    } else {
+      legacyCopy(text);
+    }
+  }
+  function legacyCopy(text) {
+    var temp = document.createElement('textarea');
+    temp.value = text;
+    document.body.appendChild(temp);
+    temp.select();
+    temp.setSelectionRange(0, 99999);
+    document.execCommand('copy');
+    document.body.removeChild(temp);
+    showShareFeedback('链接已复制');
+  }
+  function showShareFeedback(msg) {
+    shareBtn.disabled = true;
+    var original = shareBtn.textContent;
+    shareBtn.textContent = msg;
+    setTimeout(function () {
+      shareBtn.disabled = false;
+      shareBtn.textContent = original;
+    }, 1500);
   }
 })();
 </script>

@@ -3,7 +3,8 @@
 <div class="row justify-content-center">
   <div class="col-md-4">
     <h3 class="mb-4">哇！终于等到了长得这么漂亮（帅气）的你，登录即可加入哦，信息随便填也没事</h3>
-    <form method="post" action="{{ url_for('login') }}">
+    <form method="post" action="{{ url_for('login', next=request.args.get('next')) }}">
+      <input type="hidden" name="next" value="{{ next_url or request.args.get('next') or '' }}">
       <div class="mb-3">
         <label for="username" class="form-label">用户名</label>
         <input type="text" class="form-control" id="username" name="username" required>
@@ -11,6 +12,12 @@
       <div class="mb-3">
         <label for="password" class="form-label">密码</label>
         <input type="password" class="form-control" id="password" name="password" required>
+      </div>
+      <div class="form-check mb-3">
+        <input class="form-check-input" type="checkbox" value="1" id="rememberMe" name="remember" checked>
+        <label class="form-check-label" for="rememberMe">
+          记住我，下次自动登录
+        </label>
       </div>
       <button type="submit" class="btn btn-primary">登录</button>
       <a href="{{ url_for('register') }}" class="btn btn-link">没有账号？几秒钟注册一下，信息也能随便填，出门在外身份是自己给的</a>

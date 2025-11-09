@@ -125,14 +125,17 @@
     {% endif %}
   </div>
 </div>
-{% if profile_affiliations %}
+{% if is_self %}
 <div class="card mb-4">
   <div class="card-header d-flex justify-content-between align-items-center">
-    <span class="fw-semibold">地点关联</span>
+    <span class="fw-semibold">地点关联（仅自己可见）</span>
     <span class="badge bg-light text-dark border">{{ profile_affiliations|length }}</span>
   </div>
+  {% if profile_affiliations %}
+  {% set affiliation_preview = profile_affiliations[:5] %}
+  {% set affiliation_extra = profile_affiliations[5:] %}
   <ul class="list-group list-group-flush">
-    {% for entry in profile_affiliations %}
+    {% for entry in affiliation_preview %}
     <li class="list-group-item">
       <div class="d-flex justify-content-between align-items-start gap-3">
         <div>
@@ -151,8 +154,196 @@
     </li>
     {% endfor %}
   </ul>
+  {% if affiliation_extra %}
+  <div class="collapse" id="profileAffiliationsMore">
+    <ul class="list-group list-group-flush">
+      {% for entry in affiliation_extra %}
+      <li class="list-group-item">
+        <div class="d-flex justify-content-between align-items-start gap-3">
+          <div>
+            <a href="{{ url_for('view_location', loc_id=entry.location.id) }}" class="fw-semibold text-decoration-none">{{ entry.location.name }}</a>
+            <span class="badge bg-info-subtle text-info-emphasis border ms-2">{{ entry.relation_label }}</span>
+            {% if entry.note %}
+              <div class="text-muted small mt-1">{{ entry.note }}</div>
+            {% endif %}
+          </div>
+          <div class="text-end text-muted small">
+            {% if entry.location.clean_status %}
+              状态：{{ entry.location.clean_status }}
+            {% endif %}
+          </div>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  <div class="card-footer text-center">
+    <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#profileAffiliationsMore" aria-expanded="false" aria-controls="profileAffiliationsMore">
+      展开剩余 {{ affiliation_extra|length }} 个
+    </button>
+  </div>
+  {% endif %}
+  {% else %}
+  <div class="card-body">
+    <p class="mb-0 text-muted">尚未记录地点关联。</p>
+  </div>
+  {% endif %}
+</div>
+{% else %}
+<div class="card mb-4">
+  <div class="card-header fw-semibold">地点关联</div>
+  <div class="card-body">
+    <p class="mb-0 text-muted small">地点关联仅本人可见。</p>
+  </div>
 </div>
 {% endif %}
+
+{% if is_self %}
+<div class="card mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span class="fw-semibold">兴趣清单（仅自己可见）</span>
+    <span class="badge bg-light text-dark border">{{ profile_interests|length }}</span>
+  </div>
+  {% if profile_interests %}
+  {% set interest_preview = profile_interests[:5] %}
+  {% set interest_extra = profile_interests[5:] %}
+  <ul class="list-group list-group-flush">
+    {% for entry in interest_preview %}
+    <li class="list-group-item">
+      <div class="d-flex justify-content-between align-items-start gap-3">
+        <div>
+          <a href="{{ url_for('item_detail', item_id=entry.item.id) }}" class="fw-semibold text-decoration-none">{{ entry.item.name }}</a>
+          <span class="badge bg-primary-subtle text-primary-emphasis border ms-2">{{ entry.relation_label }}</span>
+          {% if entry.note %}
+            <div class="text-muted small mt-1">{{ entry.note }}</div>
+          {% endif %}
+        </div>
+        <div class="text-end text-muted small">
+          {% if entry.item.stock_status %}
+            库存：{{ entry.item.stock_status }}
+          {% endif %}
+        </div>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% if interest_extra %}
+  <div class="collapse" id="profileInterestsMore">
+    <ul class="list-group list-group-flush">
+      {% for entry in interest_extra %}
+      <li class="list-group-item">
+        <div class="d-flex justify-content-between align-items-start gap-3">
+          <div>
+            <a href="{{ url_for('item_detail', item_id=entry.item.id) }}" class="fw-semibold text-decoration-none">{{ entry.item.name }}</a>
+            <span class="badge bg-primary-subtle text-primary-emphasis border ms-2">{{ entry.relation_label }}</span>
+            {% if entry.note %}
+              <div class="text-muted small mt-1">{{ entry.note }}</div>
+            {% endif %}
+          </div>
+          <div class="text-end text-muted small">
+            {% if entry.item.stock_status %}
+              库存：{{ entry.item.stock_status }}
+            {% endif %}
+          </div>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  <div class="card-footer text-center">
+    <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#profileInterestsMore" aria-expanded="false" aria-controls="profileInterestsMore">
+      展开剩余 {{ interest_extra|length }} 个
+    </button>
+  </div>
+  {% endif %}
+  {% else %}
+  <div class="card-body">
+    <p class="mb-0 text-muted">还没有关注任何物品，去物品页看看吧。</p>
+  </div>
+  {% endif %}
+</div>
+{% else %}
+<div class="card mb-4">
+  <div class="card-header fw-semibold">兴趣清单</div>
+  <div class="card-body">
+    <p class="mb-0 text-muted small">兴趣清单仅本人可见。</p>
+  </div>
+</div>
+{% endif %}
+
+{% if is_self %}
+<div class="card mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span class="fw-semibold">活动关联（仅自己可见）</span>
+    <span class="badge bg-light text-dark border">{{ profile_events|length }}</span>
+  </div>
+  {% if profile_events %}
+  {% set event_preview = profile_events[:5] %}
+  {% set event_extra = profile_events[5:] %}
+  <ul class="list-group list-group-flush">
+    {% for entry in event_preview %}
+    <li class="list-group-item">
+      <div class="d-flex justify-content-between align-items-start gap-3">
+        <div>
+          <a href="{{ url_for('event_detail', event_id=entry.event.id) }}" class="fw-semibold text-decoration-none">{{ entry.event.title }}</a>
+          <span class="badge bg-secondary-subtle text-secondary-emphasis border ms-2">{{ entry.relation_label }}</span>
+          {% if entry.note %}
+            <div class="text-muted small mt-1">{{ entry.note }}</div>
+          {% endif %}
+        </div>
+        <div class="text-end text-muted small">
+          {% if entry.event.start_time %}
+            {{ entry.event.start_time.strftime('%Y-%m-%d') }}
+          {% endif %}
+        </div>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% if event_extra %}
+  <div class="collapse" id="profileEventsMore">
+    <ul class="list-group list-group-flush">
+      {% for entry in event_extra %}
+      <li class="list-group-item">
+        <div class="d-flex justify-content-between align-items-start gap-3">
+          <div>
+            <a href="{{ url_for('event_detail', event_id=entry.event.id) }}" class="fw-semibold text-decoration-none">{{ entry.event.title }}</a>
+            <span class="badge bg-secondary-subtle text-secondary-emphasis border ms-2">{{ entry.relation_label }}</span>
+            {% if entry.note %}
+              <div class="text-muted small mt-1">{{ entry.note }}</div>
+            {% endif %}
+          </div>
+          <div class="text-end text-muted small">
+            {% if entry.event.start_time %}
+              {{ entry.event.start_time.strftime('%Y-%m-%d') }}
+            {% endif %}
+          </div>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  <div class="card-footer text-center">
+    <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#profileEventsMore" aria-expanded="false" aria-controls="profileEventsMore">
+      展开剩余 {{ event_extra|length }} 个
+    </button>
+  </div>
+  {% endif %}
+  {% else %}
+  <div class="card-body">
+    <p class="mb-0 text-muted">尚未记录活动关联。</p>
+  </div>
+  {% endif %}
+</div>
+{% else %}
+<div class="card mb-4">
+  <div class="card-header fw-semibold">活动关联</div>
+  <div class="card-body">
+    <p class="mb-0 text-muted small">活动关联仅本人可见。</p>
+  </div>
+</div>
+{% endif %}
+
 {% set preview_items = items_preview if items_preview is defined else items_resp[:5] %}
 {% set extra_items = items_extra if items_extra is defined else (items_resp[5:] if items_resp|length > 5 else []) %}
 {% set preview_locations = locations_preview if locations_preview is defined else locations_resp[:5] %}

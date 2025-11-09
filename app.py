@@ -1,5 +1,5 @@
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 import re
 import json
 from flask import Flask, render_template, request, redirect, url_for, flash, send_file, send_from_directory, abort, jsonify
@@ -26,6 +26,8 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 
 # 优先从环境变量读取，生产环境请设置强随机串：export FLASK_SECRET_KEY='...'
 app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'dev-only-change-me')
+# 记住登录状态的 cookie 时长（天）
+app.config['REMEMBER_COOKIE_DURATION'] = timedelta(days=30)
 # 注意：SQLite 在多进程/并发写入下会锁表；生产建议换 PostgreSQL。
 # 这里为提高并发容忍度，加入超时参数；并在 engine options 中关闭线程检查。
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///lab.db?timeout=30'
@@ -85,6 +87,13 @@ item_locations = db.Table(
     'item_locations',
     db.Column('item_id', db.Integer, db.ForeignKey('items.id'), primary_key=True),
     db.Column('location_id', db.Integer, db.ForeignKey('locations.id'), primary_key=True)
+)
+
+# 物品-负责人：多对多关联表
+item_members = db.Table(
+    'item_members',
+    db.Column('item_id', db.Integer, db.ForeignKey('items.id'), primary_key=True),
+    db.Column('member_id', db.Integer, db.ForeignKey('members.id'), primary_key=True)
 )
 
 # 事项与物品/位置的关联表
@@ -174,6 +183,31 @@ def _extract_external_urls(raw_value):
                 seen.add(candidate)
     return urls
 
+
+def _member_display_key(member):
+    """Sort key for member display/order handling."""
+    if not member:
+        return ('', 0)
+    name = (member.name or member.username or '').strip().lower()
+    return (name, member.id or 0)
+
+
+def _ensure_item_responsible_members(item):
+    """Backfill legacy responsible relationship using responsible_id if needed."""
+    if not item:
+        return False
+    members = list(getattr(item, 'responsible_members', []) or [])
+    if members:
+        return False
+    legacy_id = getattr(item, 'responsible_id', None)
+    if not legacy_id:
+        return False
+    legacy_member = db.session.get(Member, legacy_id)
+    if not legacy_member:
+        return False
+    item.assign_responsible_members([legacy_member])
+    return True
+
 def determine_media_kind(ref):
     """Return media kind string for the given filename or URL."""
     ext = _extract_file_extension(ref)
@@ -198,6 +232,21 @@ _MEMBER_RELATION_TYPES = {
     'work': '工作',
     'live': '居住',
     'own': '拥有',
+    'other': '其他'
+}
+_MEMBER_ITEM_REL_TYPES = {
+    'borrow': '租借',
+    'praise': '好评',
+    'favorite': '收藏',
+    'wishlist': '待购',
+    'other': '其他'
+}
+_MEMBER_EVENT_REL_TYPES = {
+    'host': '主办',
+    'join': '参与',
+    'support': '协助',
+    'follow': '关注',
+    'interested': '想参加',
     'other': '其他'
 }
 _LOCATION_USAGE_CHOICES = [
@@ -387,7 +436,9 @@ def _parse_profile_notes(raw):
     empty = {
         'bio': '',
         'social_links': [],
-        'location_relations': []
+        'location_relations': [],
+        'item_relations': [],
+        'event_relations': []
     }
     if not raw:
         return empty, False
@@ -405,7 +456,9 @@ def _parse_profile_notes(raw):
         meta = {
             'bio': _ensure_string(data.get('bio')),
             'social_links': [],
-            'location_relations': []
+            'location_relations': [],
+            'item_relations': [],
+            'event_relations': []
         }
         social = data.get('social_links') or []
         if isinstance(social, list):
@@ -435,6 +488,44 @@ def _parse_profile_notes(raw):
                     'relation': relation,
                     'note': note
                 })
+        item_links = data.get('item_relations') or []
+        if isinstance(item_links, list):
+            for entry in item_links:
+                if not isinstance(entry, dict):
+                    continue
+                item_id = entry.get('item_id')
+                try:
+                    item_id = int(item_id)
+                except (TypeError, ValueError):
+                    continue
+                relation = _ensure_string(entry.get('relation')).strip()
+                if relation not in _MEMBER_ITEM_REL_TYPES:
+                    relation = 'other'
+                note = _ensure_string(entry.get('note')).strip()
+                meta['item_relations'].append({
+                    'item_id': item_id,
+                    'relation': relation,
+                    'note': note
+                })
+        event_links = data.get('event_relations') or []
+        if isinstance(event_links, list):
+            for entry in event_links:
+                if not isinstance(entry, dict):
+                    continue
+                event_id = entry.get('event_id')
+                try:
+                    event_id = int(event_id)
+                except (TypeError, ValueError):
+                    continue
+                relation = _ensure_string(entry.get('relation')).strip()
+                if relation not in _MEMBER_EVENT_REL_TYPES:
+                    relation = 'other'
+                note = _ensure_string(entry.get('note')).strip()
+                meta['event_relations'].append({
+                    'event_id': event_id,
+                    'relation': relation,
+                    'note': note
+                })
         return meta, True
     # 兼容旧文本
     empty['bio'] = _ensure_string(raw)
@@ -446,7 +537,9 @@ def _serialize_profile_notes(meta):
     payload = {
         'bio': _ensure_string(meta.get('bio')),
         'social_links': [],
-        'location_relations': []
+        'location_relations': [],
+        'item_relations': [],
+        'event_relations': []
     }
     social = meta.get('social_links') or []
     for entry in social:
@@ -475,6 +568,50 @@ def _serialize_profile_notes(meta):
         seen.add(key)
         payload['location_relations'].append({
             'location_id': loc_id,
+            'relation': relation,
+            'note': note
+        })
+    items_rel = meta.get('item_relations') or []
+    seen_items = set()
+    for entry in items_rel:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            item_id = int(entry.get('item_id'))
+        except (TypeError, ValueError):
+            continue
+        relation = _ensure_string(entry.get('relation')).strip()
+        if relation not in _MEMBER_ITEM_REL_TYPES:
+            relation = 'other'
+        note = _ensure_string(entry.get('note')).strip()
+        key = (item_id, relation, note)
+        if key in seen_items:
+            continue
+        seen_items.add(key)
+        payload['item_relations'].append({
+            'item_id': item_id,
+            'relation': relation,
+            'note': note
+        })
+    events_rel = meta.get('event_relations') or []
+    seen_events = set()
+    for entry in events_rel:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            event_id = int(entry.get('event_id'))
+        except (TypeError, ValueError):
+            continue
+        relation = _ensure_string(entry.get('relation')).strip()
+        if relation not in _MEMBER_EVENT_REL_TYPES:
+            relation = 'other'
+        note = _ensure_string(entry.get('note')).strip()
+        key = (event_id, relation, note)
+        if key in seen_events:
+            continue
+        seen_events.add(key)
+        payload['event_relations'].append({
+            'event_id': event_id,
             'relation': relation,
             'note': note
         })
@@ -767,7 +904,12 @@ class Member(UserMixin, db.Model):
     feedback_log = db.Column(db.Text, default='')                # 他人评价/留言流（JSON lines）
     last_modified = db.Column(db.DateTime, default=datetime.utcnow)  # 最后修改时间
     # 关系：成员负责的物品，以及发送/收到的消息和日志
-    items = db.relationship('Item', backref='responsible_member', lazy=True, foreign_keys='Item.responsible_id')
+    items = db.relationship(
+        'Item',
+        secondary='item_members',
+        backref=db.backref('responsible_members', lazy='select'),
+        lazy='select'
+    )
     # 负责的位置：多对多 responsible_locations
     responsible_locations = db.relationship(
         'Location',
@@ -849,6 +991,30 @@ class Item(db.Model):
         if self.image and self.image not in seen:
             filenames.insert(0, self.image)
         return filenames
+
+    def assign_responsible_members(self, members):
+        """Assign responsible members ensuring uniqueness and stable order."""
+        unique = []
+        seen_ids = set()
+        for member in members or []:
+            if not member:
+                continue
+            if member.id in seen_ids:
+                continue
+            unique.append(member)
+            seen_ids.add(member.id)
+        unique.sort(key=_member_display_key)
+        self.responsible_members = unique
+        self.responsible_id = unique[0].id if unique else None
+        return unique
+
+    @property
+    def primary_responsible(self):
+        members = list(self.responsible_members or [])
+        if not members:
+            return None
+        members.sort(key=_member_display_key)
+        return members[0]
 
     def __repr__(self):
         return f'<Item {self.name}>'
@@ -1234,16 +1400,22 @@ def index():
 def login():
     if current_user.is_authenticated:
         return redirect(url_for('index'))
+    next_url = request.args.get('next', '')
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
+        remember_raw = request.form.get('remember')
+        remember_me = str(remember_raw).lower() in {'1', 'true', 'on', 'yes'}
+        next_url = request.form.get('next') or next_url
         user = Member.query.filter_by(username=username).first()
         if user and user.check_password(password):
-            login_user(user)
+            login_user(user, remember=remember_me)
+            if next_url and next_url.startswith('/'):
+                return redirect(next_url)
             return redirect(url_for('index'))
         else:
             flash('用户名或密码不正确', 'danger')
-    return render_template('login.html')
+    return render_template('login.html', next_url=next_url)
 
 @app.route('/logout')
 @login_required
@@ -1904,11 +2076,17 @@ def items():
     items_list = (
         Item.query.options(
             selectinload(Item.locations),
-            selectinload(Item.responsible_member)
+            selectinload(Item.responsible_members)
         )
         .order_by(func.lower(Item.name))
         .all()
     )
+    migrated = False
+    for item in items_list:
+        if _ensure_item_responsible_members(item):
+            migrated = True
+    if migrated:
+        db.session.commit()
     event_counts = dict(
         db.session.query(
             event_items.c.item_id,
@@ -1948,7 +2126,14 @@ def items():
 @login_required
 def item_detail(item_id):
     # 查看物品详情
-    item = Item.query.get_or_404(item_id)
+    item = (
+        Item.query.options(
+            selectinload(Item.responsible_members),
+            selectinload(Item.locations)
+        ).get_or_404(item_id)
+    )
+    if _ensure_item_responsible_members(item):
+        db.session.commit()
     events = (
         Event.query
         .join(event_items)
@@ -1961,6 +2146,27 @@ def item_detail(item_id):
         .all()
     )
     event_bundle = _build_event_summary(events)
+    interest_relation_lookup = dict(_MEMBER_ITEM_REL_TYPES)
+    interest_counter = Counter()
+    interest_total = 0
+    members_interest_summary = []
+    members = Member.query.options(load_only(Member.id, Member.name, Member.username, Member.notes)).all()
+    for member in members:
+        meta, _ = _parse_profile_notes(member.notes)
+        for relation_entry in meta.get('item_relations', []) or []:
+            if relation_entry.get('item_id') != item.id:
+                continue
+            relation_key = _ensure_string(relation_entry.get('relation')).strip()
+            if relation_key not in interest_relation_lookup:
+                relation_key = 'other'
+            interest_counter[relation_key] += 1
+            interest_total += 1
+    for rel_key, count in sorted(interest_counter.items(), key=lambda pair: (-pair[1], pair[0])):
+        members_interest_summary.append({
+            'relation': rel_key,
+            'label': interest_relation_lookup.get(rel_key, rel_key),
+            'count': count
+        })
     return render_template(
         'item_detail.html',
         item=item,
@@ -1970,7 +2176,10 @@ def item_detail(item_id):
         upcoming_events=event_bundle['upcoming'],
         unscheduled_events=event_bundle['unscheduled'],
         recent_past_events=event_bundle['recent_past'],
-        past_events_total=event_bundle['past_total']
+        past_events_total=event_bundle['past_total'],
+        interest_summary=members_interest_summary,
+        interest_total=interest_total,
+        interest_relation_lookup=interest_relation_lookup
     )
 
 @app.route('/items/add', methods=['GET', 'POST'])
@@ -1982,7 +2191,11 @@ def add_item():
         name = request.form.get('name')
         category = request.form.get('category')
         stock_status = request.form.get('stock_status')  # ✅ 单选字段
-        features_str = _normalize_item_feature(request.form.get('features'))  # 统一为公共/私人
+        feature_raw = request.form.get('features')
+        features_str = _normalize_item_feature(feature_raw)  # 统一为公共/私人
+        if not features_str:
+            flash('请选择物品特性（公共或私人）。', 'danger')
+            return redirect(request.url)
 
         value = request.form.get('value')
         value = float(value) if value else None          # ✅ 数字输入
@@ -1994,7 +2207,13 @@ def add_item():
         purchase_date_str = request.form.get('purchase_date')  # ✅ 日期处理
         purchase_date = datetime.strptime(purchase_date_str, '%Y-%m-%d').date() if purchase_date_str else None
 
-        responsible_id = request.form.get('responsible_id')
+        responsible_ids_raw = request.form.getlist('responsible_ids')
+        responsible_ids = {int(x) for x in responsible_ids_raw if x.isdigit()}
+        responsible_members = []
+        if responsible_ids:
+            responsible_members = Member.query.filter(Member.id.in_(responsible_ids)).all()
+        if features_str == '私人' and not responsible_members:
+            responsible_members = [current_user]
         location_ids = request.form.getlist('location_ids')  # ✅ 支持多个位置
         notes = request.form.get('notes')
         purchase_link = request.form.get('purchase_link')
@@ -2025,11 +2244,14 @@ def add_item():
             quantity=quantity,
             unit=unit,
             purchase_date=purchase_date,
-            responsible_id=responsible_id if responsible_id else current_user.id,
+            responsible_id=None,
             notes=notes,
             purchase_link=purchase_link,
             image=primary_image
         )
+        assigned_members = new_item.assign_responsible_members(responsible_members)
+        if features_str == '私人' and not assigned_members:
+            new_item.assign_responsible_members([current_user])
         trimmed_links = new_item.set_detail_links(detail_links)
         if trimmed_links:
             flash('部分详情链接过长（字段限 64 字符），已保留前几条，请确认链接长度。', 'warning')
@@ -2086,6 +2308,10 @@ def add_item():
 @login_required
 def edit_item(item_id):
     item = Item.query.get_or_404(item_id)
+    if _ensure_item_responsible_members(item):
+        db.session.commit()
+    if item.features == '私人' and current_user not in item.responsible_members:
+        abort(403)
     if request.method == 'POST':
         # 更新物品信息
         item.name = request.form.get('name')
@@ -2096,7 +2322,12 @@ def edit_item(item_id):
             flash('部分详情链接过长（字段限 64 字符），已保留前几条，请确认链接长度。', 'warning')
 
         item.stock_status = request.form.get('stock_status')  # 单选库存状态
-        item.features = _normalize_item_feature(request.form.get('features'))          # 单选物品特性
+        feature_raw = request.form.get('features')
+        features_str = _normalize_item_feature(feature_raw)          # 单选物品特性
+        if not features_str:
+            flash('请选择物品特性（公共或私人）。', 'danger')
+            return redirect(request.url)
+        item.features = features_str
         
         item.value = request.form.get('value', type=float)    # 新增：价值（数值）
         item.quantity = request.form.get('quantity', type=float)  # 数量（数字）
@@ -2106,7 +2337,14 @@ def edit_item(item_id):
         if purchase_date_str:
             item.purchase_date = datetime.strptime(purchase_date_str, '%Y-%m-%d').date()
 
-        item.responsible_id = request.form.get('responsible_id')
+        responsible_ids_raw = request.form.getlist('responsible_ids')
+        responsible_ids = {int(x) for x in responsible_ids_raw if x.isdigit()}
+        responsible_members = []
+        if responsible_ids:
+            responsible_members = Member.query.filter(Member.id.in_(responsible_ids)).all()
+        assigned_members = item.assign_responsible_members(responsible_members)
+        if features_str == '私人' and not assigned_members:
+            item.assign_responsible_members([current_user])
         location_ids = request.form.getlist('location_ids')  # ✅ 多选位置
         # 同步多对多关系
         loc_ids = [int(x) for x in location_ids] if location_ids else []
@@ -2189,6 +2427,10 @@ def edit_item(item_id):
 @login_required
 def delete_item(item_id):
     item = Item.query.get_or_404(item_id)
+    if _ensure_item_responsible_members(item):
+        db.session.commit()
+    if item.features == '私人' and current_user not in item.responsible_members:
+        abort(403)
     for fname in set(item.image_filenames):
         remove_uploaded_file(fname)
     db.session.delete(item)
@@ -2222,10 +2464,15 @@ def manage_item_category():
     added_items = []
     removed_items = []
     now = datetime.utcnow()
+    migration_needed = False
 
     if add_ids:
         candidates = Item.query.filter(Item.id.in_(add_ids)).all()
         for item in candidates:
+            if _ensure_item_responsible_members(item):
+                migration_needed = True
+            if item.features == '私人' and current_user not in item.responsible_members:
+                continue
             if (item.category or '').strip():
                 continue
             item.category = category_name
@@ -2242,6 +2489,10 @@ def manage_item_category():
     if remove_ids:
         candidates = Item.query.filter(Item.id.in_(remove_ids)).all()
         for item in candidates:
+            if _ensure_item_responsible_members(item):
+                migration_needed = True
+            if item.features == '私人' and current_user not in item.responsible_members:
+                continue
             if (item.category or '').strip() != category_name:
                 continue
             item.category = None
@@ -2256,6 +2507,8 @@ def manage_item_category():
             db.session.add(log)
 
     if not added_items and not removed_items:
+        if migration_needed:
+            db.session.commit()
         flash('没有物品符合调整条件', 'info')
         return redirect(url_for('items'))
 
@@ -2443,6 +2696,8 @@ def add_location():
 @login_required
 def edit_location(loc_id):
     location = Location.query.get_or_404(loc_id)
+    if location.responsible_members and current_user not in location.responsible_members:
+        abort(403)
     current_meta, _ = _parse_location_notes(location.notes)
     if request.method == 'POST':
         # 更新位置信息
@@ -2542,6 +2797,8 @@ def edit_location(loc_id):
 @login_required
 def delete_location(loc_id):
     location = Location.query.get_or_404(loc_id)
+    if location.responsible_members and current_user not in location.responsible_members:
+        abort(403)
     for fname in set(location.image_filenames):
         remove_uploaded_file(fname)
     db.session.delete(location)
@@ -2559,6 +2816,12 @@ def view_location(loc_id):
     location = Location.query.get_or_404(loc_id)
     # 获取该位置包含的所有物品（多对多）
     items_at_location = sorted(location.items, key=lambda item: item.name.lower())
+    migrated = False
+    for item in items_at_location:
+        if _ensure_item_responsible_members(item):
+            migrated = True
+    if migrated:
+        db.session.commit()
     # 分类统计状态标签（如：用完、少量、充足）
     status_counter = Counter()
     category_counter = Counter()
@@ -2576,9 +2839,10 @@ def view_location(loc_id):
             category_counter[item.category.strip()] += 1
         if item.features:
             feature_counter[item.features.strip()] += 1
-        if item.responsible_member:
-            responsible_counter[item.responsible_member.id] += 1
-            responsible_map[item.responsible_member.id] = item.responsible_member
+        if item.responsible_members:
+            for member in item.responsible_members:
+                responsible_counter[member.id] += 1
+                responsible_map[member.id] = member
 
     def _counter_to_stats(counter, limit=None):
         pairs = sorted(counter.items(), key=lambda x: (-x[1], x[0]))
@@ -2648,7 +2912,7 @@ def view_location(loc_id):
         })
     affiliation_summary.sort(key=lambda entry: (-entry['count'], entry['label']))
 
-    return render_template('location.html', location=location, 
+    return render_template('location_detail.html', location=location, 
                            items=items_at_location,
                            status_counter=status_counter,
                            status_stats=status_stats,
@@ -2672,6 +2936,8 @@ def view_location(loc_id):
 @login_required
 def manage_location_items(loc_id):
     location = Location.query.get_or_404(loc_id)
+    if location.responsible_members and current_user not in location.responsible_members:
+        abort(403)
     action = request.form.get('action')
     if action not in {'add_existing', 'remove'}:
         flash('无效操作类型', 'danger')
@@ -2778,8 +3044,19 @@ def toggle_follow(member_id):
 def profile(member_id):
     member = Member.query.get_or_404(member_id)
 
+    is_self = member.id == current_user.id
+
     # 负责的物品
-    all_items = Item.query.filter_by(responsible_id=member.id).all()
+    all_items = list(member.items)
+    legacy_candidates = Item.query.filter_by(responsible_id=member.id).all()
+    migrated_items = False
+    for legacy_item in legacy_candidates:
+        if legacy_item not in all_items:
+            if _ensure_item_responsible_members(legacy_item):
+                migrated_items = True
+    if migrated_items:
+        db.session.commit()
+        all_items = list(member.items)
     # 负责的位置（多对多）
     all_locations = list(member.responsible_locations)
 
@@ -2822,19 +3099,21 @@ def profile(member_id):
 
     # 通知列表：他人对该成员负责的物品/位置的最近更新
     notifications = []
-    if member.id == current_user.id:
-        # 只查找该成员负责的物品和位置的日志（物品表的responsible_id，位置表通过多对多）
-        location_ids = [loc.id for loc in member.responsible_locations]
-        notifications = Log.query.join(Item, Log.item_id == Item.id, isouter=True) \
-                        .join(Location, Log.location_id == Location.id, isouter=True) \
-                        .filter(
-                            or_(
-                                Item.responsible_id == member.id,
-                                Location.id.in_(location_ids) if location_ids else False
-                            ),
-                            Log.user_id != member.id
-                        ) \
-                        .order_by(Log.timestamp.desc()).limit(5).all()
+    if is_self:
+        # 只查找该成员负责的物品和位置的日志（通过多对多关系判断负责权）
+        notifications = (
+            Log.query
+            .filter(
+                or_(
+                    Log.item.has(Item.responsible_members.any(Member.id == member.id)),
+                    Log.location.has(Location.responsible_members.any(Member.id == member.id))
+                ),
+                Log.user_id != member.id
+            )
+            .order_by(Log.timestamp.desc())
+            .limit(5)
+            .all()
+        )
     member_index, mention_lookup = build_member_lookup()
     profile_notes_html = None
     profile_meta, _ = _parse_profile_notes(member.notes)
@@ -2844,7 +3123,7 @@ def profile(member_id):
 
     affiliation_entries = []
     relation_lookup = dict(_MEMBER_RELATION_TYPES)
-    if profile_meta['location_relations']:
+    if is_self and profile_meta['location_relations']:
         loc_ids = [entry['location_id'] for entry in profile_meta['location_relations']]
         unique_ids = {lid for lid in loc_ids}
         if unique_ids:
@@ -2863,9 +3142,53 @@ def profile(member_id):
                     'note': entry.get('note', '').strip()
                 })
 
+    item_relation_lookup = dict(_MEMBER_ITEM_REL_TYPES)
+    interest_entries = []
+    if is_self and profile_meta['item_relations']:
+        item_ids = [entry['item_id'] for entry in profile_meta['item_relations']]
+        unique_item_ids = {iid for iid in item_ids}
+        item_map = {}
+        if unique_item_ids:
+            item_map = {itm.id: itm for itm in Item.query.filter(Item.id.in_(unique_item_ids)).all()}
+        for entry in profile_meta['item_relations']:
+            itm = item_map.get(entry['item_id'])
+            if not itm:
+                continue
+            relation = entry.get('relation', 'other')
+            if relation not in item_relation_lookup:
+                relation = 'other'
+            interest_entries.append({
+                'item': itm,
+                'relation': relation,
+                'relation_label': item_relation_lookup[relation],
+                'note': entry.get('note', '').strip()
+            })
+
+    event_relation_lookup = dict(_MEMBER_EVENT_REL_TYPES)
+    event_entries = []
+    if is_self and profile_meta['event_relations']:
+        event_ids = [entry['event_id'] for entry in profile_meta['event_relations']]
+        unique_event_ids = {eid for eid in event_ids}
+        event_map = {}
+        if unique_event_ids:
+            event_map = {ev.id: ev for ev in Event.query.filter(Event.id.in_(unique_event_ids)).all()}
+        for entry in profile_meta['event_relations']:
+            ev = event_map.get(entry['event_id'])
+            if not ev:
+                continue
+            relation = entry.get('relation', 'other')
+            if relation not in event_relation_lookup:
+                relation = 'other'
+            event_entries.append({
+                'event': ev,
+                'relation': relation,
+                'relation_label': event_relation_lookup[relation],
+                'note': entry.get('note', '').strip()
+            })
+
     # 当前用户自己的操作记录（仅查看自己的主页时显示）
     user_logs = []
-    if member.id == current_user.id:
+    if is_self:
         user_logs = Log.query.filter_by(user_id=member.id).order_by(Log.timestamp.desc()).limit(5).all()
     is_following = False
     if member.id != current_user.id:
@@ -2891,7 +3214,12 @@ def profile(member_id):
                            profile_meta=profile_meta,
                            profile_social_links=profile_meta['social_links'],
                            profile_affiliations=affiliation_entries,
-                           relation_lookup=relation_lookup)
+                           profile_interests=interest_entries,
+                           profile_events=event_entries,
+                           relation_lookup=relation_lookup,
+                           item_relation_lookup=item_relation_lookup,
+                           event_relation_lookup=event_relation_lookup,
+                           is_self=is_self)
 
 @app.route('/member/<int:member_id>/edit', methods=['GET', 'POST'])
 @login_required
@@ -2936,10 +3264,48 @@ def edit_profile(member_id):
                 'relation': relation,
                 'note': note
             })
+        interest_item_ids = request.form.getlist('interest_item_id')
+        interest_relations = request.form.getlist('interest_item_relation')
+        interest_notes = request.form.getlist('interest_item_note')
+        item_relations = []
+        for item_id_raw, relation_raw, note_raw in zip(interest_item_ids, interest_relations, interest_notes):
+            try:
+                item_id = int(item_id_raw)
+            except (TypeError, ValueError):
+                continue
+            relation = _ensure_string(relation_raw).strip()
+            if relation not in _MEMBER_ITEM_REL_TYPES:
+                relation = 'other'
+            note = _ensure_string(note_raw).strip()
+            item_relations.append({
+                'item_id': item_id,
+                'relation': relation,
+                'note': note
+            })
+        event_ids = request.form.getlist('event_relation_event_id')
+        event_relations_raw = request.form.getlist('event_relation_relation')
+        event_notes = request.form.getlist('event_relation_note')
+        event_relations = []
+        for event_id_raw, relation_raw, note_raw in zip(event_ids, event_relations_raw, event_notes):
+            try:
+                event_id = int(event_id_raw)
+            except (TypeError, ValueError):
+                continue
+            relation = _ensure_string(relation_raw).strip()
+            if relation not in _MEMBER_EVENT_REL_TYPES:
+                relation = 'other'
+            note = _ensure_string(note_raw).strip()
+            event_relations.append({
+                'event_id': event_id,
+                'relation': relation,
+                'note': note
+            })
         profile_payload = {
             'bio': bio,
             'social_links': social_links,
-            'location_relations': location_relations
+            'location_relations': location_relations,
+            'item_relations': item_relations,
+            'event_relations': event_relations
         }
         member.notes = _serialize_profile_notes(profile_payload)
         # 如填写了新密码则更新密码
@@ -2961,12 +3327,18 @@ def edit_profile(member_id):
         flash('个人信息已更新', 'success')
         return redirect(url_for('profile', member_id=member_id))
     locations = Location.query.order_by(func.lower(Location.name)).all()
+    items = Item.query.order_by(func.lower(Item.name)).all()
+    events = Event.query.order_by(func.lower(Event.title)).all()
     return render_template('edit_profile.html',
                            member=member,
                            profile_meta=profile_meta,
                            structured_notes=structured,
                            relation_lookup=_MEMBER_RELATION_TYPES,
-                           locations=locations)
+                           item_relation_lookup=_MEMBER_ITEM_REL_TYPES,
+                           event_relation_lookup=_MEMBER_EVENT_REL_TYPES,
+                           locations=locations,
+                           items=items,
+                           events=events)
 
 @app.route('/message/<int:member_id>', methods=['POST'])
 @login_required
@@ -2980,6 +3352,15 @@ def post_message(member_id):
         db.session.commit()
         flash('留言已发布', 'success')
     return redirect(url_for('profile', member_id=member_id))
+
+
+@app.errorhandler(403)
+def forbidden(error):
+    description = getattr(error, 'description', None) or '无权访问该资源。'
+    if request.accept_mimetypes.accept_json and not request.accept_mimetypes.accept_html:
+        return jsonify({'error': 'forbidden', 'message': description}), 403
+    back_url = request.referrer if request.referrer else url_for('index')
+    return render_template('error_403.html', description=description, back_url=back_url), 403
 
 @app.route('/export/<string:datatype>')
 @login_required

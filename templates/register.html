@@ -1,9 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
+{% set redirect_next = next_url or request.args.get('next') %}
 <div class="row justify-content-center">
   <div class="col-md-4">
     <h3 class="mb-4">随便注册一下啦，出门在外身份是自己给的</h3>
-    <form method="post" action="{{ url_for('register') }}">
+    <form method="post" action="{{ url_for('register', next=redirect_next) if redirect_next else url_for('register') }}">
+      <input type="hidden" name="next" value="{{ redirect_next or '' }}">
       <div class="mb-3">
         <label for="name" class="form-label">姓名</label>
         <input type="text" class="form-control" id="name" name="name" required>
@@ -21,7 +23,7 @@
         <input type="text" class="form-control" id="contact" name="contact">
       </div>
       <button type="submit" class="btn btn-primary">注册</button>
-      <a href="{{ url_for('login') }}" class="btn btn-link">已经是我们社区的成员啦？快快登陆吧</a>
+      <a href="{{ url_for('login', next=redirect_next) if redirect_next else url_for('login') }}" class="btn btn-link">已经是我们社区的成员啦？快快登陆吧</a>
     </form>
   </div>
 </div>

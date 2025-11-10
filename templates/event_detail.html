@@ -178,6 +178,37 @@
       </div>
     </div>
 
+    {% if share_meta %}
+    <div class="card mb-3">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>分享与二维码</span>
+        {% if share_meta.validity_hint %}
+        <span class="badge bg-light text-dark border">{{ share_meta.validity_hint }}</span>
+        {% endif %}
+      </div>
+      <div class="card-body">
+        <div class="mb-3">
+          <label for="eventShareLinkInput" class="form-label">扫码后跳转链接</label>
+          <div class="input-group input-group-sm">
+            <input type="text" class="form-control" id="eventShareLinkInput" value="{{ share_meta.url }}" readonly>
+            <button type="button" class="btn btn-outline-secondary" id="copyShareLinkBtn">复制</button>
+          </div>
+        </div>
+        {% if share_meta.expires_at %}
+        <p class="mb-1"><strong>预计过期：</strong>{{ share_meta.expires_at|china_time }}</p>
+        {% endif %}
+        <p class="mb-0 text-muted small">
+          扫码后如提示二维码过期，请返回此页重新生成海报。
+          {% if share_meta.base_override %}
+            当前固定域名：{{ share_meta.base_override }}。
+          {% else %}
+            可在环境变量 <code>PUBLIC_BASE_URL</code> 中配置发布域名。
+          {% endif %}
+        </p>
+      </div>
+    </div>
+    {% endif %}
+
     <div class="card">
       <div class="card-header">相关提醒</div>
       <div class="card-body">
@@ -187,6 +218,16 @@
           {% else %}仅创建者本人可见。
           {% endif %}
         </p>
+        {% if event.visibility == 'internal' %}
+        <p class="mb-1">
+          <strong>权限说明：</strong>
+          {% if event.allow_participant_edit %}
+            所有参与成员均可进入“编辑”页面，方便补充媒体与细节。
+          {% else %}
+            仅负责人可编辑，参与成员如需修改请联系负责人。
+          {% endif %}
+        </p>
+        {% endif %}
         <p class="mb-1"><strong>参与人数：</strong>{{ event.participant_count() }}</p>
         <p class="mb-0 text-muted small">若需要更改可见性或参与成员，请点击上方“编辑”。</p>
       </div>
@@ -206,4 +247,32 @@
   </div>
 </div>
 {% endif %}
+<script>
+  (function () {
+    var copyBtn = document.getElementById('copyShareLinkBtn');
+    var input = document.getElementById('eventShareLinkInput');
+    if (!copyBtn || !input) {
+      return;
+    }
+    copyBtn.addEventListener('click', function () {
+      input.select();
+      input.setSelectionRange(0, input.value.length);
+      var success = false;
+      try {
+        success = document.execCommand('copy');
+      } catch (err) {
+        success = false;
+      }
+      if (!success && navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(input.value).then(function () {
+          success = true;
+        }).catch(function () {});
+      }
+      copyBtn.textContent = success ? '已复制' : '复制失败';
+      setTimeout(function () {
+        copyBtn.textContent = '复制';
+      }, 2000);
+    });
+  })();
+</script>
 {% endblock %}

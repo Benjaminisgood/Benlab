@@ -20,7 +20,8 @@
         </label>
       </div>
       <button type="submit" class="btn btn-primary">登录</button>
-      <a href="{{ url_for('register') }}" class="btn btn-link">注册</a>
+      {% set redirect_next = next_url or request.args.get('next') %}
+      <a href="{{ url_for('register', next=redirect_next) if redirect_next else url_for('register') }}" class="btn btn-link">注册</a>
       <p class="mt-3">没有账号？立即注册，无需验证，仅需几秒钟。担心消息泄漏？信息随便填填也行，出门在外身份是自己给的。</p>
     </form>
   </div>

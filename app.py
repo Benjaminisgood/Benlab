@@ -6,6 +6,7 @@ import json
 from io import BytesIO
 import urllib.request
 from urllib.error import URLError, HTTPError
+from urllib.parse import urljoin
 from flask import Flask, render_template, request, redirect, url_for, flash, send_file, send_from_directory, abort, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
@@ -16,6 +17,7 @@ from sqlalchemy.orm import selectinload, load_only
 from sqlalchemy import or_, func, text, inspect
 from flask_migrate import Migrate
 from markupsafe import Markup, escape
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
 try:
     from PIL import Image, ImageDraw, ImageFont, ImageOps
@@ -57,6 +59,11 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
     'connect_args': {'check_same_thread': False}
 }
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['EVENT_SHARE_TOKEN_MAX_AGE'] = int(os.getenv('EVENT_SHARE_TOKEN_MAX_AGE', 60 * 60 * 24 * 30))
+app.config['EVENT_SHARE_TOKEN_SALT'] = os.getenv('EVENT_SHARE_TOKEN_SALT', 'benlab-event-share')
+public_base = (os.getenv('PUBLIC_BASE_URL') or '').strip()
+app.config['PUBLIC_BASE_URL'] = public_base.rstrip('/') if public_base else None
+app.config['PREFERRED_URL_SCHEME'] = os.getenv('PREFERRED_URL_SCHEME', 'https')
 # 使用绝对路径，避免工作目录变化导致保存失败
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # app.config['UPLOAD_FOLDER'] = os.path.join(BASE_DIR, 'static', 'images')
@@ -337,7 +344,85 @@ def _build_qr_image(data, box_size=10):
     return qr.make_image(fill_color='#202020', back_color='white').convert('RGB')
 
 
-def generate_event_share_poster(event, detail_url):
+def _event_share_serializer():
+    secret = app.config['SECRET_KEY']
+    salt = app.config.get('EVENT_SHARE_TOKEN_SALT', 'benlab-event-share')
+    return URLSafeTimedSerializer(secret_key=secret, salt=salt)
+
+
+def generate_event_share_token(event):
+    serializer = _event_share_serializer()
+    issued_at = int(datetime.utcnow().timestamp())
+    payload = {
+        'event_id': event.id,
+        'visibility': event.visibility,
+        'owner_id': event.owner_id,
+        'issued_at': issued_at
+    }
+    return serializer.dumps(payload)
+
+
+def verify_event_share_token(token):
+    serializer = _event_share_serializer()
+    max_age = app.config.get('EVENT_SHARE_TOKEN_MAX_AGE')
+    try:
+        return serializer.loads(token, max_age=max_age), None
+    except SignatureExpired:
+        return None, 'expired'
+    except BadSignature:
+        return None, 'invalid'
+
+
+def build_event_share_url(event):
+    token = generate_event_share_token(event)
+    public_base = app.config.get('PUBLIC_BASE_URL')
+    if public_base:
+        relative = url_for('event_share_entry', event_id=event.id, token=token)
+        normalized = public_base.rstrip('/') + '/'
+        return urljoin(normalized, relative.lstrip('/'))
+    return url_for('event_share_entry', event_id=event.id, token=token, _external=True)
+
+
+def describe_duration(seconds):
+    if not seconds:
+        return '长期有效'
+    units = [
+        (60 * 60 * 24, '天'),
+        (60 * 60, '小时'),
+        (60, '分钟')
+    ]
+    parts = []
+    remaining = int(seconds)
+    for span, label in units:
+        if remaining >= span:
+            value = remaining // span
+            remaining -= value * span
+            parts.append(f'{value}{label}')
+            if len(parts) == 2:
+                break
+    if not parts:
+        return f'{remaining}秒'
+    return ''.join(parts)
+
+
+def build_event_share_metadata(event):
+    if not event or event.visibility == 'personal':
+        return None
+    url = build_event_share_url(event)
+    max_age = app.config.get('EVENT_SHARE_TOKEN_MAX_AGE')
+    issued_at = datetime.utcnow()
+    expires_at = issued_at + timedelta(seconds=max_age) if max_age else None
+    return {
+        'url': url,
+        'issued_at': issued_at,
+        'expires_at': expires_at,
+        'max_age_seconds': max_age,
+        'validity_hint': describe_duration(max_age),
+        'base_override': app.config.get('PUBLIC_BASE_URL')
+    }
+
+
+def generate_event_share_poster(event, detail_url, validity_hint=None):
     if not (Image and ImageDraw and ImageFont and qrcode):
         raise RuntimeError('海报生成依赖 Pillow 和 qrcode，请先安装相关依赖。')
 
@@ -433,6 +518,13 @@ def generate_event_share_poster(event, detail_url):
         for line in guidance_lines:
             card_draw.text((content_x, line_y), line, font=hint_font, fill=(102, 102, 102))
             line_y += _font_line_height(hint_font) + 2
+        if validity_hint:
+            card_draw.text(
+                (content_x, line_y + 8),
+                f'二维码有效期：{validity_hint}',
+                font=hint_font,
+                fill=(120, 120, 120)
+            )
 
     else:
         fallback_text = '二维码生成失败，请稍后重试。'
@@ -1508,6 +1600,7 @@ class Event(db.Model):
     end_time = db.Column(db.DateTime)
     detail_link = db.Column(db.String(255))
     feedback_log = db.Column(db.Text, default='')
+    allow_participant_edit = db.Column(db.Boolean, nullable=False, default=False, server_default='0')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -1560,7 +1653,14 @@ class Event(db.Model):
         return any(link.member_id == member.id for link in self.participant_links)
 
     def can_edit(self, member):
-        return bool(member and member.id == self.owner_id)
+        if not member:
+            return False
+        if member.id == self.owner_id:
+            return True
+        allow_edit = getattr(self, 'allow_participant_edit', False)
+        if self.visibility == 'internal' and allow_edit:
+            return any(link.member_id == member.id for link in self.participant_links)
+        return False
 
     def can_join(self, member):
         if not member or member.id == self.owner_id:
@@ -1676,6 +1776,27 @@ def ensure_owner_participation(event):
         )
 
 
+def grant_internal_event_access(event, member, source='share-link'):
+    """Auto-enroll a member into an internal event when arriving via share."""
+    if not member or not event or event.visibility != 'internal':
+        return False
+    if member.id == event.owner_id or event.is_participant(member):
+        return False
+    event.participant_links.append(
+        EventParticipant(member_id=member.id, role='participant', status='confirmed')
+    )
+    event.touch()
+    log = Log(
+        user_id=member.id,
+        event_id=event.id,
+        action_type="扫码加入事项",
+        details=f"Auto-joined via {source}"
+    )
+    db.session.add(log)
+    db.session.commit()
+    return True
+
+
 def add_event_images(event, file_storages):
     for image_file in file_storages:
         stored_name = save_uploaded_media(image_file)
@@ -1751,6 +1872,9 @@ with app.app_context():
         if 'feedback_log' not in event_cols:
             with db.engine.begin() as conn:
                 conn.execute(text('ALTER TABLE events ADD COLUMN feedback_log TEXT'))
+        if 'allow_participant_edit' not in event_cols:
+            with db.engine.begin() as conn:
+                conn.execute(text('ALTER TABLE events ADD COLUMN allow_participant_edit BOOLEAN DEFAULT 0'))
     if Member.query.count() == 0:
         default_user = Member(name="Admin User", username="admin", contact="admin@example.com", notes="Default admin user")
         default_user.set_password("admin")
@@ -1821,12 +1945,17 @@ def uploaded_file(filename):
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if current_user.is_authenticated:
+        next_target = request.args.get('next') or request.form.get('next')
+        if next_target and next_target.startswith('/'):
+            return redirect(next_target)
         return redirect(url_for('index'))
+    next_url = request.args.get('next', '')
     if request.method == 'POST':
         name = request.form.get('name')
         username = request.form.get('username')
         password = request.form.get('password')
         contact = request.form.get('contact')
+        next_url = request.form.get('next') or next_url
         # 检查用户名是否已存在
         if Member.query.filter_by(username=username).first():
             flash('用户名已存在', 'warning')
@@ -1836,8 +1965,10 @@ def register():
             db.session.add(new_user)
             db.session.commit()
             flash('注册成功，请登录', 'success')
+            if next_url and next_url.startswith('/'):
+                return redirect(url_for('login', next=next_url))
             return redirect(url_for('login'))
-    return render_template('register.html')
+    return render_template('register.html', next_url=next_url)
 
 
 @app.route('/events')
@@ -2095,7 +2226,8 @@ def add_event():
         'location_ids': [],
         'participant_ids': [],
         'detail_link': '',
-        'external_image_urls': ''
+        'external_image_urls': '',
+        'allow_participant_edit': False
     }
     if request.method == 'POST':
         title = (request.form.get('title') or '').strip()
@@ -2111,6 +2243,9 @@ def add_event():
         location_ids = _collect_selected_ids(request.form.getlist('location_ids'))
         participant_ids = _collect_selected_ids(request.form.getlist('participant_ids'))
         detail_link = (request.form.get('detail_link') or '').strip()
+        allow_participant_edit = request.form.get('allow_participant_edit') in {'1', 'true', 'on'}
+        if visibility != 'internal':
+            allow_participant_edit = False
 
         available_member_ids = {member.id for member in members}
         participant_ids = {pid for pid in participant_ids if pid in available_member_ids and pid != current_user.id}
@@ -2133,7 +2268,8 @@ def add_event():
             'location_ids': list(location_ids),
             'participant_ids': list(participant_ids),
             'detail_link': detail_link,
-            'external_image_urls': request.form.get('external_event_image_urls', '')
+            'external_image_urls': request.form.get('external_event_image_urls', ''),
+            'allow_participant_edit': allow_participant_edit
         }
 
         if errors:
@@ -2148,7 +2284,8 @@ def add_event():
             owner_id=current_user.id,
             start_time=start_time,
             end_time=end_time,
-            detail_link=detail_link or None
+            detail_link=detail_link or None,
+            allow_participant_edit=allow_participant_edit
         )
         db.session.add(event)
 
@@ -2217,6 +2354,7 @@ def event_detail(event_id):
     allow_join = event.can_join(current_user)
     member_index, mention_lookup = build_member_lookup()
     feedback_entries = prepare_feedback_entries(event.feedback_log, member_index, mention_lookup)
+    share_meta = build_event_share_metadata(event)
     return render_template(
         'event_detail.html',
         event=event,
@@ -2226,7 +2364,8 @@ def event_detail(event_id):
         missing_locations=missing_locations,
         allow_join=allow_join,
         feedback_entries=feedback_entries,
-        feedback_post_url=url_for('post_event_feedback', event_id=event.id)
+        feedback_post_url=url_for('post_event_feedback', event_id=event.id),
+        share_meta=share_meta
     )
 
 
@@ -2242,9 +2381,15 @@ def event_share_poster(event_id):
         if not current_user.is_authenticated or not event.can_view(current_user):
             abort(403)
 
-    detail_url = url_for('event_detail', event_id=event.id, _external=True)
+    share_meta = build_event_share_metadata(event)
+    if share_meta:
+        detail_url = share_meta['url']
+        validity_hint = share_meta['validity_hint']
+    else:
+        detail_url = url_for('event_detail', event_id=event.id, _external=True)
+        validity_hint = None
     try:
-        output = generate_event_share_poster(event, detail_url)
+        output = generate_event_share_poster(event, detail_url, validity_hint=validity_hint)
     except RuntimeError as exc:
         abort(503, description=str(exc))
 
@@ -2258,6 +2403,32 @@ def event_share_poster(event_id):
     )
     response.headers['Cache-Control'] = 'no-store'
     return response
+
+
+@app.route('/events/<int:event_id>/share/<string:token>')
+def event_share_entry(event_id, token):
+    event = Event.query.options(selectinload(Event.participant_links)).get_or_404(event_id)
+    payload, error = verify_event_share_token(token)
+    if error == 'expired':
+        flash('分享链接已过期，请联系活动负责人重新生成最新海报。', 'warning')
+        if current_user.is_authenticated:
+            if event.can_view(current_user):
+                return redirect(url_for('event_detail', event_id=event.id))
+            return redirect(url_for('events_overview'))
+        return redirect(url_for('login'))
+    if not payload or payload.get('event_id') != event.id:
+        abort(403)
+    if event.visibility == 'personal':
+        abort(403)
+
+    if not current_user.is_authenticated:
+        flash('请先登录或注册，我们会在回来后自动为你开通该事项的权限。', 'info')
+        return redirect(url_for('login', next=request.path))
+
+    joined = grant_internal_event_access(event, current_user, source='share-link')
+    if joined:
+        flash('已自动将你加入事项，可立即查看详情。', 'success')
+    return redirect(url_for('event_detail', event_id=event.id))
 
 
 @app.route('/events/<int:event_id>/feedback', methods=['POST'])
@@ -2289,8 +2460,12 @@ def edit_event(event_id):
     if request.method == 'POST':
         title = (request.form.get('title') or '').strip()
         description = request.form.get('description') or ''
-        visibility = request.form.get('visibility', event.visibility)
-        if visibility not in {'personal', 'internal', 'public'}:
+        requested_visibility = request.form.get('visibility', event.visibility)
+        if requested_visibility not in {'personal', 'internal', 'public'}:
+            requested_visibility = event.visibility
+        if current_user.id == event.owner_id:
+            visibility = requested_visibility
+        else:
             visibility = event.visibility
         start_raw = request.form.get('start_time')
         end_raw = request.form.get('end_time')
@@ -2300,6 +2475,15 @@ def edit_event(event_id):
         location_ids = _collect_selected_ids(request.form.getlist('location_ids'))
         participant_ids = _collect_selected_ids(request.form.getlist('participant_ids'))
         detail_link = (request.form.get('detail_link') or '').strip()
+        allow_participant_edit = request.form.get('allow_participant_edit') in {'1', 'true', 'on'}
+        if visibility != 'internal':
+            allow_participant_edit = False
+        can_manage_members = current_user.id == event.owner_id
+        if not can_manage_members:
+            participant_ids = {
+                link.member_id for link in event.participant_links
+                if link.member_id != event.owner_id
+            }
 
         available_member_ids = {member.id for member in members}
         participant_ids = {pid for pid in participant_ids if pid in available_member_ids and pid != current_user.id}
@@ -2322,7 +2506,8 @@ def edit_event(event_id):
             'location_ids': list(location_ids),
             'participant_ids': list(participant_ids),
             'detail_link': detail_link,
-            'external_image_urls': request.form.get('external_event_image_urls', '')
+            'external_image_urls': request.form.get('external_event_image_urls', ''),
+            'allow_participant_edit': allow_participant_edit
         }
 
         if errors:
@@ -2336,20 +2521,25 @@ def edit_event(event_id):
         event.start_time = start_time
         event.end_time = end_time
         event.detail_link = detail_link or None
+        if current_user.id == event.owner_id:
+            event.allow_participant_edit = allow_participant_edit and visibility == 'internal'
+        elif event.visibility != 'internal':
+            event.allow_participant_edit = False
 
-        current_links = {link.member_id: link for link in event.participant_links}
-        desired_ids = participant_ids if visibility in {'internal', 'public'} else set()
+        if can_manage_members:
+            current_links = {link.member_id: link for link in event.participant_links}
+            desired_ids = participant_ids if visibility in {'internal', 'public'} else set()
 
-        for member_id, link in list(current_links.items()):
-            if member_id == event.owner_id:
-                continue
-            if member_id not in desired_ids:
-                db.session.delete(link)
+            for member_id, link in list(current_links.items()):
+                if member_id == event.owner_id:
+                    continue
+                if member_id not in desired_ids:
+                    db.session.delete(link)
 
-        if visibility in {'internal', 'public'}:
-            for pid in desired_ids:
-                if pid not in current_links:
-                    event.participant_links.append(EventParticipant(member_id=pid, role='participant', status='confirmed'))
+            if visibility in {'internal', 'public'}:
+                for pid in desired_ids:
+                    if pid not in current_links:
+                        event.participant_links.append(EventParticipant(member_id=pid, role='participant', status='confirmed'))
 
         ensure_owner_participation(event)
 
@@ -2410,7 +2600,8 @@ def edit_event(event_id):
         'location_ids': [loc.id for loc in event.locations],
         'participant_ids': [link.member_id for link in event.participant_links if link.member_id != event.owner_id],
         'detail_link': event.detail_link or '',
-        'external_image_urls': ''
+        'external_image_urls': '',
+        'allow_participant_edit': bool(getattr(event, 'allow_participant_edit', False))
     }
     return render_template('event_form.html', event=event, members=members, items=items, locations=locations, form_state=form_state)
 
@@ -2419,7 +2610,7 @@ def edit_event(event_id):
 @login_required
 def delete_event(event_id):
     event = Event.query.get_or_404(event_id)
-    if not event.can_edit(current_user):
+    if event.owner_id != current_user.id:
         abort(403)
     event_title = event.title
     event_identifier = event.id

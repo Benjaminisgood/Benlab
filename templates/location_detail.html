@@ -228,7 +228,8 @@
                     </div>
                     <div class="text-end">
                       {% if item.stock_status %}
-                      <span class="badge bg-secondary">{{ item.stock_status }}</span>
+                      {% set status_intent = stock_status_intent(item.stock_status) %}
+                      <span class="badge badge-item-status badge-item-status-{{ status_intent }}">{{ item.stock_status }}</span>
                       {% endif %}
                       {% if item.category %}
                       <small class="text-muted ms-2">{{ item.category }}</small>
@@ -280,7 +281,8 @@
                     </div>
                     <div class="text-end">
                       {% if it.stock_status %}
-                      <span class="badge bg-secondary">{{ it.stock_status }}</span>
+                      {% set status_intent = stock_status_intent(it.stock_status) %}
+                      <span class="badge badge-item-status badge-item-status-{{ status_intent }}">{{ it.stock_status }}</span>
                       {% endif %}
                       {% if it.category %}
                       <small class="text-muted ms-2">{{ it.category }}</small>

@@ -208,7 +208,8 @@
             <label class="form-check-label d-flex justify-content-between align-items-center" for="eventItem{{ item.id }}">
               <span>{{ item.name }}</span>
               {% if item.stock_status %}
-                <span class="badge bg-light text-dark border ms-2">{{ item.stock_status }}</span>
+                {% set status_intent = stock_status_intent(item.stock_status) %}
+                <span class="badge badge-item-status badge-item-status-{{ status_intent }} ms-2">{{ item.stock_status }}</span>
               {% endif %}
             </label>
           </div>

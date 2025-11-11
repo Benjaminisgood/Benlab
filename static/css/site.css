@@ -91,6 +91,38 @@
   --badge-visibility-personal-bg: rgba(var(--bs-secondary-rgb), 0.18);
   --badge-visibility-personal-border: rgba(var(--bs-secondary-rgb), 0.4);
   --badge-visibility-personal-text: #262c3f;
+  --item-feature-public-bg: rgba(var(--bs-success-rgb), 0.16);
+  --item-feature-public-border: rgba(var(--bs-success-rgb), 0.38);
+  --item-feature-public-text: #0f3a2f;
+  --item-feature-private-bg: rgba(var(--bs-info-rgb), 0.18);
+  --item-feature-private-border: rgba(var(--bs-info-rgb), 0.4);
+  --item-feature-private-text: #0b2a5a;
+  --item-feature-neutral-bg: rgba(var(--bs-secondary-rgb), 0.12);
+  --item-feature-neutral-border: rgba(var(--bs-secondary-rgb), 0.3);
+  --item-feature-neutral-text: var(--app-heading);
+  --item-status-critical-bg: rgba(var(--bs-danger-rgb), 0.16);
+  --item-status-critical-border: rgba(var(--bs-danger-rgb), 0.42);
+  --item-status-critical-text: #7a1624;
+  --item-status-warning-bg: rgba(var(--bs-warning-rgb), 0.2);
+  --item-status-warning-border: rgba(var(--bs-warning-rgb), 0.45);
+  --item-status-warning-text: #8a5200;
+  --item-status-positive-bg: rgba(var(--bs-success-rgb), 0.18);
+  --item-status-positive-border: rgba(var(--bs-success-rgb), 0.45);
+  --item-status-positive-text: #0f3a2f;
+  --item-status-info-bg: rgba(var(--bs-info-rgb), 0.18);
+  --item-status-info-border: rgba(var(--bs-info-rgb), 0.42);
+  --item-status-info-text: #0b2f62;
+  --item-status-muted-bg: rgba(var(--bs-secondary-rgb), 0.12);
+  --item-status-muted-border: rgba(var(--bs-secondary-rgb), 0.32);
+  --item-status-muted-text: #2c3445;
+  --item-status-neutral-bg: rgba(11, 23, 43, 0.04);
+  --item-status-neutral-border: rgba(11, 23, 43, 0.12);
+  --item-status-neutral-text: var(--app-heading);
+  --inventory-row-critical-bg: rgba(var(--bs-danger-rgb), 0.12);
+  --inventory-row-warning-bg: rgba(var(--bs-warning-rgb), 0.14);
+  --inventory-row-positive-bg: rgba(var(--bs-success-rgb), 0.1);
+  --inventory-row-info-bg: rgba(var(--bs-info-rgb), 0.12);
+  --inventory-row-muted-bg: rgba(var(--bs-secondary-rgb), 0.08);
   --graph-canvas-bg: #f4f7ff;
   --graph-legend-bg: rgba(255, 255, 255, 0.9);
   --graph-legend-text: #1e2435;
@@ -229,6 +261,38 @@
   --badge-visibility-personal-bg: rgba(var(--bs-secondary-rgb), 0.24);
   --badge-visibility-personal-border: rgba(var(--bs-secondary-rgb), 0.5);
   --badge-visibility-personal-text: rgba(226, 232, 240, 0.95);
+  --item-feature-public-bg: rgba(var(--bs-success-rgb), 0.32);
+  --item-feature-public-border: rgba(var(--bs-success-rgb), 0.55);
+  --item-feature-public-text: rgba(209, 250, 229, 0.95);
+  --item-feature-private-bg: rgba(var(--bs-info-rgb), 0.28);
+  --item-feature-private-border: rgba(var(--bs-info-rgb), 0.5);
+  --item-feature-private-text: rgba(224, 242, 254, 0.95);
+  --item-feature-neutral-bg: rgba(148, 163, 184, 0.18);
+  --item-feature-neutral-border: rgba(148, 163, 184, 0.45);
+  --item-feature-neutral-text: rgba(248, 250, 252, 0.92);
+  --item-status-critical-bg: rgba(var(--bs-danger-rgb), 0.32);
+  --item-status-critical-border: rgba(var(--bs-danger-rgb), 0.65);
+  --item-status-critical-text: rgba(255, 228, 233, 0.95);
+  --item-status-warning-bg: rgba(var(--bs-warning-rgb), 0.32);
+  --item-status-warning-border: rgba(var(--bs-warning-rgb), 0.65);
+  --item-status-warning-text: rgba(255, 240, 206, 0.95);
+  --item-status-positive-bg: rgba(var(--bs-success-rgb), 0.32);
+  --item-status-positive-border: rgba(var(--bs-success-rgb), 0.65);
+  --item-status-positive-text: rgba(219, 255, 238, 0.95);
+  --item-status-info-bg: rgba(var(--bs-info-rgb), 0.32);
+  --item-status-info-border: rgba(var(--bs-info-rgb), 0.6);
+  --item-status-info-text: rgba(226, 242, 254, 0.95);
+  --item-status-muted-bg: rgba(148, 163, 184, 0.24);
+  --item-status-muted-border: rgba(148, 163, 184, 0.45);
+  --item-status-muted-text: rgba(241, 245, 249, 0.92);
+  --item-status-neutral-bg: rgba(255, 255, 255, 0.06);
+  --item-status-neutral-border: rgba(255, 255, 255, 0.2);
+  --item-status-neutral-text: rgba(248, 250, 252, 0.92);
+  --inventory-row-critical-bg: rgba(var(--bs-danger-rgb), 0.22);
+  --inventory-row-warning-bg: rgba(var(--bs-warning-rgb), 0.22);
+  --inventory-row-positive-bg: rgba(var(--bs-success-rgb), 0.2);
+  --inventory-row-info-bg: rgba(var(--bs-info-rgb), 0.2);
+  --inventory-row-muted-bg: rgba(148, 163, 184, 0.16);
   --graph-canvas-bg: #0b1723;
   --graph-legend-bg: rgba(3, 7, 18, 0.7);
   --graph-legend-text: rgba(226, 232, 240, 0.95);
@@ -729,6 +793,77 @@ body {
   border: 1px solid var(--badge-visibility-personal-border);
 }
 
+.badge-item-feature,
+.badge-item-status {
+  border-width: 1px;
+  border-style: solid;
+  text-transform: none;
+}
+
+.badge-item-feature {
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+}
+
+.badge-item-status {
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+}
+
+.badge-item-feature-public {
+  background-color: var(--item-feature-public-bg);
+  border-color: var(--item-feature-public-border);
+  color: var(--item-feature-public-text);
+}
+
+.badge-item-feature-private {
+  background-color: var(--item-feature-private-bg);
+  border-color: var(--item-feature-private-border);
+  color: var(--item-feature-private-text);
+}
+
+.badge-item-feature-neutral {
+  background-color: var(--item-feature-neutral-bg);
+  border-color: var(--item-feature-neutral-border);
+  color: var(--item-feature-neutral-text);
+}
+
+.badge-item-status-critical {
+  background-color: var(--item-status-critical-bg);
+  border-color: var(--item-status-critical-border);
+  color: var(--item-status-critical-text);
+}
+
+.badge-item-status-warning {
+  background-color: var(--item-status-warning-bg);
+  border-color: var(--item-status-warning-border);
+  color: var(--item-status-warning-text);
+}
+
+.badge-item-status-positive {
+  background-color: var(--item-status-positive-bg);
+  border-color: var(--item-status-positive-border);
+  color: var(--item-status-positive-text);
+}
+
+.badge-item-status-info {
+  background-color: var(--item-status-info-bg);
+  border-color: var(--item-status-info-border);
+  color: var(--item-status-info-text);
+}
+
+.badge-item-status-muted {
+  background-color: var(--item-status-muted-bg);
+  border-color: var(--item-status-muted-border);
+  color: var(--item-status-muted-text);
+}
+
+.badge-item-status-neutral {
+  background-color: var(--item-status-neutral-bg);
+  border-color: var(--item-status-neutral-border);
+  color: var(--item-status-neutral-text);
+}
+
 .badge.bg-primary,
 .badge.text-bg-primary {
   background-image: var(--benlab-rainbow);
@@ -751,6 +886,64 @@ body {
 .table td {
   border-color: var(--app-border);
   vertical-align: middle;
+}
+
+.table-inventory {
+  border: 1px solid var(--app-border);
+}
+
+.table-inventory .inventory-row {
+  transition: background-color 0.2s ease;
+}
+
+.table-inventory .inventory-row > td,
+.table-inventory .inventory-row > th {
+  transition: background-color 0.2s ease;
+}
+
+.table-inventory .inventory-row-critical {
+  box-shadow: inset 4px 0 0 var(--item-status-critical-border);
+}
+
+.table-inventory .inventory-row-warning {
+  box-shadow: inset 4px 0 0 var(--item-status-warning-border);
+}
+
+.table-inventory .inventory-row-positive {
+  box-shadow: inset 4px 0 0 var(--item-status-positive-border);
+}
+
+.table-inventory .inventory-row-info {
+  box-shadow: inset 4px 0 0 var(--item-status-info-border);
+}
+
+.table-inventory .inventory-row-muted {
+  box-shadow: inset 4px 0 0 var(--item-status-muted-border);
+}
+
+.table-inventory .inventory-row-critical > td,
+.table-inventory .inventory-row-critical > th {
+  background-color: var(--inventory-row-critical-bg) !important;
+}
+
+.table-inventory .inventory-row-warning > td,
+.table-inventory .inventory-row-warning > th {
+  background-color: var(--inventory-row-warning-bg) !important;
+}
+
+.table-inventory .inventory-row-positive > td,
+.table-inventory .inventory-row-positive > th {
+  background-color: var(--inventory-row-positive-bg) !important;
+}
+
+.table-inventory .inventory-row-info > td,
+.table-inventory .inventory-row-info > th {
+  background-color: var(--inventory-row-info-bg) !important;
+}
+
+.table-inventory .inventory-row-muted > td,
+.table-inventory .inventory-row-muted > th {
+  background-color: var(--inventory-row-muted-bg) !important;
 }
 
 .table thead {

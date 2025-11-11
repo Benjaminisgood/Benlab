@@ -27,10 +27,12 @@
         <div class="text-end">
           <div class="d-flex flex-wrap justify-content-end gap-1">
             {% if entry.stock_status %}
-              <span class="badge {% if '用完' in entry.stock_status %}bg-danger{% elif '少量' in entry.stock_status %}bg-warning text-dark{% else %}bg-secondary{% endif %}">{{ entry.stock_status }}</span>
+              {% set status_intent = stock_status_intent(entry.stock_status) %}
+              <span class="badge badge-item-status badge-item-status-{{ status_intent }}">{{ entry.stock_status }}</span>
             {% endif %}
-            {% if entry.features in ['公共', '私人'] %}
-              <span class="badge bg-light text-dark border">{{ entry.features }}</span>
+            {% if entry.features %}
+              {% set feature_tone = feature_intent(entry.features) %}
+              <span class="badge badge-item-feature badge-item-feature-{{ feature_tone }}">{{ entry.features }}</span>
             {% endif %}
           </div>
           {% if entry.stock_status and '用完' in entry.stock_status %}

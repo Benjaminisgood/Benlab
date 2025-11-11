@@ -12,7 +12,7 @@
   </div>
 </div>
 
-<table class="table table-hover align-middle" id="itemsTable">
+<table class="table table-hover align-middle table-inventory" id="itemsTable">
   <thead class="table-light">
     <tr>
       <th>名称</th>
@@ -37,17 +37,10 @@
     {% endfor %}
 
     {% for item in active_items + discarded_items %}
-      {% set row_class = '' %}
-      {% if item.stock_status %}
-        {% if item.stock_status == '用完' %}
-          {% set row_class = 'table-danger' %}
-        {% elif item.stock_status == '少量' %}
-          {% set row_class = 'table-warning' %}
-        {% elif item.stock_status == '充足' %}
-          {% set row_class = 'table-success' %}
-        {% elif item.stock_status == '舍弃' %}
-          {% set row_class = 'table-secondary' %}
-        {% endif %}
+      {% set status_intent = stock_status_intent(item.stock_status) %}
+      {% set row_class = 'inventory-row' %}
+      {% if status_intent != 'neutral' %}
+        {% set row_class = row_class ~ ' inventory-row-' ~ status_intent %}
       {% endif %}
       {% set location_names = item.locations | map(attribute='name') | list %}
       {% set detail_links_blob = item.detail_links | map(attribute='url') | list %}
@@ -59,7 +52,16 @@
 
       <tr class="{{ row_class }}" data-search="{{ search_blob|lower }}">
         <td>
-          <a href="{{ url_for('item_detail', item_id=item.id) }}">{{ item.name }}</a>
+          <div class="d-flex flex-wrap align-items-center gap-2">
+            <a href="{{ url_for('item_detail', item_id=item.id) }}">{{ item.name }}</a>
+            {% if item.features %}
+              {% set feature_tone = feature_intent(item.features) %}
+              <span class="badge badge-item-feature badge-item-feature-{{ feature_tone }}">{{ item.features }}</span>
+            {% endif %}
+            {% if item.stock_status %}
+              <span class="badge badge-item-status badge-item-status-{{ status_intent }}">{{ item.stock_status }}</span>
+            {% endif %}
+          </div>
         </td>
         <td>
           {% if item.category %}

@@ -737,6 +737,20 @@ _MENTION_PATTERN = re.compile(r'(?<![\w@])@(?P<handle>[\w\u4e00-\u9fa5-]+)')
 _SENTIMENT_GOOD_TOKEN = '__SENT_POS__'
 _SENTIMENT_DOUBT_TOKEN = '__SENT_QUEST__'
 _ALLOWED_ITEM_FEATURES = {'公共', '私人'}
+_ITEM_FEATURE_INTENTS = {
+    '公共': 'public',
+    '私人': 'private'
+}
+_STOCK_STATUS_INTENTS = {
+    '充足': 'positive',
+    '少量': 'warning',
+    '用完': 'critical',
+    '舍弃': 'muted',
+    '闲置': 'muted',
+    '借出': 'info',
+    '待售': 'warning',
+    '售出': 'muted'
+}
 _MEMBER_RELATION_TYPES = {
     'study': '上学',
     'work': '工作',
@@ -866,6 +880,23 @@ def _serialize_item_detail_links(entries, max_length=64):
 def _normalize_item_feature(value):
     value = (value or '').strip()
     return value if value in _ALLOWED_ITEM_FEATURES else None
+
+
+def _feature_intent(value):
+    """Return semantic intent for public/private feature badges."""
+    value = (value or '').strip()
+    return _ITEM_FEATURE_INTENTS.get(value, 'neutral')
+
+
+def _stock_status_intent(value):
+    """Return semantic intent token for inventory stock status badges/rows."""
+    if not value:
+        return 'neutral'
+    tokens = [segment.strip() for segment in str(value).split(',') if segment.strip()]
+    for token in tokens:
+        if token in _STOCK_STATUS_INTENTS:
+            return _STOCK_STATUS_INTENTS[token]
+    return 'neutral'
 
 
 def _collect_detail_links_from_form(form):
@@ -4314,6 +4345,8 @@ def inject_image_helpers():
         media_kind_labels=MEDIA_KIND_LABELS,
         media_display_name=media_display_name,
         direct_upload_config=_build_direct_upload_config(),
+        feature_intent=_feature_intent,
+        stock_status_intent=_stock_status_intent,
     )
 
 if __name__ == "__main__":

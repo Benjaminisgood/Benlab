@@ -261,6 +261,15 @@
       return new bootstrap.Tooltip(tooltipTriggerEl);
     });
   </script>
+  <script>
+    window.addEventListener('DOMContentLoaded', function () {
+      document.querySelectorAll('.modal').forEach(function (modal) {
+        if (modal.parentElement !== document.body) {
+          document.body.appendChild(modal);
+        }
+      });
+    });
+  </script>
   <script src="{{ url_for('static', filename='js/media_gallery.js') }}" defer></script>
 </body>
 </html>

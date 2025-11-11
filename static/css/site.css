@@ -502,7 +502,9 @@ body {
   border-radius: 1rem;
   padding: 0.95rem 1.2rem;
   border: 1px solid transparent;
-  border-image: var(--benlab-rainbow) 1;
+  background-image: linear-gradient(var(--app-card), var(--app-card)), var(--benlab-rainbow);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
   box-shadow: var(--benlab-shadow-sm);
   background-color: var(--bs-alert-bg, var(--app-card));
   color: var(--bs-alert-color, var(--app-heading));
@@ -777,6 +779,15 @@ body {
   border: 1px solid var(--app-border);
   background: var(--app-card);
   box-shadow: var(--benlab-shadow-md);
+}
+
+.modal {
+  z-index: 2000;
+}
+
+.modal-backdrop {
+  z-index: 1990;
+  backdrop-filter: blur(3px);
 }
 
 .modal-header {

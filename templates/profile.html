@@ -650,9 +650,9 @@
               <span class="fw-semibold">{{ fb.sender_name }}</span>
             {% endif %}
             {% if fb.sentiment == 'positive' %}
-              <span class="badge bg-success ms-2">好评</span>
+              <span class="badge badge-sentiment-positive ms-2">好评</span>
             {% elif fb.sentiment == 'doubt' %}
-              <span class="badge bg-warning text-dark ms-2">需关注</span>
+              <span class="badge badge-sentiment-doubt ms-2">需关注</span>
             {% endif %}
           </div>
           <small class="text-muted">{{ fb.timestamp_display }}</small>

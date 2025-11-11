@@ -7,7 +7,7 @@
     <div class="text-muted small mt-1">由 {{ event.owner.name if event.owner else '未知成员' }} 创建于 {{ event.created_at|china_time }}</div>
   </div>
   <div class="d-flex gap-2">
-    <span class="badge bg-{% if event.visibility == 'public' %}success{% elif event.visibility == 'internal' %}info{% else %}secondary{% endif %} align-self-center">
+    <span class="badge badge-visibility {% if event.visibility == 'public' %}badge-visibility-public{% elif event.visibility == 'internal' %}badge-visibility-internal{% else %}badge-visibility-personal{% endif %} align-self-center">
       {% if event.visibility == 'public' %}公开事项{% elif event.visibility == 'internal' %}内部事项{% else %}个人事项{% endif %}
     </span>
     {% if event.detail_link %}
@@ -105,9 +105,9 @@
                 <span class="fw-semibold">{{ fb.sender_name }}</span>
               {% endif %}
               {% if fb.sentiment == 'positive' %}
-                <span class="badge bg-success ms-2">好评</span>
+                <span class="badge badge-sentiment-positive ms-2">好评</span>
               {% elif fb.sentiment == 'doubt' %}
-                <span class="badge bg-warning text-dark ms-2">待关注</span>
+                <span class="badge badge-sentiment-doubt ms-2">待关注</span>
               {% endif %}
             </div>
             <small class="text-muted">{{ fb.timestamp_display }}</small>

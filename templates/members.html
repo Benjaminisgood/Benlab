@@ -58,9 +58,9 @@
       {% set search_blob = ((mem.name or '') ~ ' ' ~ mem.username ~ ' ' ~ (mem.contact or '') ~ ' ' ~ items_count ~ ' ' ~ locations_count ~ ' ' ~ events_count) %}
       {% set row_class = '' %}
       {% if mem.id == current_user.id %}
-        {% set row_class = 'table-primary' %}
+        {% set row_class = 'member-row-self' %}
       {% elif mem.id in followed_ids %}
-        {% set row_class = 'table-success' %}
+        {% set row_class = 'member-row-followed' %}
       {% endif %}
       <tr class="{{ row_class }}" data-search="{{ search_blob|lower }}">
         <td class="member-cell-username">

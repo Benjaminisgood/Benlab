@@ -63,6 +63,21 @@
   --chip-sentiment-doubt-bg: rgba(220, 53, 69, 0.16);
   --chip-sentiment-doubt-border: rgba(220, 53, 69, 0.35);
   --chip-sentiment-doubt-color: #842029;
+  --badge-positive-bg: var(--chip-sentiment-good-bg);
+  --badge-positive-border: var(--chip-sentiment-good-border);
+  --badge-positive-text: var(--chip-sentiment-good-color);
+  --badge-doubt-bg: var(--chip-sentiment-doubt-bg);
+  --badge-doubt-border: var(--chip-sentiment-doubt-border);
+  --badge-doubt-text: var(--chip-sentiment-doubt-color);
+  --badge-visibility-public-bg: rgba(var(--bs-success-rgb), 0.18);
+  --badge-visibility-public-border: rgba(var(--bs-success-rgb), 0.38);
+  --badge-visibility-public-text: #0f3a2f;
+  --badge-visibility-internal-bg: rgba(var(--bs-info-rgb), 0.18);
+  --badge-visibility-internal-border: rgba(var(--bs-info-rgb), 0.4);
+  --badge-visibility-internal-text: #0b244a;
+  --badge-visibility-personal-bg: rgba(var(--bs-secondary-rgb), 0.18);
+  --badge-visibility-personal-border: rgba(var(--bs-secondary-rgb), 0.4);
+  --badge-visibility-personal-text: #262c3f;
   --graph-canvas-bg: #f4f7ff;
   --graph-legend-bg: rgba(255, 255, 255, 0.9);
   --graph-legend-text: #1e2435;
@@ -108,6 +123,19 @@
   --media-focus-action-bg: rgba(255, 255, 255, 0.95);
   --media-focus-action-color: #212529;
   --media-focus-action-shadow: 0 2rem 3rem rgba(0, 0, 0, 0.35);
+  --member-row-self-bg: rgba(138, 54, 255, 0.12);
+  --member-row-self-border: rgba(138, 54, 255, 0.35);
+  --member-row-self-text: var(--app-heading);
+  --member-row-follow-bg: rgba(18, 199, 132, 0.12);
+  --member-row-follow-border: rgba(18, 199, 132, 0.35);
+  --member-row-follow-text: var(--app-heading);
+  --location-root-row-bg: rgba(58, 123, 255, 0.12);
+  --location-root-row-border: rgba(58, 123, 255, 0.35);
+  --location-root-row-text: var(--app-heading);
+  --table-head-bg: rgba(var(--bs-primary-rgb), 0.08);
+  --table-head-text: var(--app-heading);
+  --table-head-border: rgba(var(--bs-primary-rgb), 0.25);
+  --table-row-hover-bg: rgba(var(--bs-primary-rgb), 0.08);
 }
 
 :root[data-bs-theme='dark'] {
@@ -160,6 +188,21 @@
   --chip-sentiment-doubt-bg: rgba(244, 63, 94, 0.22);
   --chip-sentiment-doubt-border: rgba(244, 63, 94, 0.48);
   --chip-sentiment-doubt-color: #ffb4c2;
+  --badge-positive-bg: var(--chip-sentiment-good-bg);
+  --badge-positive-border: var(--chip-sentiment-good-border);
+  --badge-positive-text: var(--chip-sentiment-good-color);
+  --badge-doubt-bg: var(--chip-sentiment-doubt-bg);
+  --badge-doubt-border: var(--chip-sentiment-doubt-border);
+  --badge-doubt-text: var(--chip-sentiment-doubt-color);
+  --badge-visibility-public-bg: rgba(var(--bs-success-rgb), 0.24);
+  --badge-visibility-public-border: rgba(var(--bs-success-rgb), 0.5);
+  --badge-visibility-public-text: rgba(209, 250, 229, 0.95);
+  --badge-visibility-internal-bg: rgba(var(--bs-info-rgb), 0.24);
+  --badge-visibility-internal-border: rgba(var(--bs-info-rgb), 0.5);
+  --badge-visibility-internal-text: rgba(224, 242, 254, 0.95);
+  --badge-visibility-personal-bg: rgba(var(--bs-secondary-rgb), 0.24);
+  --badge-visibility-personal-border: rgba(var(--bs-secondary-rgb), 0.5);
+  --badge-visibility-personal-text: rgba(226, 232, 240, 0.95);
   --graph-canvas-bg: #0b1723;
   --graph-legend-bg: rgba(3, 7, 18, 0.7);
   --graph-legend-text: rgba(226, 232, 240, 0.95);
@@ -205,6 +248,19 @@
   --media-focus-action-bg: rgba(15, 23, 42, 0.92);
   --media-focus-action-color: rgba(248, 250, 252, 0.95);
   --media-focus-action-shadow: 0 2rem 3rem rgba(0, 0, 0, 0.75);
+  --member-row-self-bg: rgba(241, 153, 255, 0.2);
+  --member-row-self-border: rgba(241, 153, 255, 0.4);
+  --member-row-self-text: rgba(248, 250, 252, 0.95);
+  --member-row-follow-bg: rgba(34, 197, 167, 0.2);
+  --member-row-follow-border: rgba(34, 197, 167, 0.45);
+  --member-row-follow-text: rgba(240, 253, 250, 0.95);
+  --location-root-row-bg: rgba(59, 130, 246, 0.22);
+  --location-root-row-border: rgba(59, 130, 246, 0.45);
+  --location-root-row-text: rgba(240, 249, 255, 0.95);
+  --table-head-bg: rgba(255, 255, 255, 0.08);
+  --table-head-text: rgba(248, 250, 252, 0.92);
+  --table-head-border: rgba(255, 255, 255, 0.16);
+  --table-row-hover-bg: rgba(255, 255, 255, 0.06);
 }
 
 body {
@@ -456,6 +512,33 @@ body {
   box-shadow: var(--benlab-shadow-sm);
 }
 
+.member-row-self > td,
+.member-row-self > th {
+  background-color: var(--member-row-self-bg) !important;
+  color: var(--member-row-self-text);
+  border-color: var(--member-row-self-border);
+}
+
+.member-row-followed > td,
+.member-row-followed > th {
+  background-color: var(--member-row-follow-bg) !important;
+  color: var(--member-row-follow-text);
+  border-color: var(--member-row-follow-border);
+}
+
+.member-row-self a,
+.member-row-followed a {
+  color: inherit;
+}
+
+.location-row-root > td,
+.location-row-root > th {
+  background-color: var(--location-root-row-bg);
+  color: var(--location-root-row-text);
+  border-color: var(--location-root-row-border);
+  font-weight: 600;
+}
+
 .btn {
   border-radius: 999px;
   font-weight: 600;
@@ -548,6 +631,42 @@ body {
   letter-spacing: 0.04em;
 }
 
+.badge-sentiment-positive {
+  background-color: var(--badge-positive-bg);
+  color: var(--badge-positive-text);
+  border: 1px solid var(--badge-positive-border);
+}
+
+.badge-sentiment-doubt {
+  background-color: var(--badge-doubt-bg);
+  color: var(--badge-doubt-text);
+  border: 1px solid var(--badge-doubt-border);
+}
+
+.badge-visibility {
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.badge-visibility-public {
+  background-color: var(--badge-visibility-public-bg);
+  color: var(--badge-visibility-public-text);
+  border: 1px solid var(--badge-visibility-public-border);
+}
+
+.badge-visibility-internal {
+  background-color: var(--badge-visibility-internal-bg);
+  color: var(--badge-visibility-internal-text);
+  border: 1px solid var(--badge-visibility-internal-border);
+}
+
+.badge-visibility-personal {
+  background-color: var(--badge-visibility-personal-bg);
+  color: var(--badge-visibility-personal-text);
+  border: 1px solid var(--badge-visibility-personal-border);
+}
+
 .badge.bg-primary,
 .badge.text-bg-primary {
   background-image: var(--benlab-rainbow);
@@ -573,13 +692,23 @@ body {
 }
 
 .table thead {
-  background: rgba(var(--bs-primary-rgb), 0.07);
+  background: var(--table-head-bg);
+  color: var(--table-head-text);
+  border-bottom: 1px solid var(--table-head-border);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 
+.table thead.table-light,
+.table thead.table-light > tr > th,
+.table thead.table-light > tr > td {
+  background: var(--table-head-bg) !important;
+  color: var(--table-head-text) !important;
+  border-color: var(--table-head-border) !important;
+}
+
 .table-hover > tbody > tr:hover {
-  background: rgba(var(--bs-primary-rgb), 0.08);
+  background: var(--table-row-hover-bg);
 }
 
 .dropdown-menu,

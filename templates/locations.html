@@ -4,7 +4,7 @@
 {% macro render_location(loc, level=0) %}
 {% set loc_meta = location_meta_map.get(loc.id) %}
 {% set usage_tags = loc_meta.usage_tags if loc_meta else [] %}
-<tr class="{% if level == 0 %}table-primary{% else %}table-light{% endif %} indent-{{ level }}">
+<tr class="indent-{{ level }}{% if level == 0 %} location-row-root{% endif %}">
   <td>
     {% if level > 0 %}↳ {% endif %}
     <a href="{{ url_for('view_location', loc_id=loc.id) }}">{{ loc.name }}</a>

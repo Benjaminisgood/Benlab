@@ -8,6 +8,8 @@ static/**/*
 !static/fonts/*.ttc
 !static/js/
 !static/js/*.js
+!static/css/
+!static/css/*.css
 *.pyc
 *.sqlite3
 instance/

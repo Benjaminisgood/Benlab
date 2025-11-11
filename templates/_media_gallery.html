@@ -1,16 +1,34 @@
 {% macro render_media_gallery(entries, gallery_id, media_kind_labels, empty_text='暂无媒体文件', options=None) -%}
-  {% set overlay_id = (gallery_id|string) ~ '-overlay' %}
+  {% set focus_overlay_id = (gallery_id|string) ~ '-focus-overlay' %}
   {% set gallery_class = options.gallery_class if options and options.gallery_class is not none else 'media-gallery' %}
   {% set grid_class = options.grid_class if options and options.grid_class is not none else 'media-gallery-grid' %}
   {% set card_class = options.card_class if options and options.card_class is not none else 'media-card' %}
-  {% set enable_fullscreen = options.enable_fullscreen if options and options.enable_fullscreen is not none else true %}
+  {% set enable_focus_mode = options.enable_focus_mode if options and options.enable_focus_mode is not none else true %}
+  {% set entry_count = entries|length if entries else 0 %}
+  {% set audio_entries = [] %}
+  {% if entry_count %}
+    {% set audio_entries = entries | selectattr('kind', 'equalto', 'audio') | list %}
+  {% endif %}
   {% if entries %}
   <div class="{{ gallery_class }}" id="{{ gallery_id }}">
+    {% if enable_focus_mode and entry_count %}
+    <div class="media-gallery-toolbar">
+      <span class="media-gallery-hint text-muted">点击任意卡片开启专注欣赏，双击退出</span>
+    </div>
+    {% endif %}
     <div class="{{ grid_class }}">
       {% for media in entries %}
       {% set kind = media.kind|default('file') %}
       <div class="{{ card_class }}{% if options and options.card_extra_class %} {{ options.card_extra_class }}{% endif %}"
-           data-kind="{{ kind }}">
+           data-kind="{{ kind }}"
+           {% if enable_focus_mode %}
+           role="button"
+           tabindex="0"
+           data-action="open-focus-mode"
+           data-focus-target="{{ focus_overlay_id }}"
+           data-focus-index="{{ loop.index0 }}"
+           aria-label="打开{{ (media.display_name or media_kind_labels.get(kind, '媒体'))|e }}的大图浏览"
+           {% endif %}>
         {% if kind == 'image' %}
         <figure class="media-card-figure">
           <img src="{{ media.url }}"
@@ -19,33 +37,6 @@
                loading="lazy"
                decoding="async">
         </figure>
-        <div class="media-actions">
-          {% if enable_fullscreen %}
-          <button type="button"
-                  class="btn btn-sm btn-primary media-play-btn"
-                  data-action="open-fullscreen"
-                  data-overlay-target="{{ overlay_id }}"
-                  data-kind="image"
-                  data-src="{{ media.url|e }}"
-                  data-name="{{ (media.display_name or media_kind_labels.get('image', '图片'))|e }}"
-                  aria-label="在大屏查看{{ (media.display_name or media_kind_labels.get('image', '图片'))|e }}">
-            大屏查看
-          </button>
-          {% else %}
-          <a href="{{ media.url|e }}"
-             class="btn btn-sm btn-primary"
-             target="_blank" rel="noopener"
-             aria-label="查看{{ (media.display_name or media_kind_labels.get('image', '图片'))|e }}">
-            查看图片
-          </a>
-          {% endif %}
-          <a href="{{ media.url|e }}"
-             class="btn btn-sm btn-outline-secondary media-download-btn"
-             download="{{ (media.display_name or media_kind_labels.get('image', '图片'))|e }}"
-             aria-label="下载{{ (media.display_name or media_kind_labels.get('image', '图片'))|e }}">
-            下载
-          </a>
-        </div>
         {% if media.description %}
         <p class="media-description">{{ media.description }}</p>
         {% endif %}
@@ -64,24 +55,6 @@
             您的浏览器不支持视频播放。
           </video>
         </figure>
-        <div class="media-actions">
-          {% if enable_fullscreen %}
-          <button type="button"
-                  class="btn btn-sm btn-primary media-play-btn"
-                  data-action="open-fullscreen"
-                  data-overlay-target="{{ overlay_id }}"
-                  data-kind="video"
-                  data-src="{{ media.url|e }}"
-                  data-name="{{ (media.display_name or media_kind_labels.get('video', '视频'))|e }}">
-            全屏播放
-          </button>
-          {% endif %}
-          <a href="{{ media.url|e }}"
-             class="btn btn-sm btn-outline-secondary media-download-btn"
-             download="{{ (media.display_name or media_kind_labels.get('video', '视频'))|e }}">
-            下载
-          </a>
-        </div>
         {% elif kind == 'audio' %}
         <figure class="media-card-figure media-card-audio-figure">
           <audio class="media-card-audio"
@@ -92,43 +65,132 @@
             您的浏览器不支持音频播放。
           </audio>
         </figure>
-        <div class="media-actions">
-          <a href="{{ media.url|e }}"
-             class="btn btn-sm btn-outline-secondary media-download-btn"
-             download="{{ (media.display_name or media_kind_labels.get('audio', '音频'))|e }}">
-            下载
-          </a>
-        </div>
         {% else %}
         <div class="media-file-link">
           <span class="media-tag">{{ media_kind_labels.get(kind, '文件') }}</span>
-          <div class="media-actions">
-            <a href="{{ media.url|e }}" target="_blank" rel="noopener"
-               class="btn btn-sm btn-primary"
-               aria-label="打开{{ media.display_name or media_kind_labels.get(kind, '文件') }}">
-              打开
-            </a>
-            <a href="{{ media.url|e }}"
-               class="btn btn-sm btn-outline-secondary media-download-btn"
-               download="{{ (media.display_name or media_kind_labels.get(kind, '文件'))|e }}"
-               aria-label="下载{{ (media.display_name or media_kind_labels.get(kind, '文件'))|e }}">
-              下载
-            </a>
-          </div>
         </div>
         {% endif %}
       </div>
       {% endfor %}
     </div>
   </div>
-  {% if enable_fullscreen %}
-  <div class="media-lightbox" id="{{ overlay_id }}" hidden tabindex="-1" aria-hidden="true">
-    <div class="media-lightbox-backdrop" data-action="close-fullscreen"></div>
-    <div class="media-lightbox-dialog" role="dialog" aria-modal="true" aria-label="媒体预览">
-      <button type="button" class="btn-close media-lightbox-close" data-action="close-fullscreen" aria-label="关闭预览"></button>
-      <div class="media-lightbox-body" data-role="body"></div>
-      <div class="media-lightbox-footer">
-        <div class="media-lightbox-title" data-role="title" hidden></div>
+  {% if enable_focus_mode and entry_count %}
+  {% set first_entry = entries[0] if entry_count > 0 else none %}
+  <div class="media-focus-overlay" id="{{ focus_overlay_id }}" hidden tabindex="-1" aria-hidden="true">
+    <div class="media-focus-backdrop" data-action="close-focus-mode"></div>
+    <div class="media-focus-stage" role="dialog" aria-modal="true" aria-label="专注模式媒体浏览">
+      <div class="media-focus-content">
+        <button type="button"
+                class="media-focus-nav media-focus-nav-prev"
+                data-action="focus-nav"
+                data-direction="-1"
+                {% if entry_count <= 1 %}disabled{% endif %}
+                aria-label="上一条">
+          &lsaquo;
+        </button>
+        <div class="media-focus-track" data-role="focus-track">
+          {% for media in entries %}
+          {% set kind = media.kind|default('file') %}
+          <article class="media-focus-slide{% if loop.first %} is-active{% endif %}"
+                   data-focus-slide
+                   data-index="{{ loop.index0 }}"
+                   data-title="{{ (media.display_name or media_kind_labels.get(kind, '媒体'))|e }}"
+                   data-description="{{ (media.description or '')|e }}"
+                   data-kind="{{ kind }}"
+                   data-download="{{ media.url|e }}"
+                   aria-hidden="{{ 'false' if loop.first else 'true' }}">
+            <figure class="media-focus-figure">
+              {% if kind == 'image' %}
+              <img src="{{ media.url|e }}"
+                   alt="{{ (media.display_name or media_kind_labels.get('image', '图片'))|e }}"
+                   class="media-focus-image"
+                   loading="lazy"
+                   decoding="async">
+              {% elif kind == 'video' %}
+              <video class="media-focus-video"
+                     controls
+                     playsinline
+                     preload="metadata"
+                     poster="{{ media.poster|default('')|e }}">
+                <source src="{{ media.url|e }}" type="{{ media.mimetype or 'video/mp4' }}">
+                您的浏览器不支持视频播放。
+              </video>
+              {% elif kind == 'audio' %}
+              <div class="media-focus-audio-inline">
+                <audio controls preload="metadata">
+                  <source src="{{ media.url|e }}" type="{{ media.mimetype or 'audio/mpeg' }}">
+                  您的浏览器不支持音频播放。
+                </audio>
+              </div>
+              {% else %}
+              <div class="media-focus-file">
+                <span class="media-focus-file-label">{{ media_kind_labels.get(kind, '文件') }}</span>
+                <a href="{{ media.url|e }}"
+                   class="btn btn-primary btn-sm"
+                   target="_blank"
+                   rel="noopener"
+                   aria-label="打开{{ (media.display_name or media_kind_labels.get(kind, '文件'))|e }}">
+                  打开
+                </a>
+              </div>
+              {% endif %}
+            </figure>
+          </article>
+          {% endfor %}
+        </div>
+        <button type="button"
+                class="media-focus-nav media-focus-nav-next"
+                data-action="focus-nav"
+                data-direction="1"
+                {% if entry_count <= 1 %}disabled{% endif %}
+                aria-label="下一条">
+          &rsaquo;
+        </button>
+      </div>
+      <div class="media-focus-info">
+        <div class="media-focus-counter" data-role="focus-counter">1/{{ entry_count }}</div>
+        <div class="media-focus-caption" data-role="focus-caption">
+          {% if first_entry %}
+            {{ first_entry.description or (first_entry.display_name or media_kind_labels.get(first_entry.kind|default('file'), '媒体')) }}
+          {% endif %}
+        </div>
+      </div>
+      {% if audio_entries %}
+      <div class="media-focus-audio-panel" data-role="focus-audio-panel">
+        <label for="{{ focus_overlay_id }}-audio-select" class="form-label mb-0">背景音乐</label>
+        <div class="media-focus-audio-controls">
+          <select class="form-select form-select-sm media-focus-audio-select"
+                  id="{{ focus_overlay_id }}-audio-select"
+                  data-role="focus-audio-select"
+                  aria-label="切换背景音乐">
+            {% for audio in audio_entries %}
+            <option value="{{ loop.index0 }}" data-src="{{ audio.url|e }}">
+              {{ audio.display_name or media_kind_labels.get('audio', '音频') }}
+            </option>
+            {% endfor %}
+          </select>
+          <audio class="media-focus-audio-player"
+                 data-role="focus-audio-player"
+                 controls
+                 preload="metadata"></audio>
+        </div>
+      </div>
+      {% endif %}
+      <div class="media-focus-action-sheet" data-role="focus-action-sheet" hidden>
+        <div class="media-focus-action-card">
+          <p class="mb-2 text-muted small">长按已激活更多动作</p>
+          <a class="btn btn-light btn-sm w-100"
+             data-role="focus-download-link"
+             href="#"
+             download>
+            下载当前媒体
+          </a>
+          <button type="button"
+                  class="btn btn-outline-light btn-sm w-100 mt-2"
+                  data-action="focus-action-close">
+            收起
+          </button>
+        </div>
       </div>
     </div>
   </div>

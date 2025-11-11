@@ -1,0 +1,458 @@
+.media-gallery {
+  width: 100%;
+}
+
+.media-gallery-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.media-gallery-hint {
+  font-size: 0.85rem;
+  letter-spacing: 0.02em;
+}
+
+.media-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 1rem;
+}
+
+.media-card {
+  position: relative;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+  background-color: var(--bs-body-bg);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0.75rem;
+  min-height: 160px;
+  overflow: hidden;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+  cursor: default;
+}
+
+.media-card[role="button"] {
+  cursor: pointer;
+}
+
+.media-card[role="button"]:focus-visible {
+  outline: 2px solid var(--bs-primary);
+  outline-offset: 3px;
+}
+
+.media-card:hover {
+  box-shadow: 0 0.75rem 1.5rem rgba(33, 37, 41, 0.12);
+  transform: translateY(-2px);
+}
+
+.media-card-figure {
+  margin: 0;
+  width: 100%;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.media-card-img {
+  max-width: 100%;
+  max-height: 240px;
+  border-radius: 0.5rem;
+  object-fit: contain;
+  background-color: rgba(248, 249, 250, 0.6);
+}
+
+.media-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+  text-align: center;
+  flex: 1;
+}
+
+.media-placeholder-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  width: 100%;
+  align-items: center;
+}
+
+.media-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.8rem;
+  border-radius: 999px;
+  background-color: rgba(13, 110, 253, 0.12);
+  color: var(--bs-primary);
+  border: 1px solid rgba(13, 110, 253, 0.3);
+}
+
+.media-card[data-kind="audio"] .media-tag {
+  background-color: rgba(32, 201, 151, 0.12);
+  color: #198754;
+  border-color: rgba(32, 201, 151, 0.35);
+}
+
+.media-card[data-kind="video"] .media-tag {
+  background-color: rgba(111, 66, 193, 0.12);
+  color: #6f42c1;
+  border-color: rgba(111, 66, 193, 0.35);
+}
+
+.media-caption {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--bs-body-color);
+  text-align: center;
+  margin: 0;
+}
+
+.media-description {
+  font-size: 0.8rem;
+  color: var(--bs-secondary-color);
+  text-align: center;
+  margin: 0;
+}
+
+.media-name {
+  font-size: 0.8rem;
+  color: var(--bs-secondary-color);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.media-file-link {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  text-decoration: none;
+}
+
+.media-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.media-actions .btn {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.media-card video,
+.media-card audio {
+  width: 100%;
+  max-height: 260px;
+  border-radius: 0.5rem;
+  outline: none;
+  background: #000;
+}
+
+.media-card video {
+  object-fit: cover;
+}
+
+.media-empty {
+  border: 1px dashed var(--bs-border-color);
+  border-radius: 0.75rem;
+  padding: 1.5rem;
+  text-align: center;
+  background: rgba(248, 249, 250, 0.6);
+}
+
+.media-focus-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  background: radial-gradient(circle at top, rgba(30, 33, 45, 0.95), rgba(5, 6, 9, 0.92));
+  z-index: 1090;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+
+.media-focus-overlay.is-active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.media-focus-overlay[hidden] {
+  display: none;
+}
+
+.media-focus-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  z-index: 0;
+}
+
+.media-focus-stage {
+  position: relative;
+  width: min(1100px, 100%);
+  max-height: 92vh;
+  padding: 1.5rem;
+  background: rgba(8, 9, 15, 0.95);
+  border-radius: 1.25rem;
+  box-shadow: 0 3rem 5rem rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  z-index: 1;
+  color: #f8f9fa;
+}
+
+.media-focus-content {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  min-height: 320px;
+}
+
+.media-focus-track {
+  position: relative;
+  flex: 1;
+  height: min(70vh, 640px);
+  min-height: 360px;
+  border-radius: 1rem;
+  background: rgba(15, 17, 28, 0.9);
+  overflow: hidden;
+  touch-action: pan-y;
+}
+
+.media-focus-slide {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(8%);
+  transition: opacity 0.3s ease, transform 0.35s ease;
+}
+
+.media-focus-slide.is-active {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+}
+
+.media-focus-figure {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.media-focus-image,
+.media-focus-video {
+  max-width: 100%;
+  max-height: 70vh;
+  border-radius: 1rem;
+  object-fit: contain;
+  background: #000;
+  box-shadow: 0 2rem 3rem rgba(0, 0, 0, 0.35);
+}
+
+.media-focus-video {
+  width: 100%;
+}
+
+.media-focus-file {
+  display: grid;
+  place-items: center;
+  gap: 1rem;
+  text-align: center;
+}
+
+.media-focus-file-label {
+  font-size: 0.9rem;
+  letter-spacing: 0.05em;
+  color: rgba(248, 249, 250, 0.72);
+  text-transform: uppercase;
+}
+
+.media-focus-nav {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 999px;
+  border: none;
+  background: rgba(248, 249, 250, 0.08);
+  color: #f8f9fa;
+  font-size: 1.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s ease, transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.media-focus-nav:hover:not(:disabled) {
+  background: rgba(248, 249, 250, 0.2);
+  transform: scale(1.05);
+}
+
+.media-focus-nav:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.media-focus-info {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.media-focus-counter {
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.85rem;
+  color: rgba(248, 249, 250, 0.75);
+}
+
+.media-focus-caption {
+  flex: 1;
+  min-height: 1.25rem;
+  font-size: 0.95rem;
+  color: rgba(248, 249, 250, 0.9);
+}
+
+.media-focus-audio-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.media-focus-audio-controls {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.media-focus-audio-player {
+  min-width: 220px;
+  max-width: 320px;
+}
+
+.media-focus-audio-inline audio {
+  width: min(480px, 100%);
+}
+
+.media-focus-action-sheet {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 6, 9, 0.75);
+  border-radius: 1.25rem;
+  z-index: 2;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.media-focus-action-sheet.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.media-focus-action-sheet[hidden] {
+  display: none;
+}
+
+.media-focus-action-card {
+  background: rgba(255, 255, 255, 0.95);
+  color: #212529;
+  padding: 1.5rem;
+  border-radius: 1rem;
+  width: min(320px, 80%);
+  box-shadow: 0 2rem 3rem rgba(0, 0, 0, 0.35);
+  text-align: center;
+}
+
+body.media-focus-open {
+  overflow: hidden;
+}
+
+@media (max-width: 768px) {
+  .media-gallery-grid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  }
+
+  .media-card {
+    min-height: 140px;
+  }
+
+  .media-card-img {
+    max-height: 200px;
+  }
+
+  .media-focus-overlay {
+    padding: 1rem;
+  }
+
+  .media-focus-stage {
+    padding: 1rem;
+  }
+
+  .media-focus-content {
+    flex-direction: column;
+  }
+
+  .media-focus-track {
+    width: 100%;
+  }
+
+  .media-focus-nav {
+    width: 100%;
+    border-radius: 0.75rem;
+  }
+}
+
+@media (max-width: 576px) {
+  .media-focus-stage {
+    gap: 0.75rem;
+  }
+
+  .media-focus-slide {
+    padding: 1rem;
+  }
+
+  .media-focus-caption {
+    font-size: 0.85rem;
+  }
+}

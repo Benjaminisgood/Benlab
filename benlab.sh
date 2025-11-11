@@ -173,8 +173,58 @@ determine_workers() {
   fi
   python - <<'PY'
 import multiprocessing
+import platform
+import subprocess
+
+def sysctl_int(name: str):
+    try:
+        out = subprocess.check_output(["sysctl", "-n", name], text=True)
+        out = out.strip()
+        return int(out) if out else None
+    except Exception:
+        return None
+
+def linux_mem_total():
+    try:
+        with open("/proc/meminfo", "r", encoding="utf-8") as fh:
+            for line in fh:
+                if line.startswith("MemTotal:"):
+                    parts = line.split()
+                    return int(parts[1]) * 1024  # value is reported in kB
+    except Exception:
+        return None
+
 cores = multiprocessing.cpu_count()
-print(max(2, cores * 2 + 1))
+system = platform.system()
+machine = platform.machine()
+is_apple_silicon = system == "Darwin" and machine.startswith(("arm", "aarch64"))
+
+# Keep at least one fast core free for macOS on entry-level Apple Silicon boxes.
+if is_apple_silicon:
+    perf_cores = sysctl_int("hw.perflevel0.physicalcpu")
+    usable_cores = perf_cores - 1 if perf_cores and perf_cores > 1 else cores // 2 or 1
+else:
+    usable_cores = cores - 1 if cores > 2 else cores
+
+usable_cores = max(1, usable_cores)
+
+mem_bytes = None
+if system == "Darwin":
+    mem_bytes = sysctl_int("hw.memsize")
+elif system == "Linux":
+    mem_bytes = linux_mem_total()
+
+workers_by_mem = None
+if mem_bytes:
+    mem_gb = mem_bytes / (1024 ** 3)
+    # Roughly budget 1.5 GB per worker to stay safe on 8 GB variants.
+    workers_by_mem = max(1, int(mem_gb // 1.5))
+
+workers = usable_cores
+if workers_by_mem:
+    workers = min(workers, workers_by_mem)
+
+print(max(2, workers))
 PY
 }
 

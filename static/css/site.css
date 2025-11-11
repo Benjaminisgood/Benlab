@@ -7,6 +7,9 @@
   --benlab-purple: #b347ff;
   --benlab-dark: #0b1723;
   --benlab-rainbow: linear-gradient(118deg, var(--benlab-red), var(--benlab-orange), var(--benlab-yellow), var(--benlab-green), var(--benlab-blue), var(--benlab-purple));
+  --benlab-button-gradient: linear-gradient(120deg, #ff7a8a, #f7b267, #ffe072, #45d3b3, #6faefc, #cfa1ff);
+  --benlab-button-shadow: 0 16px 32px rgba(15, 20, 44, 0.28);
+  --benlab-button-shadow-hover: 0 22px 44px rgba(15, 20, 44, 0.35);
   --navbar-gradient: linear-gradient(120deg, rgba(228, 3, 3, 0.9), rgba(10, 199, 132, 0.92), rgba(58, 123, 255, 0.92));
   --navbar-border: rgba(255, 255, 255, 0.45);
   --navbar-shadow: 0 28px 60px rgba(9, 16, 31, 0.42);
@@ -156,6 +159,9 @@
   --benlab-shadow-lg: 0 55px 110px rgba(0, 0, 0, 0.85);
   --benlab-shadow-md: 0 30px 70px rgba(0, 0, 0, 0.65);
   --benlab-shadow-sm: 0 18px 38px rgba(0, 0, 0, 0.55);
+  --benlab-button-gradient: linear-gradient(120deg, #ff94a9, #f8c078, #fbe68a, #34d3b0, #7fc4ff, #d7b6ff);
+  --benlab-button-shadow: 0 20px 38px rgba(0, 0, 0, 0.65);
+  --benlab-button-shadow-hover: 0 28px 50px rgba(0, 0, 0, 0.75);
   --bs-primary: #f199ff;
   --bs-primary-rgb: 241, 153, 255;
   --bs-secondary: #9fb0df;
@@ -554,8 +560,8 @@ body {
 .btn-primary,
 .btn-gradient {
   border: none;
-  background-image: var(--benlab-rainbow);
-  box-shadow: 0 18px 38px rgba(var(--bs-primary-rgb), 0.35);
+  background-image: var(--benlab-button-gradient);
+  box-shadow: var(--benlab-button-shadow);
   color: #fff;
 }
 
@@ -563,7 +569,7 @@ body {
 .btn-primary:focus,
 .btn-gradient:hover,
 .btn-gradient:focus {
-  box-shadow: 0 25px 50px rgba(var(--bs-primary-rgb), 0.45);
+  box-shadow: var(--benlab-button-shadow-hover);
 }
 
 .btn-outline-primary {

@@ -460,10 +460,13 @@
             <img id="photoPreview" src="" alt="头像预览" class="avatar-preview-img" hidden>
           </div>
           <div class="d-flex flex-column gap-2 flex-grow-1">
-            <input type="file" id="photoInput" name="photo" accept="image/*" class="form-control">
+            <input type="file" id="photoInput" name="photo" accept="image/*" class="form-control" data-direct-upload="oss" data-remote-field="photo_remote_keys">
             <div class="form-text">
               支持 JPG / PNG，建议选择清晰的方形图片，文件小于 5MB。选择后会立即预览，保存即可更新头像。
             </div>
+            {% if direct_upload_config.enabled %}
+            <div class="form-text text-success">如果启用了 OSS，头像会直接上传到 OSS 并将链接保存到资料中。</div>
+            {% endif %}
             {% if member.photo %}
               <a href="{{ uploaded_image_url(member.photo) }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary align-self-start">查看当前头像</a>
             {% endif %}

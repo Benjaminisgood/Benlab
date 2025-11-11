@@ -72,9 +72,13 @@ python app.py
 | `PORT` / `FLASK_RUN_PORT` / `BENSCI_PORT` | `5001` | 多级端口回退，优先级 `PORT` → `FLASK_RUN_PORT` → `BENSCI_PORT` |
 | `SQLALCHEMY_DATABASE_URI` | `sqlite:///lab.db?timeout=30` | 支持改为 PostgreSQL/MySQL 等，例如 `postgresql+psycopg://user:pass@host/db` |
 | `UPLOAD_FOLDER` | `./images` | 上传文件保存目录，默认位于项目根目录 |
-| `MAX_CONTENT_LENGTH` | `16 * 1024 * 1024` | 上传文件体积上限（16MB） |
+| `MEDIA_STORAGE_MODE` | `auto` | 媒资上传存储策略：`auto`（能用 OSS 就用，失败退回本地）、`oss`（强制 OSS，配置缺失会报错）、`local`（始终使用本地 `UPLOAD_FOLDER`） |
+| `ENABLE_DIRECT_OSS_UPLOAD` | `true` | 当启用 OSS 时允许前端直接上传到 OSS 并回传对象键，`false` 可恢复为服务器中转上传 |
+| `MAX_CONTENT_LENGTH` | `2500 * 1024 * 1024` | 上传文件体积上限（2500MB） |
 
 > 若使用 `.env` / `.flaskenv` 管理变量，可借助 `python-dotenv` 自动加载。
+
+> 使用提供的 `benlab.sh start` 管理脚本时，会自动在项目根目录加载 `.env` 并导出环境变量，无需手动 `export`。
 
 ## 目录结构
 ```text

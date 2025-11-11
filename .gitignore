@@ -6,6 +6,8 @@ static/**/*
 !static/fonts/*.ttf
 !static/fonts/*.otf
 !static/fonts/*.ttc
+!static/js/
+!static/js/*.js
 *.pyc
 *.sqlite3
 instance/

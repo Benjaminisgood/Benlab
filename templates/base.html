@@ -190,6 +190,10 @@
       max-height: 260px;
       border-radius: 0.5rem;
       outline: none;
+      background: #000;
+    }
+    .media-card video {
+      object-fit: cover;
     }
     .media-empty {
       border: 1px dashed var(--bs-border-color);
@@ -371,6 +375,10 @@
 
   <!-- 引入 Bootstrap JS (含 Popper) -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    window.BenlabUploadConfig = {{ (direct_upload_config or {'enabled': False}) | tojson }};
+  </script>
+  <script src="{{ url_for('static', filename='js/direct_upload.js') }}" defer></script>
   <!-- 启用 Bootstrap 工具提示（如需） -->
   <script>
     var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));

@@ -68,14 +68,29 @@ app.config['PREFERRED_URL_SCHEME'] = os.getenv('PREFERRED_URL_SCHEME', 'https')
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # app.config['UPLOAD_FOLDER'] = os.path.join(BASE_DIR, 'static', 'images')
 app.config['UPLOAD_FOLDER'] = os.path.join(BASE_DIR, 'images')
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 限制上传16MB以内的文件
+app.config['MAX_CONTENT_LENGTH'] = 2500 * 1024 * 1024  # 限制上传2500MB以内的文件
 OSS_ENDPOINT = os.getenv('ALIYUN_OSS_ENDPOINT')
 OSS_ACCESS_KEY_ID = os.getenv('ALIYUN_OSS_ACCESS_KEY_ID')
 OSS_ACCESS_KEY_SECRET = os.getenv('ALIYUN_OSS_ACCESS_KEY_SECRET')
 OSS_BUCKET_NAME = os.getenv('ALIYUN_OSS_BUCKET')
 OSS_PREFIX = (os.getenv('ALIYUN_OSS_PREFIX') or '').strip('/ ')
 OSS_PUBLIC_BASE_URL = (os.getenv('ALIYUN_OSS_PUBLIC_BASE_URL') or '').rstrip('/')
-USE_OSS = bool(oss2 and OSS_ENDPOINT and OSS_ACCESS_KEY_ID and OSS_ACCESS_KEY_SECRET and OSS_BUCKET_NAME)
+MEDIA_STORAGE_MODE = (os.getenv('MEDIA_STORAGE_MODE') or 'auto').strip().lower()
+if MEDIA_STORAGE_MODE not in {'auto', 'oss', 'local'}:
+    MEDIA_STORAGE_MODE = 'auto'
+app.config['MEDIA_STORAGE_MODE'] = MEDIA_STORAGE_MODE
+_oss_env_ready = bool(OSS_ENDPOINT and OSS_ACCESS_KEY_ID and OSS_ACCESS_KEY_SECRET and OSS_BUCKET_NAME)
+_can_use_oss = bool(oss2 and _oss_env_ready)
+if MEDIA_STORAGE_MODE == 'oss':
+    if not _can_use_oss:
+        raise RuntimeError(
+            'MEDIA_STORAGE_MODE=oss 但 OSS 配置或 oss2 依赖缺失，请检查环境变量与依赖安装。'
+        )
+    USE_OSS = True
+elif MEDIA_STORAGE_MODE == 'local':
+    USE_OSS = False
+else:
+    USE_OSS = _can_use_oss
 app.config['USE_OSS'] = USE_OSS
 if USE_OSS:
     app.config['OSS_ENDPOINT'] = OSS_ENDPOINT
@@ -84,6 +99,18 @@ if USE_OSS:
     app.config['OSS_BUCKET'] = OSS_BUCKET_NAME
 app.config['OSS_PREFIX'] = OSS_PREFIX
 app.config['OSS_PUBLIC_BASE_URL'] = OSS_PUBLIC_BASE_URL
+_direct_upload_flag = os.getenv('ENABLE_DIRECT_OSS_UPLOAD')
+if _direct_upload_flag is None:
+    _enable_direct_upload = True
+else:
+    _enable_direct_upload = _direct_upload_flag.strip().lower() not in {'0', 'false', 'no', 'off'}
+try:
+    direct_upload_expiration = int(os.getenv('DIRECT_UPLOAD_URL_EXPIRATION', '900'))
+except (TypeError, ValueError):
+    direct_upload_expiration = 900
+app.config['DIRECT_OSS_UPLOAD_ENABLED'] = bool(USE_OSS and _enable_direct_upload)
+app.config['DIRECT_UPLOAD_URL_EXPIRATION'] = max(60, direct_upload_expiration)
+REMOTE_FIELD_SUFFIX = '_remote_keys'
 _oss_bucket = None
 
 UTC = timezone.utc
@@ -1304,15 +1331,21 @@ def _get_oss_bucket():
     return _oss_bucket
 
 
+def _generate_stored_filename(original_name):
+    sanitized = secure_filename(original_name or '')
+    if not sanitized:
+        sanitized = 'upload'
+    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
+    return f"{timestamp}_{sanitized}"
+
+
 def save_uploaded_media(file_storage):
     """Persist an uploaded media file and return the stored filename."""
     if not file_storage or file_storage.filename == '':
         return None
     if not allowed_file(file_storage.filename):
         return None
-    filename = secure_filename(file_storage.filename)
-    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
-    stored_name = f"{timestamp}_{filename}"
+    stored_name = _generate_stored_filename(file_storage.filename)
     if app.config.get('USE_OSS'):
         bucket = _get_oss_bucket()
         prefix = app.config.get('OSS_PREFIX')
@@ -1372,6 +1405,67 @@ def _build_oss_url(key):
     endpoint = endpoint.replace('https://', '').replace('http://', '')
     bucket = app.config.get('OSS_BUCKET')
     return f"https://{bucket}.{endpoint}/{key}"
+
+
+def _normalize_object_key(value):
+    if not value:
+        return None
+    token = str(value).strip().replace('\\', '/')
+    token = token.lstrip('/')
+    if not token or '..' in token or token.startswith('http://') or token.startswith('https://'):
+        return None
+    return token
+
+
+def _collect_remote_object_keys(field_name):
+    if not field_name or not app.config.get('USE_OSS') or not app.config.get('DIRECT_OSS_UPLOAD_ENABLED'):
+        return []
+    remote_field = f"{field_name}{REMOTE_FIELD_SUFFIX}"
+    seen = set()
+    refs = []
+    for raw in request.form.getlist(remote_field):
+        normalized = _normalize_object_key(raw)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        refs.append(normalized)
+    return refs
+
+
+def _append_media_records(collection, model_cls, filenames):
+    if not filenames:
+        return
+    existing = {getattr(entry, 'filename') for entry in collection if getattr(entry, 'filename', None)}
+    for name in filenames:
+        if not name or name in existing:
+            continue
+        collection.append(model_cls(filename=name))
+        existing.add(name)
+
+
+def _build_direct_upload_config():
+    enabled = bool(app.config.get('DIRECT_OSS_UPLOAD_ENABLED'))
+    config = {
+        'enabled': enabled,
+        'field_suffix': REMOTE_FIELD_SUFFIX
+    }
+    if not enabled:
+        return config
+    max_size = app.config.get('MAX_CONTENT_LENGTH')
+    if max_size and max_size > 0:
+        if max_size >= 1024 * 1024:
+            human_size = f"{max_size / (1024 * 1024):.1f} MB"
+        else:
+            human_size = f"{max_size / 1024:.0f} KB"
+    else:
+        human_size = None
+    config.update({
+        'presign_url': url_for('create_direct_oss_upload'),
+        'max_size': max_size,
+        'max_size_label': human_size,
+        'storage': 'oss'
+    })
+    return config
 
 # 数据模型定义
 class Member(UserMixin, db.Model):
@@ -1942,6 +2036,49 @@ def logout():
 def uploaded_file(filename):
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
+
+@app.route('/api/uploads/oss/presign', methods=['POST'])
+@login_required
+def create_direct_oss_upload():
+    if not app.config.get('DIRECT_OSS_UPLOAD_ENABLED'):
+        abort(404)
+    if not app.config.get('USE_OSS'):
+        abort(404)
+    bucket = _get_oss_bucket()
+    if bucket is None:
+        abort(503)
+    payload = request.get_json(silent=True) or {}
+    filename = (payload.get('filename') or '').strip()
+    content_type = (payload.get('content_type') or 'application/octet-stream').strip() or 'application/octet-stream'
+    if not filename:
+        return jsonify({'error': 'missing_filename'}), 400
+    if not allowed_file(filename):
+        return jsonify({'error': 'unsupported_type'}), 400
+    max_size = app.config.get('MAX_CONTENT_LENGTH')
+    declared_size = payload.get('size') or payload.get('filesize')
+    if declared_size is not None:
+        try:
+            declared_size_value = int(declared_size)
+        except (TypeError, ValueError):
+            declared_size_value = None
+        if declared_size_value is not None and max_size and declared_size_value > max_size:
+            return jsonify({'error': 'file_too_large', 'max_size': max_size}), 400
+    stored_name = _generate_stored_filename(filename)
+    prefix = app.config.get('OSS_PREFIX')
+    object_key = f"{prefix}/{stored_name}" if prefix else stored_name
+    expires = app.config.get('DIRECT_UPLOAD_URL_EXPIRATION', 900)
+    headers = {'Content-Type': content_type}
+    upload_url = bucket.sign_url('PUT', object_key, expires, headers=headers)
+    return jsonify({
+        'object_key': object_key,
+        'upload_url': upload_url,
+        'headers': headers,
+        'access_url': _build_oss_url(object_key),
+        'expires_in': expires,
+        'max_size': max_size
+    })
+
+
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if current_user.is_authenticated:
@@ -2304,6 +2441,9 @@ def add_event():
         cleaned_files = [f for f in uploaded_event_files if f and getattr(f, 'filename', '')]
         if cleaned_files:
             add_event_images(event, cleaned_files)
+        remote_event_refs = _collect_remote_object_keys('event_images')
+        if remote_event_refs:
+            _append_media_records(event.images, EventImage, remote_event_refs)
         external_urls = _extract_external_urls(request.form.get('external_event_image_urls'))
         if external_urls:
             existing_refs = {img.filename for img in event.images}
@@ -2561,6 +2701,9 @@ def edit_event(event_id):
         cleaned_files = [f for f in uploaded_event_files if f and getattr(f, 'filename', '')]
         if cleaned_files:
             add_event_images(event, cleaned_files)
+        remote_event_refs = _collect_remote_object_keys('event_images')
+        if remote_event_refs:
+            _append_media_records(event.images, EventImage, remote_event_refs)
         external_urls = _extract_external_urls(request.form.get('external_event_image_urls'))
         if external_urls:
             existing_refs = {img.filename for img in event.images}
@@ -2991,6 +3134,9 @@ def edit_item(item_id):
             stored_name = save_uploaded_media(image_file)
             if stored_name:
                 item.images.append(ItemImage(filename=stored_name))
+        remote_refs = _collect_remote_object_keys('images')
+        if remote_refs:
+            _append_media_records(item.images, ItemImage, remote_refs)
 
         external_urls = _extract_external_urls(request.form.get('external_image_urls'))
         if external_urls:
@@ -3253,6 +3399,7 @@ def add_location():
             stored_name = save_uploaded_media(image_file)
             if stored_name:
                 saved_filenames.append(stored_name)
+        saved_filenames.extend(_collect_remote_object_keys('images'))
         external_urls = _extract_external_urls(request.form.get('external_image_urls'))
         primary_image = saved_filenames[0] if saved_filenames else (external_urls[0] if external_urls else None)
         # 先创建 Location
@@ -3350,6 +3497,9 @@ def edit_location(loc_id):
             stored_name = save_uploaded_media(image_file)
             if stored_name:
                 location.images.append(LocationImage(filename=stored_name))
+        remote_refs = _collect_remote_object_keys('images')
+        if remote_refs:
+            _append_media_records(location.images, LocationImage, remote_refs)
 
         external_urls = _extract_external_urls(request.form.get('external_image_urls'))
         if external_urls:
@@ -3924,15 +4074,23 @@ def edit_profile(member_id):
         if new_password and new_password.strip() != '':
             member.set_password(new_password)
         # 更新头像
-        image_file = request.files.get('photo')
-        if image_file and image_file.filename != '' and allowed_file(image_file.filename):
-            if determine_media_kind(image_file.filename) != 'image':
-                flash('头像仅支持图片格式，请选择 JPG / PNG 等常见格式。', 'warning')
-            else:
-                stored_name = save_uploaded_media(image_file)
-                if stored_name:
-                    remove_uploaded_file(member.photo)
-                    member.photo = stored_name
+        new_photo_ref = None
+        remote_photo_keys = _collect_remote_object_keys('photo')
+        if remote_photo_keys:
+            new_photo_ref = remote_photo_keys[-1]
+        else:
+            image_file = request.files.get('photo')
+            if image_file and image_file.filename != '' and allowed_file(image_file.filename):
+                if determine_media_kind(image_file.filename) != 'image':
+                    flash('头像仅支持图片格式，请选择 JPG / PNG 等常见格式。', 'warning')
+                else:
+                    stored_name = save_uploaded_media(image_file)
+                    if stored_name:
+                        new_photo_ref = stored_name
+        if new_photo_ref:
+            if member.photo and member.photo != new_photo_ref:
+                remove_uploaded_file(member.photo)
+            member.photo = new_photo_ref
         member.last_modified = datetime.utcnow()
         db.session.commit()
         flash('个人信息已更新', 'success')
@@ -4087,6 +4245,7 @@ def inject_image_helpers():
         media_kind=determine_media_kind,
         media_kind_labels=MEDIA_KIND_LABELS,
         media_display_name=media_display_name,
+        direct_upload_config=_build_direct_upload_config(),
     )
 
 if __name__ == "__main__":

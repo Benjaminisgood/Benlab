@@ -1,47 +1,3 @@
-{% macro render_media_placeholder(kind, media, media_kind_labels, overlay_id, enable_fullscreen) -%}
-  {% set kind_label = media_kind_labels.get(kind, '媒体') %}
-  <div class="media-placeholder" data-kind="{{ kind }}">
-    <div class="media-placeholder-header">
-      <span class="media-tag">{{ kind_label }}</span>
-    </div>
-    {% if enable_fullscreen %}
-    <div class="media-actions">
-      <button type="button"
-              class="btn btn-sm {{ 'btn-primary' if kind == 'video' else 'btn-outline-primary' }} media-play-btn"
-              data-action="open-fullscreen"
-              data-overlay-target="{{ overlay_id }}"
-              data-kind="{{ kind }}"
-              data-src="{{ media.url|e }}"
-              data-name="{{ (media.display_name or kind_label)|e }}"
-              aria-label="在大屏播放{{ (media.display_name or kind_label)|e }}">
-        {{ '点击播放' if kind == 'video' else '播放音频' }}
-      </button>
-      <a href="{{ media.url|e }}"
-         class="btn btn-sm btn-outline-secondary media-download-btn"
-         download="{{ (media.display_name or kind_label)|e }}"
-         aria-label="下载{{ (media.display_name or kind_label)|e }}">
-        下载
-      </a>
-    </div>
-    {% else %}
-    <div class="media-actions">
-      <a href="{{ media.url|e }}"
-         class="btn btn-sm {{ 'btn-primary' if kind == 'video' else 'btn-outline-primary' }}"
-         target="_blank" rel="noopener"
-         aria-label="{{ ('点击播放' if kind == 'video' else '播放音频') }} {{ (media.display_name or kind_label)|e }}">
-        {{ '点击播放' if kind == 'video' else '播放音频' }}
-      </a>
-      <a href="{{ media.url|e }}"
-         class="btn btn-sm btn-outline-secondary media-download-btn"
-         download="{{ (media.display_name or kind_label)|e }}"
-         aria-label="下载{{ (media.display_name or kind_label)|e }}">
-        下载
-      </a>
-    </div>
-    {% endif %}
-  </div>
-{%- endmacro %}
-
 {% macro render_media_gallery(entries, gallery_id, media_kind_labels, empty_text='暂无媒体文件', options=None) -%}
   {% set overlay_id = (gallery_id|string) ~ '-overlay' %}
   {% set gallery_class = options.gallery_class if options and options.gallery_class is not none else 'media-gallery' %}
@@ -93,8 +49,56 @@
         {% if media.description %}
         <p class="media-description">{{ media.description }}</p>
         {% endif %}
-        {% elif kind == 'video' or kind == 'audio' %}
-        {{ render_media_placeholder(kind, media, media_kind_labels, overlay_id, enable_fullscreen) }}
+        {% elif kind == 'video' %}
+        <figure class="media-card-figure">
+          <video class="media-card-video"
+                 muted
+                 playsinline
+                 loop
+                 autoplay
+                 controls
+                 preload="metadata"
+                 poster="{{ media.poster|default('') }}"
+                 aria-label="{{ (media.display_name or media_kind_labels.get('video', '视频'))|e }}">
+            <source src="{{ media.url|e }}" type="{{ media.mimetype or 'video/mp4' }}">
+            您的浏览器不支持视频播放。
+          </video>
+        </figure>
+        <div class="media-actions">
+          {% if enable_fullscreen %}
+          <button type="button"
+                  class="btn btn-sm btn-primary media-play-btn"
+                  data-action="open-fullscreen"
+                  data-overlay-target="{{ overlay_id }}"
+                  data-kind="video"
+                  data-src="{{ media.url|e }}"
+                  data-name="{{ (media.display_name or media_kind_labels.get('video', '视频'))|e }}">
+            全屏播放
+          </button>
+          {% endif %}
+          <a href="{{ media.url|e }}"
+             class="btn btn-sm btn-outline-secondary media-download-btn"
+             download="{{ (media.display_name or media_kind_labels.get('video', '视频'))|e }}">
+            下载
+          </a>
+        </div>
+        {% elif kind == 'audio' %}
+        <figure class="media-card-figure media-card-audio-figure">
+          <audio class="media-card-audio"
+                 controls
+                 preload="metadata"
+                 aria-label="{{ (media.display_name or media_kind_labels.get('audio', '音频'))|e }}">
+            <source src="{{ media.url|e }}" type="{{ media.mimetype or 'audio/mpeg' }}">
+            您的浏览器不支持音频播放。
+          </audio>
+        </figure>
+        <div class="media-actions">
+          <a href="{{ media.url|e }}"
+             class="btn btn-sm btn-outline-secondary media-download-btn"
+             download="{{ (media.display_name or media_kind_labels.get('audio', '音频'))|e }}">
+            下载
+          </a>
+        </div>
         {% else %}
         <div class="media-file-link">
           <span class="media-tag">{{ media_kind_labels.get(kind, '文件') }}</span>

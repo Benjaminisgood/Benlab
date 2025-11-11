@@ -140,7 +140,11 @@
       {% endif %}
     </div>
     {% endif %}
-    <input type="file" id="imageInput" name="images" accept="image/*,video/*,audio/*" class="form-control" multiple>
+    <input type="file" id="imageInput" name="images" accept="image/*,video/*,audio/*" class="form-control" multiple data-direct-upload="oss" data-remote-field="images_remote_keys">
+    <div class="form-text">支持多图上传，单个文件建议小于 16 MB。</div>
+    {% if direct_upload_config.enabled %}
+    <div class="form-text text-success">启用 OSS 时，将直接上传至 OSS 并回填引用，避免占用服务器带宽。</div>
+    {% endif %}
     <div class="mt-3">
       <label for="locationExternalImageUrls" class="form-label">外部媒体链接</label>
       <textarea class="form-control" id="locationExternalImageUrls" name="external_image_urls" rows="2" placeholder="每行一个 http(s):// 链接"></textarea>

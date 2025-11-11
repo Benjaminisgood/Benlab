@@ -43,8 +43,11 @@
       </div>
       <div class="mb-3">
         <label class="form-label" for="event_images">活动媒体（图片 / 视频 / 音频）</label>
-        <input type="file" class="form-control" id="event_images" name="event_images" accept="image/*,video/*,audio/*" multiple>
-        <div class="form-text">支持批量上传，单个文件建议小于 16 MB。</div>
+        <input type="file" class="form-control" id="event_images" name="event_images" accept="image/*,video/*,audio/*" multiple data-direct-upload="oss" data-remote-field="event_images_remote_keys">
+        <div class="form-text">支持批量上传，单个文件建议小于 2500 MB。</div>
+        {% if direct_upload_config.enabled %}
+        <div class="form-text text-success">文件选择后将直接上传到 OSS，上传完毕后提交表单即可。</div>
+        {% endif %}
         <div class="mt-3">
           <label class="form-label" for="externalEventImageUrls">外部媒体链接</label>
           <textarea class="form-control" id="externalEventImageUrls" name="external_event_image_urls" rows="2" placeholder="每行一个 http(s):// 链接">{{ form_state.external_image_urls }}</textarea>

@@ -15,6 +15,9 @@
   {% set selected_locations = form_state.location_ids | list %}
   {% set selected_items = form_state.item_ids | list %}
   {% set selected_participants = form_state.participant_ids | list %}
+  <input type="hidden" name="location_selection_touched" id="locationSelectionTouched" value="{{ form_state.location_selection_touched or '0' }}">
+  <input type="hidden" name="item_selection_touched" id="itemSelectionTouched" value="{{ form_state.item_selection_touched or '0' }}">
+  <input type="hidden" name="participant_selection_touched" id="participantSelectionTouched" value="{{ form_state.participant_selection_touched or '0' }}">
   <div class="row g-3">
     <div class="col-md-8">
       <div class="mb-3">
@@ -262,6 +265,15 @@
   const participantEditWrapper = document.getElementById('participantEditWrapper');
   const participantEditToggle = document.getElementById('allowParticipantEditToggle');
   const participantCheckboxes = Array.prototype.slice.call(document.querySelectorAll('.event-participant-checkbox'));
+  const locationSelectionTouchedInput = document.getElementById('locationSelectionTouched');
+  const itemSelectionTouchedInput = document.getElementById('itemSelectionTouched');
+  const participantSelectionTouchedInput = document.getElementById('participantSelectionTouched');
+
+  function markSelectionTouched(input) {
+    if (input) {
+      input.value = '1';
+    }
+  }
 
   function initSelectionControl(config) {
     const summary = document.getElementById(config.summaryId);
@@ -289,8 +301,14 @@
         }).join('');
       }
     };
+    const notifySelectionChanged = typeof config.onSelectionChanged === 'function' ? config.onSelectionChanged : null;
     checkboxes.forEach(function (cb) {
-      cb.addEventListener('change', updateSummary);
+      cb.addEventListener('change', function () {
+        if (notifySelectionChanged) {
+          notifySelectionChanged();
+        }
+        updateSummary();
+      });
     });
     if (searchInput) {
       searchInput.addEventListener('input', function () {
@@ -304,6 +322,9 @@
     if (clearBtn) {
       clearBtn.addEventListener('click', function () {
         checkboxes.forEach(function (cb) { if (!cb.disabled) { cb.checked = false; } });
+        if (notifySelectionChanged) {
+          notifySelectionChanged();
+        }
         updateSummary();
       });
     }
@@ -330,7 +351,8 @@
     rowSelector: '.event-location-row',
     searchInputId: 'eventLocationsSearch',
     clearBtnId: 'eventLocationsClearBtn',
-    emptyText: '未选择地点'
+    emptyText: '未选择地点',
+    onSelectionChanged: function () { markSelectionTouched(locationSelectionTouchedInput); }
   });
 
   const itemsControl = initSelectionControl({
@@ -340,7 +362,8 @@
     rowSelector: '.event-item-row',
     searchInputId: 'eventItemsSearch',
     clearBtnId: 'eventItemsClearBtn',
-    emptyText: '未选择物品'
+    emptyText: '未选择物品',
+    onSelectionChanged: function () { markSelectionTouched(itemSelectionTouchedInput); }
   });
 
   const participantsControl = initSelectionControl({
@@ -350,7 +373,8 @@
     rowSelector: '.event-participant-row',
     searchInputId: 'eventParticipantsSearch',
     clearBtnId: 'eventParticipantsClearBtn',
-    emptyText: '未选择成员'
+    emptyText: '未选择成员',
+    onSelectionChanged: function () { markSelectionTouched(participantSelectionTouchedInput); }
   });
 
   function toggleParticipants() {

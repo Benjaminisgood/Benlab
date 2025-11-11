@@ -2364,7 +2364,10 @@ def add_event():
         'participant_ids': [],
         'detail_link': '',
         'external_image_urls': '',
-        'allow_participant_edit': False
+        'allow_participant_edit': False,
+        'participant_selection_touched': '0',
+        'location_selection_touched': '0',
+        'item_selection_touched': '0'
     }
     if request.method == 'POST':
         title = (request.form.get('title') or '').strip()
@@ -2385,7 +2388,7 @@ def add_event():
             allow_participant_edit = False
 
         available_member_ids = {member.id for member in members}
-        participant_ids = {pid for pid in participant_ids if pid in available_member_ids and pid != event.owner_id}
+        participant_ids = {pid for pid in participant_ids if pid in available_member_ids and pid != current_user.id}
 
         errors = []
         if not title:
@@ -2406,7 +2409,10 @@ def add_event():
             'participant_ids': list(participant_ids),
             'detail_link': detail_link,
             'external_image_urls': request.form.get('external_event_image_urls', ''),
-            'allow_participant_edit': allow_participant_edit
+            'allow_participant_edit': allow_participant_edit,
+            'participant_selection_touched': request.form.get('participant_selection_touched', '0'),
+            'location_selection_touched': request.form.get('location_selection_touched', '0'),
+            'item_selection_touched': request.form.get('item_selection_touched', '0')
         }
 
         if errors:
@@ -2611,22 +2617,35 @@ def edit_event(event_id):
         end_raw = request.form.get('end_time')
         start_time = parse_datetime_local(start_raw)
         end_time = parse_datetime_local(end_raw)
+        existing_item_ids = {item.id for item in event.items}
+        existing_location_ids = {loc.id for loc in event.locations}
         item_ids = _collect_selected_ids(request.form.getlist('item_ids'))
         location_ids = _collect_selected_ids(request.form.getlist('location_ids'))
+        existing_participant_ids = {
+            link.member_id for link in event.participant_links
+            if link.member_id != event.owner_id
+        }
         participant_ids = _collect_selected_ids(request.form.getlist('participant_ids'))
+        participant_selection_touched = request.form.get('participant_selection_touched') == '1'
+        location_selection_touched = request.form.get('location_selection_touched') == '1'
+        item_selection_touched = request.form.get('item_selection_touched') == '1'
         detail_link = (request.form.get('detail_link') or '').strip()
         allow_participant_edit = request.form.get('allow_participant_edit') in {'1', 'true', 'on'}
         if visibility != 'internal':
             allow_participant_edit = False
         can_manage_members = current_user.id == event.owner_id
         if not can_manage_members:
-            participant_ids = {
-                link.member_id for link in event.participant_links
-                if link.member_id != event.owner_id
-            }
+            participant_ids = set(existing_participant_ids)
+        elif not participant_selection_touched and not participant_ids and existing_participant_ids:
+            participant_ids = set(existing_participant_ids)
+
+        if not location_selection_touched and not location_ids and existing_location_ids:
+            location_ids = set(existing_location_ids)
+        if not item_selection_touched and not item_ids and existing_item_ids:
+            item_ids = set(existing_item_ids)
 
         available_member_ids = {member.id for member in members}
-        participant_ids = {pid for pid in participant_ids if pid in available_member_ids and pid != current_user.id}
+        participant_ids = {pid for pid in participant_ids if pid in available_member_ids and pid != event.owner_id}
 
         errors = []
         if not title:
@@ -2647,7 +2666,10 @@ def edit_event(event_id):
             'participant_ids': list(participant_ids),
             'detail_link': detail_link,
             'external_image_urls': request.form.get('external_event_image_urls', ''),
-            'allow_participant_edit': allow_participant_edit
+            'allow_participant_edit': allow_participant_edit,
+            'participant_selection_touched': '1' if participant_selection_touched else '0',
+            'location_selection_touched': '1' if location_selection_touched else '0',
+            'item_selection_touched': '1' if item_selection_touched else '0'
         }
 
         if errors:
@@ -2744,7 +2766,10 @@ def edit_event(event_id):
         'participant_ids': [link.member_id for link in event.participant_links if link.member_id != event.owner_id],
         'detail_link': event.detail_link or '',
         'external_image_urls': '',
-        'allow_participant_edit': bool(getattr(event, 'allow_participant_edit', False))
+        'allow_participant_edit': bool(getattr(event, 'allow_participant_edit', False)),
+        'participant_selection_touched': '0',
+        'location_selection_touched': '0',
+        'item_selection_touched': '0'
     }
     return render_template('event_form.html', event=event, members=members, items=items, locations=locations, form_state=form_state)
 

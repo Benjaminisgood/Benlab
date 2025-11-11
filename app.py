@@ -2152,6 +2152,29 @@ def _collect_selected_ids(raw_list):
     return selected
 
 
+def _merge_selection_ids(new_ids, existing_ids, touched_flag):
+    """
+    Normalize selection lists coming from the form.
+
+    If the browser sent a non-empty list we always trust it, even when the
+    “touched” hidden flag failed to flip (this happens on Safari when the
+    modal markup is cached). When the browser sent nothing, we only treat it
+    as “cleared” if the hidden flag was set; otherwise we assume the user
+    never re-opened that modal and keep the previously stored IDs.
+    """
+    existing_ids = set(existing_ids or [])
+    new_ids = set(new_ids or [])
+    if new_ids:
+        if new_ids != existing_ids:
+            touched_flag = True
+        return new_ids, touched_flag
+    if touched_flag:
+        # User explicitly cleared the selection
+        return set(), True
+    # Browser submitted nothing — reuse what we already have
+    return existing_ids, False
+
+
 def build_lab_universe_graph(center_member):
     """Build a universe graph centered on the given member."""
     nodes = {}
@@ -2367,7 +2390,9 @@ def add_event():
         'allow_participant_edit': False,
         'participant_selection_touched': '0',
         'location_selection_touched': '0',
-        'item_selection_touched': '0'
+        'item_selection_touched': '0',
+        'start_time_touched': '0',
+        'end_time_touched': '0'
     }
     if request.method == 'POST':
         title = (request.form.get('title') or '').strip()
@@ -2412,7 +2437,9 @@ def add_event():
             'allow_participant_edit': allow_participant_edit,
             'participant_selection_touched': request.form.get('participant_selection_touched', '0'),
             'location_selection_touched': request.form.get('location_selection_touched', '0'),
-            'item_selection_touched': request.form.get('item_selection_touched', '0')
+            'item_selection_touched': request.form.get('item_selection_touched', '0'),
+            'start_time_touched': request.form.get('start_time_touched', '0'),
+            'end_time_touched': request.form.get('end_time_touched', '0')
         }
 
         if errors:
@@ -2629,6 +2656,8 @@ def edit_event(event_id):
         participant_selection_touched = request.form.get('participant_selection_touched') == '1'
         location_selection_touched = request.form.get('location_selection_touched') == '1'
         item_selection_touched = request.form.get('item_selection_touched') == '1'
+        start_time_touched = request.form.get('start_time_touched') == '1'
+        end_time_touched = request.form.get('end_time_touched') == '1'
         detail_link = (request.form.get('detail_link') or '').strip()
         allow_participant_edit = request.form.get('allow_participant_edit') in {'1', 'true', 'on'}
         if visibility != 'internal':
@@ -2636,13 +2665,23 @@ def edit_event(event_id):
         can_manage_members = current_user.id == event.owner_id
         if not can_manage_members:
             participant_ids = set(existing_participant_ids)
-        elif not participant_selection_touched and not participant_ids and existing_participant_ids:
-            participant_ids = set(existing_participant_ids)
+            participant_selection_touched = False
+        else:
+            participant_ids, participant_selection_touched = _merge_selection_ids(
+                participant_ids, existing_participant_ids, participant_selection_touched
+            )
 
-        if not location_selection_touched and not location_ids and existing_location_ids:
-            location_ids = set(existing_location_ids)
-        if not item_selection_touched and not item_ids and existing_item_ids:
-            item_ids = set(existing_item_ids)
+        location_ids, location_selection_touched = _merge_selection_ids(
+            location_ids, existing_location_ids, location_selection_touched
+        )
+        item_ids, item_selection_touched = _merge_selection_ids(
+            item_ids, existing_item_ids, item_selection_touched
+        )
+
+        if not start_time_touched:
+            start_time = event.start_time
+        if not end_time_touched:
+            end_time = event.end_time
 
         available_member_ids = {member.id for member in members}
         participant_ids = {pid for pid in participant_ids if pid in available_member_ids and pid != event.owner_id}
@@ -2669,7 +2708,9 @@ def edit_event(event_id):
             'allow_participant_edit': allow_participant_edit,
             'participant_selection_touched': '1' if participant_selection_touched else '0',
             'location_selection_touched': '1' if location_selection_touched else '0',
-            'item_selection_touched': '1' if item_selection_touched else '0'
+            'item_selection_touched': '1' if item_selection_touched else '0',
+            'start_time_touched': '1' if start_time_touched else '0',
+            'end_time_touched': '1' if end_time_touched else '0'
         }
 
         if errors:
@@ -2769,7 +2810,9 @@ def edit_event(event_id):
         'allow_participant_edit': bool(getattr(event, 'allow_participant_edit', False)),
         'participant_selection_touched': '0',
         'location_selection_touched': '0',
-        'item_selection_touched': '0'
+        'item_selection_touched': '0',
+        'start_time_touched': '0',
+        'end_time_touched': '0'
     }
     return render_template('event_form.html', event=event, members=members, items=items, locations=locations, form_state=form_state)
 

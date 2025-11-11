@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 {% set is_edit = event is not none %}
+{% set form_id = 'eventForm' %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h2 class="mb-0">{{ '编辑事项' if is_edit else '新建事项' }}</h2>
   {% if is_edit and event.owner_id == current_user.id %}
@@ -10,7 +11,7 @@
   {% endif %}
 </div>
 
-<form method="post" class="needs-validation" novalidate enctype="multipart/form-data">
+<form method="post" id="{{ form_id }}" class="needs-validation" novalidate enctype="multipart/form-data">
   {% set owner_controls = (not is_edit) or (event and event.owner_id == current_user.id) %}
   {% set selected_locations = form_state.location_ids | list %}
   {% set selected_items = form_state.item_ids | list %}
@@ -18,6 +19,8 @@
   <input type="hidden" name="location_selection_touched" id="locationSelectionTouched" value="{{ form_state.location_selection_touched or '0' }}">
   <input type="hidden" name="item_selection_touched" id="itemSelectionTouched" value="{{ form_state.item_selection_touched or '0' }}">
   <input type="hidden" name="participant_selection_touched" id="participantSelectionTouched" value="{{ form_state.participant_selection_touched or '0' }}">
+  <input type="hidden" name="start_time_touched" id="startTimeTouched" value="{{ form_state.start_time_touched or '0' }}">
+  <input type="hidden" name="end_time_touched" id="endTimeTouched" value="{{ form_state.end_time_touched or '0' }}">
   <div class="row g-3">
     <div class="col-md-8">
       <div class="mb-3">
@@ -167,7 +170,7 @@
         <div class="border rounded p-2" style="max-height: 320px; overflow-y: auto;">
           {% for location in locations %}
           <div class="form-check event-location-row py-1" data-label="{{ location.name|lower }}">
-            <input class="form-check-input event-location-checkbox" type="checkbox" name="location_ids" value="{{ location.id }}"
+            <input class="form-check-input event-location-checkbox" type="checkbox" form="{{ form_id }}" name="location_ids" value="{{ location.id }}"
                    id="eventLocation{{ location.id }}" data-label="{{ location.name }}"
                    {% if location.id in selected_locations %}checked{% endif %}>
             <label class="form-check-label d-flex justify-content-between align-items-center" for="eventLocation{{ location.id }}">
@@ -199,7 +202,7 @@
         <div class="border rounded p-2" style="max-height: 320px; overflow-y: auto;">
           {% for item in items %}
           <div class="form-check event-item-row py-1" data-label="{{ item.name|lower }}">
-            <input class="form-check-input event-item-checkbox" type="checkbox" name="item_ids" value="{{ item.id }}"
+            <input class="form-check-input event-item-checkbox" type="checkbox" form="{{ form_id }}" name="item_ids" value="{{ item.id }}"
                    id="eventItem{{ item.id }}" data-label="{{ item.name }}"
                    {% if item.id in selected_items %}checked{% endif %}>
             <label class="form-check-label d-flex justify-content-between align-items-center" for="eventItem{{ item.id }}">
@@ -232,7 +235,7 @@
           {% for member in members %}
           {% if member.id != current_user.id %}
           <div class="form-check event-participant-row py-1" data-label="{{ (member.name or member.username)|lower }}">
-            <input class="form-check-input event-participant-checkbox" type="checkbox" name="participant_ids" value="{{ member.id }}"
+            <input class="form-check-input event-participant-checkbox" type="checkbox" form="{{ form_id }}" name="participant_ids" value="{{ member.id }}"
                    id="eventParticipant{{ member.id }}" data-label="{{ member.name or member.username }}"
                    {% if member.id in selected_participants %}checked{% endif %}>
             <label class="form-check-label d-flex justify-content-between align-items-center" for="eventParticipant{{ member.id }}">
@@ -265,14 +268,29 @@
   const participantEditWrapper = document.getElementById('participantEditWrapper');
   const participantEditToggle = document.getElementById('allowParticipantEditToggle');
   const participantCheckboxes = Array.prototype.slice.call(document.querySelectorAll('.event-participant-checkbox'));
+  const startTimeInput = document.getElementById('start_time');
+  const endTimeInput = document.getElementById('end_time');
   const locationSelectionTouchedInput = document.getElementById('locationSelectionTouched');
   const itemSelectionTouchedInput = document.getElementById('itemSelectionTouched');
   const participantSelectionTouchedInput = document.getElementById('participantSelectionTouched');
+  const startTimeTouchedInput = document.getElementById('startTimeTouched');
+  const endTimeTouchedInput = document.getElementById('endTimeTouched');
 
   function markSelectionTouched(input) {
     if (input) {
       input.value = '1';
     }
+  }
+
+  if (startTimeInput) {
+    ['input', 'change'].forEach(function (evt) {
+      startTimeInput.addEventListener(evt, function () { markSelectionTouched(startTimeTouchedInput); });
+    });
+  }
+  if (endTimeInput) {
+    ['input', 'change'].forEach(function (evt) {
+      endTimeInput.addEventListener(evt, function () { markSelectionTouched(endTimeTouchedInput); });
+    });
   }
 
   function initSelectionControl(config) {

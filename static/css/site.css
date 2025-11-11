@@ -1,0 +1,77 @@
+:root {
+  --benlab-red: #e40303;
+  --benlab-orange: #ff8c00;
+  --benlab-yellow: #ffed00;
+  --benlab-green: #008026;
+  --benlab-blue: #004dff;
+  --benlab-purple: #750787;
+  --benlab-dark: #0b1723;
+}
+
+body {
+  background-color: #f8f9fb;
+}
+
+.navbar-rainbow {
+  background: linear-gradient(
+    135deg,
+    var(--benlab-red),
+    var(--benlab-orange),
+    var(--benlab-yellow),
+    var(--benlab-green),
+    var(--benlab-blue),
+    var(--benlab-purple)
+  );
+  box-shadow: 0 4px 16px rgba(11, 23, 35, 0.25);
+}
+
+.navbar-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.brand-logo {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  object-fit: cover;
+  background: #fff;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.25);
+  border: 2px solid rgba(255, 255, 255, 0.6);
+}
+
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.brand-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.brand-tagline {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  opacity: 0.9;
+}
+
+@media (max-width: 575.98px) {
+  .brand-logo {
+    width: 36px;
+    height: 36px;
+  }
+
+  .brand-title {
+    font-size: 0.95rem;
+  }
+
+  .brand-tagline {
+    font-size: 0.62rem;
+    letter-spacing: 0.1em;
+  }
+}

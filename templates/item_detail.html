@@ -7,9 +7,9 @@
   <button type="button" class="btn btn-outline-secondary" id="shareItemLinkBtn" data-url="{{ request.url }}">分享链接</button>
   <a href="{{ url_for('edit_item', item_id=item.id) }}" class="btn btn-primary">编辑</a>
   <form action="{{ url_for('delete_item', item_id=item.id) }}" method="post" class="d-inline" onsubmit="return confirm('确定删除该物品吗？');">
-    <button type="submit" class="btn btn-danger">删除</button>
+    <button type="submit" class="btn btn-outline-danger">删除</button>
   </form>
-  <a href="{{ url_for('items') }}" class="btn btn-secondary">返回列表</a>
+  <a href="{{ url_for('items') }}" class="btn btn-outline-secondary">返回列表</a>
 </div>
 
 <div class="row">

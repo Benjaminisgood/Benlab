@@ -10,6 +10,16 @@
   --benlab-button-gradient: linear-gradient(120deg, #ff7a8a, #f7b267, #ffe072, #45d3b3, #6faefc, #cfa1ff);
   --benlab-button-shadow: 0 16px 32px rgba(15, 20, 44, 0.28);
   --benlab-button-shadow-hover: 0 22px 44px rgba(15, 20, 44, 0.35);
+  --btn-secondary-bg: rgba(var(--bs-secondary-rgb), 0.12);
+  --btn-secondary-border: rgba(var(--bs-secondary-rgb), 0.35);
+  --btn-secondary-color: var(--app-heading);
+  --btn-secondary-hover-bg: rgba(var(--bs-secondary-rgb), 0.22);
+  --btn-secondary-hover-color: var(--app-heading);
+  --btn-danger-bg: rgba(var(--bs-danger-rgb), 0.14);
+  --btn-danger-border: rgba(var(--bs-danger-rgb), 0.4);
+  --btn-danger-color: #7a1326;
+  --btn-danger-hover-bg: rgba(var(--bs-danger-rgb), 0.26);
+  --btn-danger-hover-color: #fff;
   --navbar-gradient: linear-gradient(120deg, rgba(228, 3, 3, 0.9), rgba(10, 199, 132, 0.92), rgba(58, 123, 255, 0.92));
   --navbar-border: rgba(255, 255, 255, 0.45);
   --navbar-shadow: 0 28px 60px rgba(9, 16, 31, 0.42);
@@ -162,6 +172,16 @@
   --benlab-button-gradient: linear-gradient(120deg, #ff94a9, #f8c078, #fbe68a, #34d3b0, #7fc4ff, #d7b6ff);
   --benlab-button-shadow: 0 20px 38px rgba(0, 0, 0, 0.65);
   --benlab-button-shadow-hover: 0 28px 50px rgba(0, 0, 0, 0.75);
+  --btn-secondary-bg: rgba(var(--bs-secondary-rgb), 0.2);
+  --btn-secondary-border: rgba(var(--bs-secondary-rgb), 0.5);
+  --btn-secondary-color: rgba(236, 240, 255, 0.92);
+  --btn-secondary-hover-bg: rgba(var(--bs-secondary-rgb), 0.3);
+  --btn-secondary-hover-color: rgba(255, 255, 255, 0.98);
+  --btn-danger-bg: rgba(var(--bs-danger-rgb), 0.22);
+  --btn-danger-border: rgba(var(--bs-danger-rgb), 0.55);
+  --btn-danger-color: rgba(255, 221, 228, 0.9);
+  --btn-danger-hover-bg: rgba(var(--bs-danger-rgb), 0.35);
+  --btn-danger-hover-color: rgba(255, 255, 255, 0.98);
   --bs-primary: #f199ff;
   --bs-primary-rgb: 241, 153, 255;
   --bs-secondary: #9fb0df;
@@ -581,6 +601,40 @@ body {
 .btn-outline-primary:focus {
   background: rgba(var(--bs-primary-rgb), 0.15);
   color: var(--app-heading);
+}
+
+.btn-secondary,
+.btn-outline-secondary {
+  background: var(--btn-secondary-bg);
+  color: var(--btn-secondary-color);
+  border: 1px solid var(--btn-secondary-border);
+  backdrop-filter: blur(10px);
+}
+
+.btn-secondary:hover,
+.btn-secondary:focus,
+.btn-outline-secondary:hover,
+.btn-outline-secondary:focus {
+  background: var(--btn-secondary-hover-bg);
+  color: var(--btn-secondary-hover-color);
+  border-color: var(--btn-secondary-border);
+}
+
+.btn-danger,
+.btn-outline-danger {
+  background: var(--btn-danger-bg);
+  color: var(--btn-danger-color);
+  border: 1px solid var(--btn-danger-border);
+  backdrop-filter: blur(10px);
+}
+
+.btn-danger:hover,
+.btn-danger:focus,
+.btn-outline-danger:hover,
+.btn-outline-danger:focus {
+  background: var(--btn-danger-hover-bg);
+  color: var(--btn-danger-hover-color);
+  border-color: var(--btn-danger-border);
 }
 
 .btn-light {

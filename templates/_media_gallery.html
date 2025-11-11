@@ -89,54 +89,56 @@
           &lsaquo;
         </button>
         <div class="media-focus-track" data-role="focus-track">
-          {% for media in entries %}
-          {% set kind = media.kind|default('file') %}
-          <article class="media-focus-slide{% if loop.first %} is-active{% endif %}"
-                   data-focus-slide
-                   data-index="{{ loop.index0 }}"
-                   data-title="{{ (media.display_name or media_kind_labels.get(kind, '媒体'))|e }}"
-                   data-description="{{ (media.description or '')|e }}"
-                   data-kind="{{ kind }}"
-                   data-download="{{ media.url|e }}"
-                   aria-hidden="{{ 'false' if loop.first else 'true' }}">
-            <figure class="media-focus-figure">
-              {% if kind == 'image' %}
-              <img src="{{ media.url|e }}"
-                   alt="{{ (media.display_name or media_kind_labels.get('image', '图片'))|e }}"
-                   class="media-focus-image"
-                   loading="lazy"
-                   decoding="async">
-              {% elif kind == 'video' %}
-              <video class="media-focus-video"
-                     controls
-                     playsinline
-                     preload="metadata"
-                     poster="{{ media.poster|default('')|e }}">
-                <source src="{{ media.url|e }}" type="{{ media.mimetype or 'video/mp4' }}">
-                您的浏览器不支持视频播放。
-              </video>
-              {% elif kind == 'audio' %}
-              <div class="media-focus-audio-inline">
-                <audio controls preload="metadata">
-                  <source src="{{ media.url|e }}" type="{{ media.mimetype or 'audio/mpeg' }}">
-                  您的浏览器不支持音频播放。
-                </audio>
-              </div>
-              {% else %}
-              <div class="media-focus-file">
-                <span class="media-focus-file-label">{{ media_kind_labels.get(kind, '文件') }}</span>
-                <a href="{{ media.url|e }}"
-                   class="btn btn-primary btn-sm"
-                   target="_blank"
-                   rel="noopener"
-                   aria-label="打开{{ (media.display_name or media_kind_labels.get(kind, '文件'))|e }}">
-                  打开
-                </a>
-              </div>
-              {% endif %}
-            </figure>
-          </article>
-          {% endfor %}
+          <div class="media-focus-track-inner" data-role="focus-track-inner">
+            {% for media in entries %}
+            {% set kind = media.kind|default('file') %}
+            <article class="media-focus-slide{% if loop.first %} is-active{% endif %}"
+                     data-focus-slide
+                     data-index="{{ loop.index0 }}"
+                     data-title="{{ (media.display_name or media_kind_labels.get(kind, '媒体'))|e }}"
+                     data-description="{{ (media.description or '')|e }}"
+                     data-kind="{{ kind }}"
+                     data-download="{{ media.url|e }}"
+                     aria-hidden="{{ 'false' if loop.first else 'true' }}">
+              <figure class="media-focus-figure">
+                {% if kind == 'image' %}
+                <img src="{{ media.url|e }}"
+                     alt="{{ (media.display_name or media_kind_labels.get('image', '图片'))|e }}"
+                     class="media-focus-image"
+                     loading="lazy"
+                     decoding="async">
+                {% elif kind == 'video' %}
+                <video class="media-focus-video"
+                       controls
+                       playsinline
+                       preload="metadata"
+                       poster="{{ media.poster|default('')|e }}">
+                  <source src="{{ media.url|e }}" type="{{ media.mimetype or 'video/mp4' }}">
+                  您的浏览器不支持视频播放。
+                </video>
+                {% elif kind == 'audio' %}
+                <div class="media-focus-audio-inline">
+                  <audio controls preload="metadata">
+                    <source src="{{ media.url|e }}" type="{{ media.mimetype or 'audio/mpeg' }}">
+                    您的浏览器不支持音频播放。
+                  </audio>
+                </div>
+                {% else %}
+                <div class="media-focus-file">
+                  <span class="media-focus-file-label">{{ media_kind_labels.get(kind, '文件') }}</span>
+                  <a href="{{ media.url|e }}"
+                     class="btn btn-primary btn-sm"
+                     target="_blank"
+                     rel="noopener"
+                     aria-label="打开{{ (media.display_name or media_kind_labels.get(kind, '文件'))|e }}">
+                    打开
+                  </a>
+                </div>
+                {% endif %}
+              </figure>
+            </article>
+            {% endfor %}
+          </div>
         </div>
         <button type="button"
                 class="media-focus-nav media-focus-nav-next"

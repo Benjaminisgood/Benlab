@@ -4,7 +4,6 @@
   var navSelector = '[data-action="focus-nav"]';
   var closeSelector = '[data-action="close-focus-mode"]';
   var longPressThreshold = 550;
-  var swipeThreshold = 60;
   var doubleTapDelay = 320;
   var lastTrigger = null;
   var longPressTimer = null;
@@ -69,6 +68,39 @@
     return toArray(overlay ? overlay.querySelectorAll('[data-focus-slide]') : []);
   }
 
+  function getTrack(overlay) {
+    return overlay ? overlay.querySelector('[data-role="focus-track"]') : null;
+  }
+
+  function getTrackInner(overlay) {
+    return overlay ? overlay.querySelector('[data-role="focus-track-inner"]') : null;
+  }
+
+  function getTrackWidth(overlay) {
+    var track = getTrack(overlay);
+    return track ? track.clientWidth : 0;
+  }
+
+  function updateTrackPosition(overlay, dragOffset) {
+    var inner = getTrackInner(overlay);
+    if (!inner) {
+      return;
+    }
+    var index = parseInt(overlay.dataset.activeIndex || '0', 10) || 0;
+    var trackWidth = getTrackWidth(overlay);
+    var base = -index * trackWidth;
+    var offset = dragOffset || 0;
+    inner.style.transform = 'translate3d(' + (base + offset) + 'px, 0, 0)';
+  }
+
+  function setDraggingState(overlay, dragging) {
+    var inner = getTrackInner(overlay);
+    if (!inner) {
+      return;
+    }
+    inner.classList.toggle('is-dragging', Boolean(dragging));
+  }
+
   function setActiveSlide(overlay, nextIndex) {
     var slides = getSlides(overlay);
     if (!slides.length) {
@@ -117,6 +149,8 @@
       caption.textContent = description || title || '';
     }
     updateDownloadLink(overlay);
+    setDraggingState(overlay, false);
+    updateTrackPosition(overlay, 0);
   }
 
   function syncAudioPlayer(overlay, autoplay) {
@@ -160,30 +194,22 @@
     sheetLink.setAttribute('download', title);
   }
 
-  function bindDoubleTapHandlers(overlay) {
+  function bindGestureHandlers(overlay) {
     if (!overlay) {
       return;
     }
+    overlay.addEventListener('pointerdown', pointerDownHandler, { passive: true });
+    overlay.addEventListener('pointermove', pointerMoveHandler, { passive: true });
+    overlay.addEventListener('pointerup', pointerUpHandler, { passive: true });
+    overlay.addEventListener('pointercancel', pointerCancelHandler, { passive: true });
+    overlay.addEventListener('pointerleave', pointerCancelHandler, { passive: true });
     overlay.addEventListener('dblclick', function (event) {
-      event.preventDefault();
-      closeOverlay(overlay);
-    });
-    overlay.addEventListener('pointerup', function (event) {
-      if (event.pointerType === 'mouse') {
-        return;
-      }
       if (!shouldHandleDoubleTapTarget(event.target)) {
         return;
       }
-      var now = Date.now();
-      var lastTap = parseInt(overlay.dataset.lastTap || '0', 10) || 0;
-      if (now - lastTap <= doubleTapDelay) {
-        overlay.dataset.lastTap = '0';
-        closeOverlay(overlay);
-      } else {
-        overlay.dataset.lastTap = String(now);
-      }
-    }, { passive: true });
+      event.preventDefault();
+      closeOverlay(overlay);
+    });
   }
 
   function shouldHandleDoubleTapTarget(target) {
@@ -196,6 +222,41 @@
     return Boolean(target.closest('.media-focus-stage'));
   }
 
+  function shouldBlockSwipeTarget(target) {
+    if (!target) {
+      return false;
+    }
+    return Boolean(target.closest('[data-role="focus-action-sheet"], [data-role="focus-audio-panel"], [data-action="focus-nav"]'));
+  }
+
+  function releasePointerCapture(node, pointerId) {
+    if (!node || typeof node.releasePointerCapture !== 'function') {
+      return;
+    }
+    try {
+      node.releasePointerCapture(pointerId);
+    } catch (error) {
+      /* ignore */
+    }
+  }
+
+  function handleDoubleTap(overlay, target, pointerType) {
+    if (pointerType === 'mouse') {
+      return;
+    }
+    if (!shouldHandleDoubleTapTarget(target)) {
+      return;
+    }
+    var now = Date.now();
+    var lastTap = parseInt(overlay.dataset.lastTap || '0', 10) || 0;
+    if (now - lastTap <= doubleTapDelay) {
+      overlay.dataset.lastTap = '0';
+      closeOverlay(overlay);
+    } else {
+      overlay.dataset.lastTap = String(now);
+    }
+  }
+
   function prepareOverlay(overlay) {
     if (!overlay || overlay.dataset.focusBound === 'true') {
       return;
@@ -206,15 +267,7 @@
         syncAudioPlayer(overlay, true);
       });
     }
-    var track = overlay.querySelector('[data-role="focus-track"]');
-    if (track) {
-      track.addEventListener('pointerdown', pointerDownHandler, { passive: true });
-      track.addEventListener('pointermove', pointerMoveHandler, { passive: true });
-      track.addEventListener('pointerup', pointerUpHandler, { passive: true });
-      track.addEventListener('pointercancel', pointerCancelHandler, { passive: true });
-      track.addEventListener('pointerleave', pointerCancelHandler, { passive: true });
-    }
-    bindDoubleTapHandlers(overlay);
+    bindGestureHandlers(overlay);
     overlay.dataset.focusBound = 'true';
   }
 
@@ -316,19 +369,23 @@
     if (!event.isPrimary) {
       return;
     }
-    var overlay = event.currentTarget.closest(overlaySelector);
-    if (!overlay) {
+    var overlay = event.currentTarget.closest(overlaySelector) || event.currentTarget;
+    if (!overlay || shouldBlockSwipeTarget(event.target)) {
+      swipeState = null;
       return;
     }
+    var trackWidth = getTrackWidth(overlay) || overlay.clientWidth || 1;
     swipeState = {
       overlay: overlay,
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
+      trackWidth: trackWidth,
       moved: false
     };
+    setDraggingState(overlay, true);
     try {
-      event.currentTarget.setPointerCapture(event.pointerId);
+      overlay.setPointerCapture(event.pointerId);
     } catch (error) {
       /* ignore */
     }
@@ -339,45 +396,53 @@
     if (!swipeState || swipeState.pointerId !== event.pointerId) {
       return;
     }
-    var distX = Math.abs(event.clientX - swipeState.startX);
-    var distY = Math.abs(event.clientY - swipeState.startY);
-    if (distX > 8 || distY > 8) {
+    var overlay = swipeState.overlay;
+    var dx = event.clientX - swipeState.startX;
+    var dy = event.clientY - swipeState.startY;
+    var moved = Math.abs(dx) > 6 || Math.abs(dy) > 6;
+    if (moved) {
       swipeState.moved = true;
+    }
+    if (Math.abs(dx) > Math.abs(dy)) {
       cancelLongPress();
+      updateTrackPosition(overlay, dx);
     }
   }
 
   function pointerUpHandler(event) {
-    if (!swipeState || swipeState.pointerId !== event.pointerId) {
+    var overlay = event.currentTarget.closest(overlaySelector) || event.currentTarget;
+    var handledSwipe = false;
+    if (swipeState && swipeState.pointerId === event.pointerId) {
+      var dx = event.clientX - swipeState.startX;
+      var dy = event.clientY - swipeState.startY;
+      var threshold = Math.max(60, (swipeState.trackWidth || 1) * 0.18);
       cancelLongPress();
-      return;
+      if (swipeState.moved && Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > threshold) {
+        stepSlide(overlay, dx > 0 ? -1 : 1);
+        handledSwipe = true;
+      } else {
+        updateTrackPosition(overlay, 0);
+      }
+      setDraggingState(overlay, false);
+      releasePointerCapture(overlay, event.pointerId);
+      swipeState = null;
+    } else {
+      cancelLongPress();
     }
-    var dx = event.clientX - swipeState.startX;
-    var dy = event.clientY - swipeState.startY;
-    var overlay = swipeState.overlay;
-    cancelLongPress();
-    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > swipeThreshold) {
-      stepSlide(overlay, dx > 0 ? -1 : 1);
+    if (!handledSwipe) {
+      handleDoubleTap(overlay, event.target, event.pointerType);
     }
-    cleanupSwipe(event.currentTarget);
   }
 
   function pointerCancelHandler(event) {
     if (swipeState && swipeState.pointerId === event.pointerId) {
-      cleanupSwipe(event.currentTarget);
-      cancelLongPress();
+      var overlay = swipeState.overlay;
+      releasePointerCapture(event.currentTarget, event.pointerId);
+      setDraggingState(overlay, false);
+      updateTrackPosition(overlay, 0);
+      swipeState = null;
     }
-  }
-
-  function cleanupSwipe(target) {
-    if (swipeState && target && target.releasePointerCapture) {
-      try {
-        target.releasePointerCapture(swipeState.pointerId);
-      } catch (error) {
-        /* noop */
-      }
-    }
-    swipeState = null;
+    cancelLongPress();
   }
 
   function handleDocumentClick(event) {
@@ -467,4 +532,11 @@
   ['fullscreenchange', 'webkitfullscreenchange', 'msfullscreenchange'].forEach(function (eventName) {
     document.addEventListener(eventName, handleFullscreenChange, false);
   });
+
+  window.addEventListener('resize', function () {
+    var overlay = document.querySelector(overlaySelector + '.is-active');
+    if (overlay) {
+      updateTrackPosition(overlay, 0);
+    }
+  }, false);
 })();

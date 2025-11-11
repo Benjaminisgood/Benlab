@@ -2385,7 +2385,7 @@ def add_event():
             allow_participant_edit = False
 
         available_member_ids = {member.id for member in members}
-        participant_ids = {pid for pid in participant_ids if pid in available_member_ids and pid != current_user.id}
+        participant_ids = {pid for pid in participant_ids if pid in available_member_ids and pid != event.owner_id}
 
         errors = []
         if not title:

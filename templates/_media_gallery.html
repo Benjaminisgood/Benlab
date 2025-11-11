@@ -4,6 +4,8 @@
   {% set grid_class = options.grid_class if options and options.grid_class is not none else 'media-gallery-grid' %}
   {% set card_class = options.card_class if options and options.card_class is not none else 'media-card' %}
   {% set enable_focus_mode = options.enable_focus_mode if options and options.enable_focus_mode is not none else true %}
+  {% set card_image_sizes = options.card_image_sizes if options and options.card_image_sizes is not none else '(max-width: 576px) 92vw, (max-width: 992px) 45vw, 320px' %}
+  {% set focus_image_sizes = options.focus_image_sizes if options and options.focus_image_sizes is not none else '100vw' %}
   {% set entry_count = entries|length if entries else 0 %}
   {% set audio_entries = [] %}
   {% if entry_count %}
@@ -19,8 +21,10 @@
     <div class="{{ grid_class }}">
       {% for media in entries %}
       {% set kind = media.kind|default('file') %}
+      {% set orientation = media.orientation if media.orientation is defined and media.orientation else 'unknown' %}
       <div class="{{ card_class }}{% if options and options.card_extra_class %} {{ options.card_extra_class }}{% endif %}"
            data-kind="{{ kind }}"
+           data-orientation="{{ orientation }}"
            {% if enable_focus_mode %}
            role="button"
            tabindex="0"
@@ -34,6 +38,8 @@
           <img src="{{ media.url }}"
                alt="{{ (media.display_name or '媒体文件')|e }}"
                class="media-card-img"
+               data-orientation="{{ orientation }}"
+               sizes="{{ card_image_sizes }}"
                loading="lazy"
                decoding="async">
         </figure>
@@ -92,12 +98,14 @@
           <div class="media-focus-track-inner" data-role="focus-track-inner">
             {% for media in entries %}
             {% set kind = media.kind|default('file') %}
+            {% set orientation = media.orientation if media.orientation is defined and media.orientation else 'unknown' %}
             <article class="media-focus-slide{% if loop.first %} is-active{% endif %}"
                      data-focus-slide
                      data-index="{{ loop.index0 }}"
                      data-title="{{ (media.display_name or media_kind_labels.get(kind, '媒体'))|e }}"
                      data-description="{{ (media.description or '')|e }}"
                      data-kind="{{ kind }}"
+                     data-orientation="{{ orientation }}"
                      data-download="{{ media.url|e }}"
                      aria-hidden="{{ 'false' if loop.first else 'true' }}">
               <figure class="media-focus-figure">
@@ -105,6 +113,8 @@
                 <img src="{{ media.url|e }}"
                      alt="{{ (media.display_name or media_kind_labels.get('image', '图片'))|e }}"
                      class="media-focus-image"
+                     data-orientation="{{ orientation }}"
+                     sizes="{{ focus_image_sizes }}"
                      loading="lazy"
                      decoding="async">
                 {% elif kind == 'video' %}

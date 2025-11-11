@@ -58,14 +58,28 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  min-height: 0;
 }
 
 .media-card-img {
-  max-width: 100%;
-  max-height: 240px;
+  width: 100%;
+  height: auto;
+  max-height: 260px;
   border-radius: 0.5rem;
   object-fit: contain;
   background-color: var(--media-card-media-bg);
+}
+
+.media-card[data-orientation="portrait"] .media-card-img {
+  max-height: 320px;
+}
+
+.media-card[data-orientation="landscape"] .media-card-img {
+  max-height: 240px;
+}
+
+.media-card[data-orientation="square"] .media-card-img {
+  max-height: 280px;
 }
 
 .media-placeholder {
@@ -231,13 +245,14 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 320px;
+  min-height: clamp(240px, 40vh, 520px);
 }
 
 .media-focus-track {
   position: relative;
   width: 100%;
   height: 100%;
+  min-height: 0;
   overflow: hidden;
   border-radius: clamp(0.5rem, 2vw, 1.25rem);
   background: var(--media-focus-track-bg);
@@ -261,7 +276,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0;
+  padding: clamp(0.5rem, 2vw, 1.5rem);
+  box-sizing: border-box;
   opacity: 0.35;
   transition: opacity 0.2s ease;
 }
@@ -281,15 +297,30 @@
 
 .media-focus-image,
 .media-focus-video {
-  width: 100%;
-  height: 100%;
+  width: auto;
+  height: auto;
+  max-width: min(100%, 100vw);
+  max-height: min(85vh, 900px);
   border-radius: clamp(0.5rem, 2vw, 1.25rem);
-  object-fit: cover;
+  object-fit: contain;
   background: var(--media-focus-image-bg);
 }
 
-.media-focus-video {
-  width: 100%;
+.media-focus-slide[data-orientation="portrait"] .media-focus-image,
+.media-focus-slide[data-orientation="portrait"] .media-focus-video {
+  max-width: min(92vw, 600px);
+  max-height: min(90vh, 1000px);
+}
+
+.media-focus-slide[data-orientation="landscape"] .media-focus-image,
+.media-focus-slide[data-orientation="landscape"] .media-focus-video {
+  max-width: min(100vw, 1200px);
+  max-height: min(80vh, 760px);
+}
+
+.media-focus-slide[data-orientation="square"] .media-focus-image,
+.media-focus-slide[data-orientation="square"] .media-focus-video {
+  max-width: min(92vw, 720px);
 }
 
 .media-focus-file {
@@ -439,7 +470,7 @@ body.media-focus-open {
   }
 
   .media-card-img {
-    max-height: 200px;
+    max-height: min(220px, 70vw);
   }
 
   .media-focus-stage {
@@ -459,6 +490,11 @@ body.media-focus-open {
   .media-focus-info,
   .media-focus-audio-panel {
     padding: 0.65rem 0.9rem;
+  }
+
+  .media-focus-image,
+  .media-focus-video {
+    max-height: 80vh;
   }
 }
 

@@ -14,6 +14,48 @@
     return Array.prototype.slice.call(nodeList || []);
   }
 
+  function classifyImageOrientation(img) {
+    if (!img || !img.naturalWidth || !img.naturalHeight) {
+      return;
+    }
+    var orientation = 'square';
+    if (img.naturalWidth > img.naturalHeight + 8) {
+      orientation = 'landscape';
+    } else if (img.naturalHeight > img.naturalWidth + 8) {
+      orientation = 'portrait';
+    }
+    img.dataset.orientation = orientation;
+    var container = img.closest('.media-card, .media-focus-slide');
+    if (container) {
+      container.setAttribute('data-orientation', orientation);
+    }
+  }
+
+  function bindOrientationWatchers(root) {
+    var scope = root || document;
+    var nodes = scope.querySelectorAll('img.media-card-img, img.media-focus-image');
+    toArray(nodes).forEach(function (img) {
+      if (img.dataset.orientationWatch === 'true') {
+        if (img.complete && img.naturalWidth && img.naturalHeight) {
+          classifyImageOrientation(img);
+        }
+        return;
+      }
+      img.dataset.orientationWatch = 'true';
+      var onLoad = function () {
+        classifyImageOrientation(img);
+      };
+      if (img.complete && img.naturalWidth && img.naturalHeight) {
+        onLoad();
+      } else {
+        img.addEventListener('load', onLoad, { once: true });
+      }
+      img.addEventListener('error', function () {
+        img.dataset.orientation = 'unknown';
+      }, { once: true });
+    });
+  }
+
   function getFullscreenElement() {
     return document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement || null;
   }
@@ -290,6 +332,7 @@
     var initialIndex = parseInt(trigger.getAttribute('data-focus-index') || '0', 10) || 0;
     setActiveSlide(overlay, initialIndex);
     syncAudioPlayer(overlay, false);
+    bindOrientationWatchers(overlay);
     lastTrigger = trigger;
     window.requestAnimationFrame(function () {
       try {
@@ -518,6 +561,7 @@
     overlays.forEach(function (overlay) {
       prepareOverlay(overlay);
     });
+    bindOrientationWatchers(document);
   });
 
   function handleFullscreenChange() {

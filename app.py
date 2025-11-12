@@ -84,6 +84,7 @@ app.config['PREFERRED_URL_SCHEME'] = os.getenv('PREFERRED_URL_SCHEME', 'https')
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # app.config['UPLOAD_FOLDER'] = os.path.join(BASE_DIR, 'static', 'images')
 app.config['UPLOAD_FOLDER'] = os.path.join(BASE_DIR, 'images')
+TEMP_PAGE_DIR = app.instance_path
 app.config['MAX_CONTENT_LENGTH'] = 2500 * 1024 * 1024  # 限制上传2500MB以内的文件
 OSS_ENDPOINT = os.getenv('ALIYUN_OSS_ENDPOINT')
 OSS_ACCESS_KEY_ID = os.getenv('ALIYUN_OSS_ACCESS_KEY_ID')
@@ -2187,6 +2188,13 @@ def register():
                 return redirect(url_for('login', next=next_url))
             return redirect(url_for('login'))
     return render_template('register.html', next_url=next_url)
+
+
+@app.route('/pages/<int:page_id>')
+def temporary_page(page_id):
+    """Serve numeric HTML pages stored directly under instance/."""
+    filename = f"{page_id}.html"
+    return send_from_directory(TEMP_PAGE_DIR, filename)
 
 
 @app.route('/events')

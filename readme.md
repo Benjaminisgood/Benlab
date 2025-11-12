@@ -137,6 +137,7 @@ Benlab/
 - 上传文件统一保存至 `images/`，可映射至对象存储或专用磁盘。
 - `/uploads/<filename>` 动态路由确保端口/域名变更后链接仍可用。
 - 编辑表单允许批量删除旧图片，系统会自动清理冗余文件。
+- OSS 直传：`ALIYUN_OSS_PUBLIC_BASE_URL` 控制对外访问域名，可选的 `ALIYUN_OSS_DIRECT_UPLOAD_BASE_URL` 用于前端直传签名 URL（默认回落到公共域名，再不行则使用 bucket 默认域名并自动升级为 HTTPS；若需要 HTTP，可显式写成 `http://...`）。
 
 ## 日常运维与数据管理
 - **备份**：定期复制 `lab.db`（或外部数据库备份）及 `images/` 目录。

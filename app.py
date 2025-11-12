@@ -6,7 +6,7 @@ import json
 from io import BytesIO
 import urllib.request
 from urllib.error import URLError, HTTPError
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit, urlunsplit
 from flask import Flask, render_template, request, redirect, url_for, flash, send_file, send_from_directory, abort, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
@@ -47,6 +47,22 @@ app = Flask(__name__)
 from werkzeug.middleware.proxy_fix import ProxyFix
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 
+
+def _normalize_base_url(value, default_scheme='https'):
+    """Normalize domain/CNAME inputs to absolute URLs with scheme, keep explicit http."""
+    if not value:
+        return ''
+    token = str(value).strip()
+    if not token:
+        return ''
+    if token.startswith('//'):
+        token = f"{default_scheme}:{token}"
+    elif not token.lower().startswith(('http://', 'https://')):
+        token = f"{default_scheme}://{token}"
+    token = token.rstrip('/')
+    return token
+
+
 # 优先从环境变量读取，生产环境请设置强随机串：export FLASK_SECRET_KEY='...'
 app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'dev-only-change-me')
 # 记住登录状态的 cookie 时长（天）
@@ -74,7 +90,8 @@ OSS_ACCESS_KEY_ID = os.getenv('ALIYUN_OSS_ACCESS_KEY_ID')
 OSS_ACCESS_KEY_SECRET = os.getenv('ALIYUN_OSS_ACCESS_KEY_SECRET')
 OSS_BUCKET_NAME = os.getenv('ALIYUN_OSS_BUCKET')
 OSS_PREFIX = (os.getenv('ALIYUN_OSS_PREFIX') or '').strip('/ ')
-OSS_PUBLIC_BASE_URL = (os.getenv('ALIYUN_OSS_PUBLIC_BASE_URL') or '').rstrip('/')
+OSS_PUBLIC_BASE_URL = _normalize_base_url(os.getenv('ALIYUN_OSS_PUBLIC_BASE_URL'))
+OSS_DIRECT_UPLOAD_BASE_URL = _normalize_base_url(os.getenv('ALIYUN_OSS_DIRECT_UPLOAD_BASE_URL'))
 MEDIA_STORAGE_MODE = (os.getenv('MEDIA_STORAGE_MODE') or 'auto').strip().lower()
 if MEDIA_STORAGE_MODE not in {'auto', 'oss', 'local'}:
     MEDIA_STORAGE_MODE = 'auto'
@@ -99,6 +116,8 @@ if USE_OSS:
     app.config['OSS_BUCKET'] = OSS_BUCKET_NAME
 app.config['OSS_PREFIX'] = OSS_PREFIX
 app.config['OSS_PUBLIC_BASE_URL'] = OSS_PUBLIC_BASE_URL
+app.config['OSS_DIRECT_UPLOAD_BASE_URL'] = OSS_DIRECT_UPLOAD_BASE_URL
+app.config['OSS_UPLOAD_BASE_URL'] = OSS_DIRECT_UPLOAD_BASE_URL or OSS_PUBLIC_BASE_URL
 _direct_upload_flag = os.getenv('ENABLE_DIRECT_OSS_UPLOAD')
 if _direct_upload_flag is None:
     _enable_direct_upload = True
@@ -1438,6 +1457,36 @@ def _build_oss_url(key):
     return f"https://{bucket}.{endpoint}/{key}"
 
 
+def _finalize_signed_upload_url(url):
+    """Rewrite signed OSS URL to desired domain/scheme for front-end direct uploads."""
+    if not url:
+        return url
+    preferred_base = app.config.get('OSS_UPLOAD_BASE_URL') or ''
+    parsed = urlsplit(url)
+    path = parsed.path or ''
+    if preferred_base:
+        normalized = _normalize_base_url(preferred_base)
+        if normalized:
+            base_parts = urlsplit(normalized)
+            base_path = base_parts.path.rstrip('/')
+            suffix = path or ''
+            if suffix and not suffix.startswith('/'):
+                suffix = '/' + suffix
+            new_path = f"{base_path}{suffix}" if suffix else (base_path or '/')
+            if not new_path.startswith('/'):
+                new_path = '/' + new_path
+            return urlunsplit((
+                base_parts.scheme or parsed.scheme or 'https',
+                base_parts.netloc or parsed.netloc,
+                new_path,
+                parsed.query,
+                parsed.fragment
+            ))
+    if parsed.scheme == 'http':
+        return urlunsplit(('https', parsed.netloc, path, parsed.query, parsed.fragment))
+    return url
+
+
 def _normalize_object_key(value):
     if not value:
         return None
@@ -2100,6 +2149,7 @@ def create_direct_oss_upload():
     expires = app.config.get('DIRECT_UPLOAD_URL_EXPIRATION', 900)
     headers = {'Content-Type': content_type}
     upload_url = bucket.sign_url('PUT', object_key, expires, headers=headers)
+    upload_url = _finalize_signed_upload_url(upload_url)
     return jsonify({
         'object_key': object_key,
         'upload_url': upload_url,

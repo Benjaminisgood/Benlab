@@ -9,9 +9,28 @@
   var longPressTimer = null;
   var swipeState = null;
   var fullscreenOverlay = null;
+  var viewportVarName = '--media-focus-viewport';
 
   function toArray(nodeList) {
     return Array.prototype.slice.call(nodeList || []);
+  }
+
+  function updateViewportUnit() {
+    if (!document || !document.documentElement) {
+      return;
+    }
+    var height = window.innerHeight || document.documentElement.clientHeight;
+    if (!height) {
+      return;
+    }
+    document.documentElement.style.setProperty(viewportVarName, height + 'px');
+  }
+
+  function ensureOverlayInBody(overlay) {
+    if (!overlay || overlay.parentElement === document.body || !document.body) {
+      return;
+    }
+    document.body.appendChild(overlay);
   }
 
   function classifyImageOrientation(img) {
@@ -300,7 +319,11 @@
   }
 
   function prepareOverlay(overlay) {
-    if (!overlay || overlay.dataset.focusBound === 'true') {
+    if (!overlay) {
+      return;
+    }
+    ensureOverlayInBody(overlay);
+    if (overlay.dataset.focusBound === 'true') {
       return;
     }
     var select = overlay.querySelector('[data-role="focus-audio-select"]');
@@ -322,6 +345,7 @@
     if (!overlay) {
       return;
     }
+    updateViewportUnit();
     prepareOverlay(overlay);
     overlay.classList.add('is-active');
     overlay.removeAttribute('hidden');
@@ -557,6 +581,7 @@
   document.addEventListener('keydown', handleKeydown, false);
 
   document.addEventListener('DOMContentLoaded', function () {
+    updateViewportUnit();
     var overlays = document.querySelectorAll(overlaySelector);
     overlays.forEach(function (overlay) {
       prepareOverlay(overlay);
@@ -578,9 +603,11 @@
   });
 
   window.addEventListener('resize', function () {
+    updateViewportUnit();
     var overlay = document.querySelector(overlaySelector + '.is-active');
     if (overlay) {
       updateTrackPosition(overlay, 0);
     }
   }, false);
+  window.addEventListener('orientationchange', updateViewportUnit, false);
 })();

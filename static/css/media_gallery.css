@@ -1,3 +1,7 @@
+:root {
+  --media-focus-viewport: 100vh;
+}
+
 .media-gallery {
   width: 100%;
 }
@@ -195,16 +199,27 @@
 
 .media-focus-overlay {
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
   display: flex;
   align-items: stretch;
   justify-content: center;
   padding: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
   background: var(--media-focus-overlay-bg);
   z-index: 1090;
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.25s ease;
+  min-height: var(--media-focus-viewport, 100vh);
+  height: var(--media-focus-viewport, 100vh);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  box-sizing: border-box;
 }
 
 .media-focus-overlay.is-active {
@@ -230,6 +245,10 @@
   width: 100%;
   height: 100%;
   padding: clamp(0.75rem, 2vw, 1.25rem);
+  padding-top: clamp(0.75rem, 2vw, 1.25rem);
+  padding-bottom: clamp(0.75rem, 2vw, 1.25rem);
+  padding-top: calc(clamp(0.75rem, 2vw, 1.25rem) + env(safe-area-inset-top));
+  padding-bottom: calc(clamp(0.75rem, 2vw, 1.25rem) + env(safe-area-inset-bottom));
   background: var(--media-focus-stage-bg);
   border-radius: 0;
   display: flex;
@@ -237,6 +256,8 @@
   gap: 1rem;
   z-index: 1;
   color: var(--media-focus-stage-color);
+  min-height: var(--media-focus-viewport, 100vh);
+  box-sizing: border-box;
 }
 
 .media-focus-content {
@@ -460,6 +481,16 @@ body.media-focus-open {
   overflow: hidden;
 }
 
+@supports (height: 100dvh) {
+  .media-focus-overlay {
+    min-height: 100dvh;
+    height: 100dvh;
+  }
+  .media-focus-stage {
+    min-height: 100dvh;
+  }
+}
+
 @media (max-width: 768px) {
   .media-gallery-grid {
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
@@ -475,6 +506,10 @@ body.media-focus-open {
 
   .media-focus-stage {
     padding: 0.75rem;
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+    padding-top: calc(0.75rem + env(safe-area-inset-top));
+    padding-bottom: calc(0.75rem + env(safe-area-inset-bottom));
     gap: 0.75rem;
   }
 

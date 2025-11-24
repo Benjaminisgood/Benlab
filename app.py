@@ -2319,8 +2319,8 @@ def temporary_page(page_id):
 def events_overview():
     events_query = Event.query.options(
         selectinload(Event.owner),
-        selectinload(Event.items),
         selectinload(Event.locations),
+        selectinload(Event.images),
         selectinload(Event.participant_links).selectinload(EventParticipant.member)
     )
     accessible_events = events_query.filter(

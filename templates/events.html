@@ -21,10 +21,27 @@
 <div class="row g-3 mb-4">
   {% for event in upcoming_events %}
   {% set loc_names = event.locations | map(attribute='name') | list %}
-  {% set item_names = event.items | map(attribute='name') | list %}
-  {% set search_blob = (event.title ~ ' ' ~ (event.owner.name if event.owner else '') ~ ' ' ~ (event.visibility or '') ~ ' ' ~ (event.description or '') ~ ' ' ~ (loc_names|join(' ')) ~ ' ' ~ (item_names|join(' '))) %}
-  <div class="col-lg-6 event-search-target" data-search="{{ search_blob|lower }}">
-    <div class="card h-100 shadow-sm">
+  {% set participant_names = [] %}
+  {% for link in event.participant_links %}
+    {% if link.member %}
+      {% set _ = participant_names.append(link.member.name or link.member.username) %}
+    {% endif %}
+  {% endfor %}
+  {% set search_blob = (event.title ~ ' ' ~ (event.owner.name if event.owner else '') ~ ' ' ~ (event.visibility or '') ~ ' ' ~ (loc_names|join(' ')) ~ ' ' ~ (participant_names|join(' '))) %}
+  {% set cover_entry = (event_media_entries(event) | selectattr('kind', 'equalto', 'image') | list | first) %}
+  {% set cover_url = cover_entry.url if cover_entry else None %}
+  <div class="col-lg-6 event-search-target" data-role="event-upcoming" data-search="{{ search_blob|lower }}">
+    <div class="card h-100 shadow-sm event-card">
+      <div class="event-card-cover">
+        {% if cover_url %}
+          <img src="{{ cover_url }}" alt="{{ event.title }}" loading="lazy" decoding="async">
+        {% else %}
+          <div class="event-card-cover-placeholder">
+            <span class="event-cover-initial">{{ event.title[:1] }}</span>
+            <span class="event-cover-subtle">等待配图</span>
+          </div>
+        {% endif %}
+      </div>
       <div class="card-body">
         <div class="d-flex justify-content-between align-items-start mb-2">
           <div>
@@ -65,16 +82,6 @@
         {% if event.detail_link %}
         <p class="mb-1"><strong>详情链接：</strong><a href="{{ event.detail_link }}" target="_blank" rel="noopener">打开</a></p>
         {% endif %}
-        <p class="mb-0">
-          <strong>所需物品：</strong>
-          {% if event.items %}
-            {% for item in event.items %}
-              <a class="badge bg-light text-dark border me-1" href="{{ url_for('item_detail', item_id=item.id) }}">{{ item.name }}</a>
-            {% endfor %}
-          {% else %}
-            未指定
-          {% endif %}
-        </p>
       </div>
       <div class="card-footer d-flex justify-content-between align-items-center small text-muted">
         <span>参与人数：{{ event.participant_count() }}</span>
@@ -91,33 +98,64 @@
 
 <h5 class="mt-4">历史事项</h5>
 {% if past_events %}
-<div class="accordion" id="pastEvents">
+<div class="d-flex flex-column gap-3" id="pastEvents">
   {% for event in past_events %}
   {% set loc_names = event.locations | map(attribute='name') | list %}
-  {% set item_names = event.items | map(attribute='name') | list %}
-  {% set search_blob = (event.title ~ ' ' ~ (event.owner.name if event.owner else '') ~ ' ' ~ (event.visibility or '') ~ ' ' ~ (event.description or '') ~ ' ' ~ (loc_names|join(' ')) ~ ' ' ~ (item_names|join(' '))) %}
-  <div class="accordion-item">
-    <h2 class="accordion-header" id="heading{{ loop.index }}">
-      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse{{ loop.index }}" aria-expanded="false" aria-controls="collapse{{ loop.index }}">
-        <span class="me-2 {{ visibility_classes.get(event.visibility, 'badge badge-visibility badge-visibility-personal') }}">{{ visibility_labels.get(event.visibility, event.visibility) }}</span>
-        {{ event.title }} {% if event.start_time %}<small class="text-muted ms-2">{{ event.start_time.strftime('%Y-%m-%d %H:%M') }}</small>{% endif %}
-      </button>
-    </h2>
-    <div id="collapse{{ loop.index }}" class="accordion-collapse collapse" data-bs-parent="#pastEvents">
-      <div class="accordion-body event-history-target" data-search="{{ search_blob|lower }}">
-        <p class="mb-2"><strong>负责人：</strong>{{ event.owner.name if event.owner else '未知' }}</p>
-        <p class="mb-2"><strong>参与人数：</strong>{{ event.participant_count() }}</p>
-        {% if event.detail_link %}
-        <p class="mb-2"><strong>详情链接：</strong><a href="{{ event.detail_link }}" target="_blank" rel="noopener">打开</a></p>
-        {% endif %}
-        <p class="mb-2"><strong>地点：</strong>
-          {% if event.locations %}
-            {% for loc in event.locations %}
-              <a class="badge bg-light text-dark border me-1" href="{{ url_for('view_location', loc_id=loc.id) }}">{{ loc.name }}</a>
-            {% endfor %}
-          {% else %}未指定{% endif %}
-        </p>
-        <a class="btn btn-outline-primary btn-sm" href="{{ url_for('event_detail', event_id=event.id) }}">查看详情</a>
+  {% set participant_names = [] %}
+  {% for link in event.participant_links %}
+    {% if link.member %}
+      {% set _ = participant_names.append(link.member.name or link.member.username) %}
+    {% endif %}
+  {% endfor %}
+  {% set search_blob = (event.title ~ ' ' ~ (event.owner.name if event.owner else '') ~ ' ' ~ (event.visibility or '') ~ ' ' ~ (loc_names|join(' ')) ~ ' ' ~ (participant_names|join(' '))) %}
+  {% set cover_entry = (event_media_entries(event) | selectattr('kind', 'equalto', 'image') | list | first) %}
+  {% set cover_url = cover_entry.url if cover_entry else None %}
+  <div class="event-history-card card shadow-sm event-card event-search-target" data-role="event-history" data-search="{{ search_blob|lower }}">
+    <div class="card-body">
+      <div class="d-flex flex-column flex-md-row gap-3">
+        <div class="event-card-cover event-card-cover-compact">
+          {% if cover_url %}
+            <img src="{{ cover_url }}" alt="{{ event.title }}" loading="lazy" decoding="async">
+          {% else %}
+            <div class="event-card-cover-placeholder">
+              <span class="event-cover-initial">{{ event.title[:1] }}</span>
+              <span class="event-cover-subtle">历史活动</span>
+            </div>
+          {% endif %}
+        </div>
+        <div class="flex-grow-1">
+          <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
+            <div class="me-2">
+              <div class="d-flex align-items-center gap-2">
+                <span class="{{ visibility_classes.get(event.visibility, 'badge badge-visibility badge-visibility-personal') }}">{{ visibility_labels.get(event.visibility, event.visibility) }}</span>
+                <a class="fw-semibold text-decoration-none" href="{{ url_for('event_detail', event_id=event.id) }}">{{ event.title }}</a>
+              </div>
+              <div class="small text-muted mt-1">
+                {% if event.start_time %}
+                  {{ event.start_time.strftime('%Y-%m-%d %H:%M') }}
+                  {% if event.end_time %}&ndash;{{ event.end_time.strftime('%m-%d %H:%M') }}{% endif %}
+                {% else %}
+                  时间待定
+                {% endif %}
+                {% if event.owner %} · 负责人 {{ event.owner.name }}{% endif %}
+                · 参与 {{ event.participant_count() }} 人
+              </div>
+            </div>
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+              <span class="small text-muted">更新 {{ (event.updated_at or event.created_at).strftime('%Y-%m-%d') }}</span>
+              <a class="btn btn-sm btn-outline-primary" href="{{ url_for('event_detail', event_id=event.id) }}">查看详情</a>
+            </div>
+          </div>
+          <div class="d-flex flex-wrap gap-2 mt-2">
+            {% if event.locations %}
+              {% for loc in event.locations %}
+                <a class="badge bg-light text-dark border" href="{{ url_for('view_location', loc_id=loc.id) }}">{{ loc.name }}</a>
+              {% endfor %}
+            {% else %}
+              <span class="text-muted small">未指定地点</span>
+            {% endif %}
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -134,29 +172,30 @@
   if (!filterInput) {
     return;
   }
-  var upcomingCards = Array.prototype.slice.call(document.querySelectorAll('.event-search-target'));
-  var historyBodies = Array.prototype.slice.call(document.querySelectorAll('.event-history-target'));
+  var upcomingCards = Array.prototype.slice.call(document.querySelectorAll('[data-role="event-upcoming"]'));
+  var historyCards = Array.prototype.slice.call(document.querySelectorAll('[data-role="event-history"]'));
   var upcomingEmpty = document.getElementById('upcomingEventsEmpty');
   var pastEmpty = document.getElementById('pastEventsEmpty');
 
-  function toggleParent(node, hidden) {
+  function setHidden(node, hidden) {
     if (!node) {
       return;
     }
+    node.classList.toggle('d-none', hidden);
     if (hidden) {
-      node.classList.add('d-none');
+      node.setAttribute('hidden', 'hidden');
     } else {
-      node.classList.remove('d-none');
+      node.removeAttribute('hidden');
     }
   }
 
   function updateVisibility(term) {
     var keyword = term.trim().toLowerCase();
     var upcomingVisible = 0;
-    upcomingCards.forEach(function (col) {
-      var haystack = col.getAttribute('data-search') || '';
+    upcomingCards.forEach(function (card) {
+      var haystack = card.getAttribute('data-search') || '';
       var match = !keyword || haystack.indexOf(keyword) !== -1;
-      toggleParent(col, !match);
+      setHidden(card, !match);
       if (match) {
         upcomingVisible += 1;
       }
@@ -166,11 +205,10 @@
     }
 
     var pastVisible = 0;
-    historyBodies.forEach(function (body) {
-      var haystack = body.getAttribute('data-search') || '';
+    historyCards.forEach(function (card) {
+      var haystack = card.getAttribute('data-search') || '';
       var match = !keyword || haystack.indexOf(keyword) !== -1;
-      var accordionItem = body.closest('.accordion-item');
-      toggleParent(accordionItem, !match);
+      setHidden(card, !match);
       if (match) {
         pastVisible += 1;
       }
@@ -183,6 +221,8 @@
   filterInput.addEventListener('input', function () {
     updateVisibility(this.value || '');
   });
+
+  updateVisibility(filterInput.value || '');
 })();
 </script>
 {% endblock %}

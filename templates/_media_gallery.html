@@ -1,30 +1,62 @@
 {% macro render_media_gallery(entries, gallery_id, media_kind_labels, empty_text='暂无媒体文件', options=None) -%}
+  {% set opts = options or {} %}
   {% set focus_overlay_id = (gallery_id|string) ~ '-focus-overlay' %}
-  {% set gallery_class = options.gallery_class if options and options.gallery_class is not none else 'media-gallery' %}
-  {% set grid_class = options.grid_class if options and options.grid_class is not none else 'media-gallery-grid' %}
-  {% set card_class = options.card_class if options and options.card_class is not none else 'media-card' %}
-  {% set enable_focus_mode = options.enable_focus_mode if options and options.enable_focus_mode is not none else true %}
-  {% set card_image_sizes = options.card_image_sizes if options and options.card_image_sizes is not none else '(max-width: 576px) 92vw, (max-width: 992px) 45vw, 320px' %}
-  {% set focus_image_sizes = options.focus_image_sizes if options and options.focus_image_sizes is not none else '100vw' %}
+  {% set gallery_class = opts.get('gallery_class') or 'media-gallery' %}
+  {% set grid_class = opts.get('grid_class') or 'media-gallery-grid' %}
+  {% set card_class = opts.get('card_class') or 'media-card' %}
+  {% set card_extra_class = opts.get('card_extra_class') or '' %}
+  {% set enable_focus_mode_opt = opts.get('enable_focus_mode') %}
+  {% if enable_focus_mode_opt is none %}
+    {% set enable_focus_mode_opt = opts.get('enable_fullscreen') %}
+  {% endif %}
+  {% set enable_focus_mode = enable_focus_mode_opt if enable_focus_mode_opt is not none else true %}
+  {% set card_image_sizes = opts.get('card_image_sizes') or '(max-width: 576px) 92vw, (max-width: 992px) 45vw, 320px' %}
+  {% set focus_image_sizes = opts.get('focus_image_sizes') or '100vw' %}
+  {% set initial_visible_opt = opts.get('initial_visible') %}
+  {% set initial_visible = (initial_visible_opt if initial_visible_opt is not none else 6)|int %}
+  {% set download_all_url = opts.get('download_all_url') %}
+  {% set download_all_oss_url = opts.get('download_all_oss_url') %}
   {% set entry_count = entries|length if entries else 0 %}
   {% set audio_entries = [] %}
+  {% set should_collapse = entry_count > initial_visible %}
   {% if entry_count %}
     {% set audio_entries = entries | selectattr('kind', 'equalto', 'audio') | list %}
   {% endif %}
   {% if entries %}
-  <div class="{{ gallery_class }}" id="{{ gallery_id }}">
-    {% if enable_focus_mode and entry_count %}
+  <div class="{{ gallery_class }}" id="{{ gallery_id }}" data-initial-visible="{{ initial_visible }}" data-total-count="{{ entry_count }}">
+    {% if (enable_focus_mode and entry_count) or download_all_url or should_collapse %}
     <div class="media-gallery-toolbar">
+      {% if enable_focus_mode and entry_count %}
       <span class="media-gallery-hint text-muted">点击任意卡片开启专注欣赏，双击退出</span>
+      {% endif %}
+      <div class="media-gallery-actions">
+        {% if download_all_oss_url %}
+        <a class="btn btn-outline-success btn-sm" href="{{ download_all_oss_url }}">
+          OSS 直连打包
+        </a>
+        {% endif %}
+        {% if should_collapse %}
+        <button class="btn btn-outline-secondary btn-sm"
+                type="button"
+                data-action="toggle-media-collapse"
+                data-target="#{{ gallery_id }}"
+                data-collapsed-text="展开全部 {{ entry_count }} 个媒体"
+                data-expanded-text="收起部分媒体">
+          展开全部 {{ entry_count }} 个媒体
+        </button>
+        {% endif %}
+      </div>
     </div>
     {% endif %}
-    <div class="{{ grid_class }}">
+    <div class="{{ grid_class }}" data-role="media-grid">
       {% for media in entries %}
       {% set kind = media.kind|default('file') %}
       {% set orientation = media.orientation if media.orientation is defined and media.orientation else 'unknown' %}
-      <div class="{{ card_class }}{% if options and options.card_extra_class %} {{ options.card_extra_class }}{% endif %}"
+      {% set is_collapsed = should_collapse and loop.index > initial_visible %}
+      <div class="{{ card_class }}{% if card_extra_class %} {{ card_extra_class }}{% endif %}"
            data-kind="{{ kind }}"
            data-orientation="{{ orientation }}"
+           {% if is_collapsed %}data-collapsed="true" hidden aria-hidden="true"{% endif %}
            {% if enable_focus_mode %}
            role="button"
            tabindex="0"
@@ -33,9 +65,33 @@
            data-focus-index="{{ loop.index0 }}"
            aria-label="打开{{ (media.display_name or media_kind_labels.get(kind, '媒体'))|e }}的大图浏览"
            {% endif %}>
+        <div class="media-card-meta">
+          <span class="media-kind-chip media-kind-chip-{{ kind }}">{{ media_kind_labels.get(kind, '媒体') }}</span>
+          {% if enable_focus_mode %}
+          <button class="media-card-focus-btn" type="button" aria-label="进入专注模式"
+                  data-action="open-focus-mode"
+                  data-focus-target="{{ focus_overlay_id }}"
+                  data-focus-index="{{ loop.index0 }}">
+            全屏
+          </button>
+          {% endif %}
+        </div>
+        <div class="media-card-media"
+             {% if enable_focus_mode %}
+             data-action="open-focus-mode"
+             data-focus-target="{{ focus_overlay_id }}"
+             data-focus-index="{{ loop.index0 }}"
+             aria-label="打开{{ (media.display_name or media_kind_labels.get(kind, '媒体'))|e }}的大图浏览"
+             {% endif %}>
         {% if kind == 'image' %}
-        <figure class="media-card-figure">
-          <img src="{{ media.url }}"
+        <figure class="media-card-figure"
+                {% if enable_focus_mode %}
+                data-action="open-focus-mode"
+                data-focus-target="{{ focus_overlay_id }}"
+                data-focus-index="{{ loop.index0 }}"
+                {% endif %}>
+          <img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="
+               data-lazy-src="{{ media.url }}"
                alt="{{ (media.display_name or '媒体文件')|e }}"
                class="media-card-img"
                data-orientation="{{ orientation }}"
@@ -47,27 +103,37 @@
         <p class="media-description">{{ media.description }}</p>
         {% endif %}
         {% elif kind == 'video' %}
-        <figure class="media-card-figure">
+        <figure class="media-card-figure"
+                {% if enable_focus_mode %}
+                data-action="open-focus-mode"
+                data-focus-target="{{ focus_overlay_id }}"
+                data-focus-index="{{ loop.index0 }}"
+                {% endif %}>
           <video class="media-card-video"
                  muted
                  playsinline
-                 loop
-                 autoplay
                  controls
-                 preload="metadata"
-                 poster="{{ media.poster|default('') }}"
+                 preload="none"
+                 data-lazy-preload="metadata"
+                 data-lazy-poster="{{ media.poster|default('') }}"
                  aria-label="{{ (media.display_name or media_kind_labels.get('video', '视频'))|e }}">
-            <source src="{{ media.url|e }}" type="{{ media.mimetype or 'video/mp4' }}">
+            <source data-lazy-src="{{ media.url|e }}" type="{{ media.mimetype or 'video/mp4' }}">
             您的浏览器不支持视频播放。
           </video>
         </figure>
         {% elif kind == 'audio' %}
-        <figure class="media-card-figure media-card-audio-figure">
+        <figure class="media-card-figure media-card-audio-figure"
+                {% if enable_focus_mode %}
+                data-action="open-focus-mode"
+                data-focus-target="{{ focus_overlay_id }}"
+                data-focus-index="{{ loop.index0 }}"
+                {% endif %}>
           <audio class="media-card-audio"
                  controls
-                 preload="metadata"
+                 preload="none"
+                 data-lazy-preload="metadata"
                  aria-label="{{ (media.display_name or media_kind_labels.get('audio', '音频'))|e }}">
-            <source src="{{ media.url|e }}" type="{{ media.mimetype or 'audio/mpeg' }}">
+            <source data-lazy-src="{{ media.url|e }}" type="{{ media.mimetype or 'audio/mpeg' }}">
             您的浏览器不支持音频播放。
           </audio>
         </figure>
@@ -75,6 +141,10 @@
         <div class="media-file-link">
           <span class="media-tag">{{ media_kind_labels.get(kind, '文件') }}</span>
         </div>
+        {% endif %}
+        </div>
+        {% if media.description %}
+        <p class="media-description">{{ media.description }}</p>
         {% endif %}
       </div>
       {% endfor %}
@@ -95,7 +165,7 @@
           &lsaquo;
         </button>
         <div class="media-focus-track" data-role="focus-track">
-          <div class="media-focus-track-inner" data-role="focus-track-inner">
+          <div class="media-focus-track-inner" data-role="focus-track-inner" style="--media-slide-count: {{ entry_count }}">
             {% for media in entries %}
             {% set kind = media.kind|default('file') %}
             {% set orientation = media.orientation if media.orientation is defined and media.orientation else 'unknown' %}
@@ -110,7 +180,8 @@
                      aria-hidden="{{ 'false' if loop.first else 'true' }}">
               <figure class="media-focus-figure">
                 {% if kind == 'image' %}
-                <img src="{{ media.url|e }}"
+                <img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="
+                     data-lazy-src="{{ media.url|e }}"
                      alt="{{ (media.display_name or media_kind_labels.get('image', '图片'))|e }}"
                      class="media-focus-image"
                      data-orientation="{{ orientation }}"
@@ -121,15 +192,16 @@
                 <video class="media-focus-video"
                        controls
                        playsinline
-                       preload="metadata"
-                       poster="{{ media.poster|default('')|e }}">
-                  <source src="{{ media.url|e }}" type="{{ media.mimetype or 'video/mp4' }}">
+                       preload="none"
+                       data-lazy-preload="metadata"
+                       data-lazy-poster="{{ media.poster|default('')|e }}">
+                  <source data-lazy-src="{{ media.url|e }}" type="{{ media.mimetype or 'video/mp4' }}">
                   您的浏览器不支持视频播放。
                 </video>
                 {% elif kind == 'audio' %}
                 <div class="media-focus-audio-inline">
-                  <audio controls preload="metadata">
-                    <source src="{{ media.url|e }}" type="{{ media.mimetype or 'audio/mpeg' }}">
+                  <audio controls preload="none" data-lazy-preload="metadata">
+                    <source data-lazy-src="{{ media.url|e }}" type="{{ media.mimetype or 'audio/mpeg' }}">
                     您的浏览器不支持音频播放。
                   </audio>
                 </div>
@@ -212,4 +284,18 @@
     <p class="mb-0">{{ empty_text }}</p>
   </div>
   {% endif %}
+  <script>
+    (function () {
+      var gallery = document.getElementById('{{ gallery_id }}');
+      if (!gallery) return;
+      gallery.addEventListener('click', function (event) {
+        var trigger = event.target.closest('[data-action="open-focus-mode"][data-focus-target]');
+        if (!trigger) return;
+        event.preventDefault();
+        if (window.BenlabOpenFocus) {
+          window.BenlabOpenFocus(trigger);
+        }
+      });
+    })();
+  </script>
 {%- endmacro %}

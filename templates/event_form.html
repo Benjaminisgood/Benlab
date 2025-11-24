@@ -62,15 +62,31 @@
       </div>
       {% if is_edit and event.images %}
       <div class="mb-3">
-        <label class="form-label">已上传媒资</label>
-        <div class="d-flex flex-wrap gap-3">
+        <label class="form-label d-flex justify-content-between align-items-center">
+          <span>已上传媒资</span>
+          <div class="d-flex gap-2">
+            {% if config['USE_OSS'] %}
+            <a class="btn btn-outline-success btn-sm" href="{{ url_for('download_event_media_archive_oss', event_id=event.id) }}">OSS 直连打包</a>
+            {% endif %}
+          </div>
+        </label>
+        {% set preview_limit = 4 %}
+        <div class="d-flex flex-wrap gap-3" id="existingEventMedia">
           {% for img in event.images %}
             {% set media_kind_value = media_kind(img.filename) %}
             {% set media_url = uploaded_media_url(img.filename) %}
             {% set media_name = media_display_name(img.filename) %}
-            <div class="media-card flex-column align-items-stretch" data-kind="{{ media_kind_value }}">
+            {% set is_collapsed = loop.index0 >= preview_limit %}
+            <div class="media-card flex-column align-items-stretch{% if is_collapsed %} d-none{% endif %}"
+                 data-kind="{{ media_kind_value }}"
+                 {% if is_collapsed %}data-collapsed="true" aria-hidden="true" hidden{% endif %}>
               {% if media_kind_value == 'image' %}
-              <img src="{{ media_url }}" alt="活动媒资" class="media-card-img">
+              <img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="
+                   data-lazy-src="{{ media_url }}"
+                   alt="活动媒资"
+                   class="media-card-img"
+                   loading="lazy"
+                   decoding="async">
               {% elif media_kind_value == 'video' %}
               <div class="media-placeholder" data-kind="video">
                 <div class="media-placeholder-header">
@@ -100,6 +116,18 @@
             </div>
           {% endfor %}
         </div>
+        {% if event.images|length > preview_limit %}
+        <div class="mt-2">
+          <button type="button"
+                  class="btn btn-outline-secondary btn-sm"
+                  data-action="toggle-media-collapse"
+                  data-target="#existingEventMedia"
+                  data-collapsed-text="展开全部 {{ event.images|length }} 个媒资"
+                  data-expanded-text="收起部分媒资">
+            展开全部 {{ event.images|length }} 个媒资
+          </button>
+        </div>
+        {% endif %}
       </div>
       {% endif %}
     </div>

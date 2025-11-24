@@ -190,7 +190,7 @@
         <div class="mb-3">
           <label for="eventShareLinkInput" class="form-label">扫码后跳转链接</label>
           <div class="input-group input-group-sm">
-            <input type="text" class="form-control" id="eventShareLinkInput" value="{{ share_meta.url }}" readonly>
+            <input type="text" class="form-control" id="eventShareLinkInput" value="{{ share_meta.url|e }}" readonly>
             <button type="button" class="btn btn-outline-secondary" id="copyShareLinkBtn">复制</button>
           </div>
         </div>
@@ -243,7 +243,18 @@
     <span class="badge bg-light text-dark border">{{ event_media|length }}</span>
   </div>
   <div class="card-body">
-    {{ render_media_gallery(event_media, 'eventMediaGallery', media_kind_labels, '暂无活动媒体') }}
+    {{ render_media_gallery(
+        event_media,
+        'eventMediaGallery',
+        media_kind_labels,
+        '暂无活动媒体',
+        {
+          'initial_visible': 6,
+          'download_all_url': url_for('download_event_media_archive', event_id=event.id),
+          'download_all_oss_url': url_for('download_event_media_archive_oss', event_id=event.id) if config['USE_OSS'] else None
+        }
+      )
+    }}
   </div>
 </div>
 {% endif %}
@@ -254,7 +265,14 @@
     if (!copyBtn || !input) {
       return;
     }
+    function setCopyState(ok) {
+      copyBtn.textContent = ok ? '已复制' : '复制失败';
+      window.setTimeout(function () {
+        copyBtn.textContent = '复制';
+      }, 2000);
+    }
     copyBtn.addEventListener('click', function () {
+      input.focus();
       input.select();
       input.setSelectionRange(0, input.value.length);
       var success = false;
@@ -265,13 +283,13 @@
       }
       if (!success && navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(input.value).then(function () {
-          success = true;
-        }).catch(function () {});
+          setCopyState(true);
+        }).catch(function () {
+          setCopyState(false);
+        });
+        return;
       }
-      copyBtn.textContent = success ? '已复制' : '复制失败';
-      setTimeout(function () {
-        copyBtn.textContent = '复制';
-      }, 2000);
+      setCopyState(success);
     });
   })();
 </script>

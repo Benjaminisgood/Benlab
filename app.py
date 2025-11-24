@@ -1,5 +1,8 @@
 import os
 import glob
+import tempfile
+import zipfile
+import threading
 from datetime import datetime, timedelta, timezone
 import re
 import json
@@ -7,7 +10,7 @@ from io import BytesIO
 import urllib.request
 from urllib.error import URLError, HTTPError
 from urllib.parse import urljoin, urlsplit, urlunsplit
-from flask import Flask, render_template, request, redirect, url_for, flash, send_file, send_from_directory, abort, jsonify
+from flask import Flask, render_template, request, redirect, url_for, flash, send_file, send_from_directory, abort, jsonify, after_this_request
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -1458,6 +1461,120 @@ def _build_oss_url(key):
     return f"https://{bucket}.{endpoint}/{key}"
 
 
+def _normalize_external_url(ref):
+    if not ref:
+        return None
+    if ref.startswith('//'):
+        return f"https:{ref}"
+    return ref
+
+
+def _read_media_bytes(ref, timeout=10):
+    """Load media bytes from local storage, OSS, or an external URL."""
+    if not ref:
+        return None
+    url = None
+    if _is_external_media(ref):
+        url = _normalize_external_url(ref)
+    elif app.config.get('USE_OSS'):
+        url = _build_oss_url(ref)
+    else:
+        upload_root = os.path.abspath(app.config['UPLOAD_FOLDER'])
+        path = os.path.abspath(os.path.join(app.config['UPLOAD_FOLDER'], ref))
+        if not path.startswith(upload_root):
+            return None
+        if os.path.exists(path):
+            try:
+                with open(path, 'rb') as fh:
+                    return fh.read()
+            except OSError:
+                return None
+    if not url:
+        return None
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            return resp.read()
+    except (URLError, HTTPError, OSError, ValueError):
+        return None
+
+
+def _safe_media_basename(ref, fallback_index=0):
+    token = (ref or '').split('?', 1)[0].split('#', 1)[0]
+    base = os.path.basename(token) or f"media-{fallback_index or 1}"
+    safe = secure_filename(base) or f"media-{fallback_index or 1}"
+    name, ext = os.path.splitext(safe)
+    return name or f"media-{fallback_index or 1}", ext
+
+
+def _collect_event_media_refs(event, allow_external=True):
+    media_refs = []
+    seen = set()
+    for img in getattr(event, 'images', []) or []:
+        ref = getattr(img, 'filename', None)
+        if not ref or ref in seen:
+            continue
+        if not allow_external and _is_external_media(ref):
+            continue
+        seen.add(ref)
+        media_refs.append(ref)
+    return media_refs
+
+
+def _build_archive_file(media_refs):
+    archive_file = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
+    used_names = set()
+    success_count = 0
+    with zipfile.ZipFile(archive_file, mode='w', compression=zipfile.ZIP_DEFLATED) as zf:
+        for idx, ref in enumerate(media_refs, start=1):
+            data = _read_media_bytes(ref)
+            if not data:
+                continue
+            arcname = _build_archive_name(ref, used_names, idx)
+            zf.writestr(arcname, data)
+            success_count += 1
+    archive_file.flush()
+    try:
+        archive_file.close()
+    except Exception:
+        pass
+    return archive_file.name, success_count
+
+
+def _upload_archive_to_oss(path, event_id):
+    if not path or not app.config.get('USE_OSS'):
+        return None, None
+    bucket = _get_oss_bucket()
+    if not bucket:
+        return None, None
+    prefix = app.config.get('OSS_PREFIX')
+    timestamp = datetime.utcnow().strftime('%Y%m%d%H%M%S')
+    filename = f"event-{event_id}-media-{timestamp}.zip"
+    object_key = f"archives/{filename}"
+    if prefix:
+        object_key = f"{prefix}/{object_key}"
+    bucket.put_object_from_file(object_key, path)
+    expiry = app.config.get('DIRECT_UPLOAD_URL_EXPIRATION', 900)
+    try:
+        expires_in = int(expiry)
+    except (TypeError, ValueError):
+        expires_in = 900
+    expires_in = max(60, expires_in)
+    signed_url = bucket.sign_url('GET', object_key, expires_in)
+    signed_url = _finalize_signed_upload_url(signed_url)
+
+    def _delete_later():
+        try:
+            bucket.delete_object(object_key)
+        except Exception:
+            pass
+
+    try:
+        threading.Timer(expires_in + 300, _delete_later).start()
+    except Exception:
+        pass
+    return signed_url, object_key
+
+
 def _finalize_signed_upload_url(url):
     """Rewrite signed OSS URL to desired domain/scheme for front-end direct uploads."""
     if not url:
@@ -2631,6 +2748,87 @@ def event_detail(event_id):
     )
 
 
+def _build_archive_name(ref, used_names, index):
+    base_name, ext = _safe_media_basename(ref, index)
+    candidate = f"{base_name}{ext}"
+    counter = 2
+    while candidate in used_names:
+        candidate = f"{base_name}-{counter}{ext}"
+        counter += 1
+    used_names.add(candidate)
+    return candidate
+
+
+@app.route('/events/<int:event_id>/media/archive')
+@login_required
+def download_event_media_archive(event_id):
+    event = _load_event_for_edit(event_id)
+    if not event.can_view(current_user):
+        abort(403)
+    media_refs = _collect_event_media_refs(event, allow_external=True)
+    if not media_refs:
+        abort(404, description='该事项暂无可下载的媒体文件')
+    archive_path, success_count = _build_archive_file(media_refs)
+
+    @after_this_request
+    def cleanup(response):  # pragma: no cover - cleanup helper
+        try:
+            os.remove(archive_path)
+        except OSError:
+            pass
+        return response
+
+    if success_count == 0:
+        try:
+            os.remove(archive_path)
+        except OSError:
+            pass
+        abort(404, description='媒体文件暂不可用，请稍后重试')
+
+    filename = f"event-{event.id}-media.zip"
+    return send_file(
+        archive_path,
+        mimetype='application/zip',
+        as_attachment=True,
+        download_name=filename
+    )
+
+
+@app.route('/events/<int:event_id>/media/archive/oss')
+@login_required
+def download_event_media_archive_oss(event_id):
+    if not app.config.get('USE_OSS'):
+        abort(404)
+    event = _load_event_for_edit(event_id)
+    if not event.can_view(current_user):
+        abort(403)
+    media_refs = _collect_event_media_refs(event, allow_external=False)
+    if not media_refs:
+        abort(404, description='该事项暂无存储在 OSS 的媒体文件')
+
+    archive_path, success_count = _build_archive_file(media_refs)
+
+    @after_this_request
+    def cleanup(response):  # pragma: no cover - cleanup helper
+        try:
+            os.remove(archive_path)
+        except OSError:
+            pass
+        return response
+
+    if success_count == 0:
+        try:
+            os.remove(archive_path)
+        except OSError:
+            pass
+        abort(404, description='媒体文件暂不可用，请稍后重试')
+
+    signed_url, _ = _upload_archive_to_oss(archive_path, event_id)
+    if not signed_url:
+        abort(503, description='OSS 存储未启用或不可用，无法生成直链下载')
+    return redirect(signed_url)
+
+
 @app.route('/events/<int:event_id>/poster.png')
 def event_share_poster(event_id):
     event = Event.query.options(
@@ -3617,6 +3815,16 @@ def edit_location(loc_id):
     if request.method == 'POST':
         # 更新位置信息
         location.name = request.form.get('name')
+        raw_parent_id = request.form.get('parent_id')
+        parent_id = None
+        if raw_parent_id:
+            try:
+                candidate_id = int(raw_parent_id)
+            except (TypeError, ValueError):
+                candidate_id = None
+            if candidate_id and candidate_id != location.id and Location.query.get(candidate_id):
+                parent_id = candidate_id
+        location.parent_id = parent_id
         responsible_ids = request.form.getlist('responsible_ids')
         detail_link = request.form.get('detail_link')
         location.clean_status = request.form.get('clean_status') or None

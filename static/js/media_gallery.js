@@ -10,6 +10,9 @@
   var swipeState = null;
   var fullscreenOverlay = null;
   var viewportVarName = '--media-focus-viewport';
+  var lazyObserver = null;
+  var trackResizeObservers = new WeakMap();
+  var TOUCH_TYPES = { touch: true, pen: true };
 
   function toArray(nodeList) {
     return Array.prototype.slice.call(nodeList || []);
@@ -24,6 +27,95 @@
       return;
     }
     document.documentElement.style.setProperty(viewportVarName, height + 'px');
+  }
+
+  function hydrateParentMedia(node) {
+    var media = node ? node.closest('video, audio') : null;
+    if (!media) {
+      return;
+    }
+    var preload = media.getAttribute('data-lazy-preload');
+    if (preload) {
+      media.setAttribute('preload', preload);
+      media.removeAttribute('data-lazy-preload');
+    }
+    var poster = media.getAttribute('data-lazy-poster');
+    if (poster) {
+      media.setAttribute('poster', poster);
+      media.removeAttribute('data-lazy-poster');
+    }
+    var sources = media.querySelectorAll('source[data-lazy-src]');
+    toArray(sources).forEach(function (source) {
+      var sourceSrc = source.getAttribute('data-lazy-src');
+      if (sourceSrc) {
+        source.setAttribute('src', sourceSrc);
+        source.removeAttribute('data-lazy-src');
+      }
+    });
+    try {
+      media.load();
+    } catch (error) {
+      /* ignore */
+    }
+  }
+
+  function loadLazyNode(node) {
+    if (!node) {
+      return;
+    }
+    var srcset = node.getAttribute('data-lazy-srcset');
+    if (srcset) {
+      node.setAttribute('srcset', srcset);
+      node.removeAttribute('data-lazy-srcset');
+    }
+    var src = node.getAttribute('data-lazy-src');
+    if (src) {
+      node.setAttribute('src', src);
+      node.removeAttribute('data-lazy-src');
+    }
+    var poster = node.getAttribute('data-lazy-poster');
+    if (poster) {
+      node.setAttribute('poster', poster);
+      node.removeAttribute('data-lazy-poster');
+    }
+    var preload = node.getAttribute('data-lazy-preload');
+    if (preload) {
+      node.setAttribute('preload', preload);
+      node.removeAttribute('data-lazy-preload');
+    }
+    hydrateParentMedia(node);
+    node.classList.remove('is-lazy');
+  }
+
+  function observeLazyMedia(root) {
+    var scope = root || document;
+    var nodes = toArray(scope.querySelectorAll('[data-lazy-src], [data-lazy-srcset], [data-lazy-poster], [data-lazy-preload]'));
+    if (!nodes.length) {
+      return;
+    }
+    if (!('IntersectionObserver' in window)) {
+      nodes.forEach(loadLazyNode);
+      return;
+    }
+    if (!lazyObserver) {
+      lazyObserver = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (entry.isIntersecting || entry.intersectionRatio > 0) {
+            var target = entry.target;
+            lazyObserver.unobserve(target);
+            loadLazyNode(target);
+          }
+        });
+      }, { rootMargin: '200px 0px', threshold: 0.01 });
+    }
+    nodes.forEach(function (node) {
+      if (node.dataset.lazyObserved === 'true') {
+        return;
+      }
+      node.dataset.lazyObserved = 'true';
+      node.classList.add('is-lazy');
+      lazyObserver.observe(node);
+    });
   }
 
   function ensureOverlayInBody(overlay) {
@@ -63,6 +155,10 @@
       img.dataset.orientationWatch = 'true';
       var onLoad = function () {
         classifyImageOrientation(img);
+        var overlay = img.closest(overlaySelector);
+        if (overlay && overlay.classList.contains('is-active')) {
+          updateTrackPosition(overlay, 0);
+        }
       };
       if (img.complete && img.naturalWidth && img.naturalHeight) {
         onLoad();
@@ -139,7 +235,40 @@
 
   function getTrackWidth(overlay) {
     var track = getTrack(overlay);
-    return track ? track.clientWidth : 0;
+    if (!track) {
+      return (overlay && overlay.clientWidth) || window.innerWidth || 0;
+    }
+    var rect = track.getBoundingClientRect();
+    if (rect && rect.width) {
+      return rect.width;
+    }
+    var activeSlide = track.querySelector('.media-focus-slide.is-active');
+    if (activeSlide && activeSlide.clientWidth) {
+      return activeSlide.clientWidth;
+    }
+    var firstSlide = track.querySelector('.media-focus-slide');
+    if (firstSlide && firstSlide.clientWidth) {
+      return firstSlide.clientWidth;
+    }
+    return track.clientWidth || (overlay && overlay.clientWidth) || window.innerWidth || 0;
+  }
+
+  function ensureSlideSizes(overlay) {
+    if (!overlay) {
+      return;
+    }
+    var slides = getSlides(overlay);
+    if (!slides.length) {
+      return;
+    }
+    slides.forEach(function (slide) {
+      slide.style.width = '';
+      slide.style.minWidth = '';
+    });
+    var inner = getTrackInner(overlay);
+    if (inner) {
+      inner.style.width = '';
+    }
   }
 
   function updateTrackPosition(overlay, dragOffset) {
@@ -147,11 +276,29 @@
     if (!inner) {
       return;
     }
+    ensureSlideSizes(overlay);
     var index = parseInt(overlay.dataset.activeIndex || '0', 10) || 0;
-    var trackWidth = getTrackWidth(overlay);
-    var base = -index * trackWidth;
+    var slides = getSlides(overlay);
+    var active = slides[index];
     var offset = dragOffset || 0;
-    inner.style.transform = 'translate3d(' + (base + offset) + 'px, 0, 0)';
+    var overlayRect = overlay.getBoundingClientRect();
+    var overlayWidth = (overlayRect && overlayRect.width) || overlay.clientWidth || window.innerWidth || 1;
+    var trackWidth = inner.scrollWidth || inner.getBoundingClientRect().width || overlayWidth;
+    var base = 0;
+    if (active && typeof active.offsetLeft === 'number') {
+      var activeRect = active.getBoundingClientRect();
+      var activeWidth = (activeRect && activeRect.width) || active.clientWidth || overlayWidth;
+      base = -active.offsetLeft + ((overlayWidth - activeWidth) / 2);
+    } else {
+      base = -(index * overlayWidth);
+    }
+    base += offset;
+    var minTranslate = overlayWidth - trackWidth;
+    if (!isFinite(minTranslate)) {
+      minTranslate = -trackWidth;
+    }
+    var clamped = Math.min(0, Math.max(minTranslate, base));
+    inner.style.transform = 'translate3d(' + clamped + 'px, 0, 0)';
   }
 
   function setDraggingState(overlay, dragging) {
@@ -160,6 +307,38 @@
       return;
     }
     inner.classList.toggle('is-dragging', Boolean(dragging));
+  }
+
+  function watchTrackResize(overlay) {
+    if (typeof ResizeObserver === 'undefined') {
+      return;
+    }
+    var track = getTrack(overlay);
+    if (!track || trackResizeObservers.has(track)) {
+      return;
+    }
+    var observer = new ResizeObserver(function () {
+      updateTrackPosition(overlay, 0);
+    });
+    observer.observe(track);
+    trackResizeObservers.set(track, observer);
+  }
+
+  function hydrateSlideMedia(slide) {
+    if (!slide) {
+      return;
+    }
+    var lazyNodes = slide.querySelectorAll('[data-lazy-src], [data-lazy-srcset], [data-lazy-poster], [data-lazy-preload]');
+    toArray(lazyNodes).forEach(function (node) {
+      if (lazyObserver) {
+        try {
+          lazyObserver.unobserve(node);
+        } catch (error) {
+          /* ignore */
+        }
+      }
+      loadLazyNode(node);
+    });
   }
 
   function setActiveSlide(overlay, nextIndex) {
@@ -175,10 +354,23 @@
       targetIndex = 0;
     }
     overlay.dataset.activeIndex = String(targetIndex);
+    var activeSlide = slides[targetIndex];
+    hydrateSlideMedia(activeSlide);
+    if (slides.length > 1) {
+      var nextSlide = slides[(targetIndex + 1) % slides.length];
+      var prevIndex = targetIndex - 1 >= 0 ? targetIndex - 1 : (slides.length - 1);
+      hydrateSlideMedia(slides[prevIndex]);
+      if (nextSlide && nextSlide !== activeSlide) {
+        hydrateSlideMedia(nextSlide);
+      }
+    }
     slides.forEach(function (slide, index) {
       var isActive = index === targetIndex;
       slide.classList.toggle('is-active', isActive);
       slide.setAttribute('aria-hidden', isActive ? 'false' : 'true');
+      if (isActive) {
+        slide.removeAttribute('hidden');
+      }
       var mediaNodes = slide.querySelectorAll('video, audio');
       toArray(mediaNodes).forEach(function (node) {
         if (typeof node.pause === 'function') {
@@ -204,7 +396,6 @@
     }
     var caption = overlay.querySelector('[data-role="focus-caption"]');
     if (caption) {
-      var activeSlide = slides[targetIndex];
       var description = activeSlide.getAttribute('data-description');
       var title = activeSlide.getAttribute('data-title');
       caption.textContent = description || title || '';
@@ -212,6 +403,9 @@
     updateDownloadLink(overlay);
     setDraggingState(overlay, false);
     updateTrackPosition(overlay, 0);
+    window.requestAnimationFrame(function () {
+      updateTrackPosition(overlay, 0);
+    });
   }
 
   function syncAudioPlayer(overlay, autoplay) {
@@ -259,11 +453,6 @@
     if (!overlay) {
       return;
     }
-    overlay.addEventListener('pointerdown', pointerDownHandler, { passive: true });
-    overlay.addEventListener('pointermove', pointerMoveHandler, { passive: true });
-    overlay.addEventListener('pointerup', pointerUpHandler, { passive: true });
-    overlay.addEventListener('pointercancel', pointerCancelHandler, { passive: true });
-    overlay.addEventListener('pointerleave', pointerCancelHandler, { passive: true });
     overlay.addEventListener('dblclick', function (event) {
       if (!shouldHandleDoubleTapTarget(event.target)) {
         return;
@@ -326,6 +515,8 @@
     if (overlay.dataset.focusBound === 'true') {
       return;
     }
+    observeLazyMedia(overlay);
+    watchTrackResize(overlay);
     var select = overlay.querySelector('[data-role="focus-audio-select"]');
     if (select) {
       select.addEventListener('change', function () {
@@ -355,6 +546,10 @@
     requestFullscreen(overlay);
     var initialIndex = parseInt(trigger.getAttribute('data-focus-index') || '0', 10) || 0;
     setActiveSlide(overlay, initialIndex);
+    window.requestAnimationFrame(function () {
+      setActiveSlide(overlay, initialIndex);
+      updateTrackPosition(overlay, 0);
+    });
     syncAudioPlayer(overlay, false);
     bindOrientationWatchers(overlay);
     lastTrigger = trigger;
@@ -397,6 +592,7 @@
     }
     var currentIndex = parseInt(overlay.dataset.activeIndex || '0', 10) || 0;
     setActiveSlide(overlay, currentIndex + (delta || 0));
+    updateTrackPosition(overlay, 0);
   }
 
   function showActionSheet(overlay) {
@@ -432,84 +628,59 @@
     }
   }
 
+  function isTouchLikePointer(event) {
+    var type = event.pointerType || '';
+    return type === 'touch' || type === 'pen' || type === '';
+  }
+
   function pointerDownHandler(event) {
-    if (!event.isPrimary) {
-      return;
-    }
-    var overlay = event.currentTarget.closest(overlaySelector) || event.currentTarget;
-    if (!overlay || shouldBlockSwipeTarget(event.target)) {
-      swipeState = null;
-      return;
-    }
-    var trackWidth = getTrackWidth(overlay) || overlay.clientWidth || 1;
-    swipeState = {
-      overlay: overlay,
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      trackWidth: trackWidth,
-      moved: false
-    };
-    setDraggingState(overlay, true);
-    try {
-      overlay.setPointerCapture(event.pointerId);
-    } catch (error) {
-      /* ignore */
-    }
-    startLongPress(overlay);
+    return;
   }
 
   function pointerMoveHandler(event) {
-    if (!swipeState || swipeState.pointerId !== event.pointerId) {
-      return;
-    }
-    var overlay = swipeState.overlay;
-    var dx = event.clientX - swipeState.startX;
-    var dy = event.clientY - swipeState.startY;
-    var moved = Math.abs(dx) > 6 || Math.abs(dy) > 6;
-    if (moved) {
-      swipeState.moved = true;
-    }
-    if (Math.abs(dx) > Math.abs(dy)) {
-      cancelLongPress();
-      updateTrackPosition(overlay, dx);
-    }
+    return;
   }
 
   function pointerUpHandler(event) {
-    var overlay = event.currentTarget.closest(overlaySelector) || event.currentTarget;
-    var handledSwipe = false;
-    if (swipeState && swipeState.pointerId === event.pointerId) {
-      var dx = event.clientX - swipeState.startX;
-      var dy = event.clientY - swipeState.startY;
-      var threshold = Math.max(60, (swipeState.trackWidth || 1) * 0.18);
-      cancelLongPress();
-      if (swipeState.moved && Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > threshold) {
-        stepSlide(overlay, dx > 0 ? -1 : 1);
-        handledSwipe = true;
-      } else {
-        updateTrackPosition(overlay, 0);
-      }
-      setDraggingState(overlay, false);
-      releasePointerCapture(overlay, event.pointerId);
-      swipeState = null;
-    } else {
-      cancelLongPress();
-    }
-    if (!handledSwipe) {
-      handleDoubleTap(overlay, event.target, event.pointerType);
-    }
+    return;
   }
 
   function pointerCancelHandler(event) {
-    if (swipeState && swipeState.pointerId === event.pointerId) {
-      var overlay = swipeState.overlay;
-      releasePointerCapture(event.currentTarget, event.pointerId);
-      setDraggingState(overlay, false);
-      updateTrackPosition(overlay, 0);
-      swipeState = null;
+    return;
+  }
+
+  function setGalleryCollapsedState(wrapper, expand) {
+    if (!wrapper) {
+      return;
     }
-    cancelLongPress();
+    var collapsedCards = wrapper.querySelectorAll('[data-collapsed="true"]');
+    var show = Boolean(expand);
+    toArray(collapsedCards).forEach(function (card) {
+      card.hidden = !show;
+      card.classList.toggle('d-none', !show);
+      card.setAttribute('aria-hidden', show ? 'false' : 'true');
+    });
+    if (show) {
+      observeLazyMedia(wrapper);
+    }
+  }
+
+  function toggleMediaCollapse(trigger) {
+    if (!trigger) {
+      return;
+    }
+    var targetSelector = trigger.getAttribute('data-target');
+    var wrapper = targetSelector ? document.querySelector(targetSelector) : trigger.closest('.media-gallery');
+    if (!wrapper) {
+      return;
+    }
+    var expanded = trigger.getAttribute('data-expanded') === 'true';
+    var nextExpanded = !expanded;
+    setGalleryCollapsedState(wrapper, nextExpanded);
+    var collapsedText = trigger.getAttribute('data-collapsed-text') || trigger.textContent || '展开';
+    var expandedText = trigger.getAttribute('data-expanded-text') || '收起';
+    trigger.textContent = nextExpanded ? expandedText : collapsedText;
+    trigger.setAttribute('data-expanded', nextExpanded ? 'true' : 'false');
   }
 
   function handleDocumentClick(event) {
@@ -517,6 +688,12 @@
     if (focusTrigger) {
       event.preventDefault();
       openOverlay(focusTrigger);
+      return;
+    }
+    var collapseTrigger = event.target.closest('[data-action="toggle-media-collapse"]');
+    if (collapseTrigger) {
+      event.preventDefault();
+      toggleMediaCollapse(collapseTrigger);
       return;
     }
     var navTrigger = event.target.closest(navSelector);
@@ -580,11 +757,35 @@
   document.addEventListener('click', handleDocumentClick, false);
   document.addEventListener('keydown', handleKeydown, false);
 
+  function bindCardClickFallback() {
+    var cards = document.querySelectorAll('.media-card[data-action="open-focus-mode"][data-focus-target]');
+    cards.forEach(function (card) {
+      if (card.dataset.focusBound === 'true') {
+        return;
+      }
+      card.dataset.focusBound = 'true';
+      card.addEventListener('click', function (evt) {
+        var target = card.getAttribute('data-focus-target');
+        if (!target) {
+          return;
+        }
+        if (evt.defaultPrevented) {
+          return;
+        }
+        openOverlay(card);
+      });
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', function () {
     updateViewportUnit();
+    bindCardClickFallback();
+    observeLazyMedia(document);
     var overlays = document.querySelectorAll(overlaySelector);
     overlays.forEach(function (overlay) {
       prepareOverlay(overlay);
+      ensureSlideSizes(overlay);
+      updateTrackPosition(overlay, 0);
     });
     bindOrientationWatchers(document);
   });
@@ -610,4 +811,15 @@
     }
   }, false);
   window.addEventListener('orientationchange', updateViewportUnit, false);
+
+  // 公开一个兜底入口，便于内联脚本直接触发专注模式
+  window.BenlabOpenFocus = function (trigger) {
+    if (trigger) {
+      openOverlay(trigger);
+    }
+  };
 })();
+  function isTouchLikePointer(event) {
+    var type = event.pointerType || '';
+    return TOUCH_TYPES[type] || type === '';
+  }

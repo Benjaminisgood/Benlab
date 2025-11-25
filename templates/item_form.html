@@ -3,6 +3,33 @@
 {% set existing_detail_links = item.detail_links if item else [] %}
 {% set allowed_features = ['公共','私人'] %}
 {% set form_id = 'itemForm' %}
+<style>
+  .card-select {
+    border: 1px solid var(--bs-border-color);
+    transition: all .12s ease-in-out;
+  }
+  .btn-check:checked + .card-select {
+    border-color: rgba(var(--bs-primary-rgb, 13, 110, 253), 0.9);
+    background-color: var(--bs-primary-bg-subtle, rgba(var(--bs-primary-rgb, 13, 110, 253), 0.08));
+    box-shadow: 0 .35rem 1rem rgba(var(--bs-primary-rgb, 13, 110, 253), 0.25);
+  }
+  .btn-check:focus + .card-select {
+    outline: 2px solid rgba(var(--bs-primary-rgb, 13, 110, 253), 0.2);
+    outline-offset: 2px;
+  }
+  .card-select-mark { display: none; }
+  .btn-check:checked + .card-select .card-select-mark { display: inline-flex; align-items: center; gap: .25rem; }
+  .btn-check:checked + .card-select .card-select-hint { display: none; }
+  .card-select-surface {
+    background-color: var(--bs-body-bg);
+    color: var(--bs-body-color);
+  }
+  .selection-panel {
+    background-color: var(--bs-tertiary-bg, var(--bs-gray-100, #f8f9fa));
+    border: 1px solid var(--bs-border-color);
+    color: var(--bs-body-color);
+  }
+</style>
 <h4 class="mb-3">{{ item and item.id and '编辑物品' or '新增物品' }}</h4>
 <form method="post" id="{{ form_id }}" enctype="multipart/form-data" action="{% if item %}{{ url_for('edit_item', item_id=item.id) }}{% else %}{{ url_for('add_item') }}{% endif %}">
   <div class="mb-3">
@@ -43,7 +70,7 @@
   <div class="mb-3">
     <label class="form-label">负责人</label>
     <div class="d-flex flex-wrap align-items-center gap-2">
-      <div id="itemResponsibleSummary" class="d-flex flex-wrap gap-2">
+      <div id="itemResponsibleSummary" class="d-flex flex-wrap gap-2 border rounded-3 px-3 py-2 bg-body-secondary text-body">
         {% if item and item.responsible_members %}
           {% for member in item.responsible_members %}
             <span class="badge bg-light text-dark border">{{ member.name or member.username }}</span>
@@ -61,7 +88,7 @@
   <div class="mb-3">
     <label class="form-label">存放位置（可多选）</label>
     <div class="d-flex flex-wrap align-items-center gap-2">
-      <div id="itemLocationsSummary" class="d-flex flex-wrap gap-2"></div>
+      <div id="itemLocationsSummary" class="d-flex flex-wrap gap-2 border rounded-3 px-3 py-2 bg-body-secondary text-body"></div>
       <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#itemLocationsModal">
         管理位置
       </button>
@@ -246,27 +273,33 @@
           <h5 class="modal-title" id="itemLocationsModalLabel">选择存放位置</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
         </div>
-        <div class="modal-body">
-          <input type="search" class="form-control form-control-sm mb-3" id="itemLocationsSearch" placeholder="搜索位置名称">
-          <div class="border rounded p-2" style="max-height: 320px; overflow-y: auto;">
-            {% for loc in locations %}
-            <div class="form-check item-location-row py-1" data-label="{{ loc.name|lower }}">
-              <input class="form-check-input item-location-checkbox" type="checkbox" form="{{ form_id }}" name="location_ids" value="{{ loc.id }}"
-                     id="itemLocation{{ loc.id }}" data-label="{{ loc.name }}"
-                     {% if item and item.locations and (loc in item.locations) %}
-                       checked
-                     {% elif not item and default_loc_id and loc.id == default_loc_id %}
-                       checked
-                     {% endif %}>
-              <label class="form-check-label" for="itemLocation{{ loc.id }}">{{ loc.name }}</label>
-            </div>
-            {% endfor %}
+      <div class="modal-body">
+        <input type="search" class="form-control form-control-sm mb-3" id="itemLocationsSearch" placeholder="搜索位置名称">
+        <div class="selection-panel rounded-3 p-2" style="max-height: 320px; overflow-y: auto;">
+          {% for loc in locations %}
+          <div class="item-location-row mb-2" data-label="{{ loc.name|lower }}">
+            <input class="btn-check item-location-checkbox" type="checkbox" form="{{ form_id }}" name="location_ids" value="{{ loc.id }}"
+                   id="itemLocation{{ loc.id }}" data-label="{{ loc.name }}"
+                   {% if item and item.locations and (loc in item.locations) %}
+                     checked
+                   {% elif not item and default_loc_id and loc.id == default_loc_id %}
+                     checked
+                   {% endif %}>
+            <label class="card-select card-select-surface d-flex justify-content-between align-items-center w-100 p-3 border rounded-3 shadow-sm" for="itemLocation{{ loc.id }}">
+              <span class="fw-semibold">{{ loc.name }}</span>
+              <span class="text-muted small">
+                <span class="card-select-mark badge bg-primary-subtle text-primary-emphasis border">已选</span>
+                <span class="card-select-hint">点击选择</span>
+              </span>
+            </label>
           </div>
+          {% endfor %}
         </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-outline-secondary btn-sm" id="itemLocationsClearBtn">清除全部</button>
-          <button type="button" class="btn btn-primary btn-sm" data-bs-dismiss="modal">完成</button>
-        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="itemLocationsClearBtn">清除全部</button>
+        <button type="button" class="btn btn-primary btn-sm" data-bs-dismiss="modal">完成</button>
+      </div>
       </div>
     </div>
   </div>
@@ -277,29 +310,35 @@
           <h5 class="modal-title" id="itemResponsibleModalLabel">选择负责人</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
         </div>
-        <div class="modal-body">
-          <input type="search" class="form-control form-control-sm mb-3" id="itemResponsibleSearch" placeholder="搜索姓名或用户名">
-          <div class="border rounded p-2" style="max-height: 320px; overflow-y: auto;">
-            {% for m in members %}
-            <div class="form-check item-responsible-row py-1" data-label="{{ (m.name or m.username)|lower }}">
-              <input class="form-check-input item-responsible-checkbox" type="checkbox" form="{{ form_id }}" name="responsible_ids" value="{{ m.id }}"
-                     id="itemResponsible{{ m.id }}"
-                     data-display="{{ m.name or m.username }}"
-                     {% if item and item.responsible_members and (m in item.responsible_members) %}checked{% endif %}>
-              <label class="form-check-label d-flex justify-content-between align-items-center" for="itemResponsible{{ m.id }}">
-                <span>{{ m.name or m.username }}</span>
+      <div class="modal-body">
+        <input type="search" class="form-control form-control-sm mb-3" id="itemResponsibleSearch" placeholder="搜索姓名或用户名">
+        <div class="selection-panel rounded-3 p-2" style="max-height: 320px; overflow-y: auto;">
+          {% for m in members %}
+          <div class="item-responsible-row mb-2" data-label="{{ (m.name or m.username)|lower }}">
+            <input class="btn-check item-responsible-checkbox" type="checkbox" form="{{ form_id }}" name="responsible_ids" value="{{ m.id }}"
+                   id="itemResponsible{{ m.id }}"
+                   data-display="{{ m.name or m.username }}"
+                   {% if item and item.responsible_members and (m in item.responsible_members) %}checked{% endif %}>
+            <label class="card-select card-select-surface d-flex justify-content-between align-items-center w-100 p-3 border rounded-3 shadow-sm" for="itemResponsible{{ m.id }}">
+              <div class="d-flex align-items-center gap-2">
+                <span class="fw-semibold">{{ m.name or m.username }}</span>
                 {% if m.username and m.name and m.username != m.name %}
-                  <small class="text-muted">@{{ m.username }}</small>
+                  <span class="badge bg-light text-muted border">@{{ m.username }}</span>
                 {% endif %}
-              </label>
-            </div>
-            {% endfor %}
+              </div>
+              <span class="text-muted small">
+                <span class="card-select-mark badge bg-primary-subtle text-primary-emphasis border">已选</span>
+                <span class="card-select-hint">点击选择</span>
+              </span>
+            </label>
           </div>
+          {% endfor %}
         </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-outline-secondary btn-sm" id="itemResponsibleClearBtn">清除全部</button>
-          <button type="button" class="btn btn-primary btn-sm" data-bs-dismiss="modal">完成</button>
-        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="itemResponsibleClearBtn">清除全部</button>
+        <button type="button" class="btn btn-primary btn-sm" data-bs-dismiss="modal">完成</button>
+      </div>
       </div>
     </div>
   </div>

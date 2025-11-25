@@ -1,9 +1,39 @@
 {% extends "base.html" %}
 {% from "_media_gallery.html" import render_media_gallery %}
 {% block content %}
+<style>
+  .card-select {
+    border: 1px solid var(--bs-border-color);
+    transition: all .12s ease-in-out;
+  }
+  .btn-check:checked + .card-select {
+    border-color: rgba(var(--bs-primary-rgb, 13, 110, 253), 0.9);
+    background-color: var(--bs-primary-bg-subtle, rgba(var(--bs-primary-rgb, 13, 110, 253), 0.08));
+    box-shadow: 0 .35rem 1rem rgba(var(--bs-primary-rgb, 13, 110, 253), 0.25);
+  }
+  .btn-check:focus + .card-select {
+    outline: 2px solid rgba(var(--bs-primary-rgb, 13, 110, 253), 0.2);
+    outline-offset: 2px;
+  }
+  .card-select-mark { display: none; }
+  .btn-check:checked + .card-select .card-select-mark { display: inline-flex; align-items: center; gap: .25rem; }
+  .btn-check:checked + .card-select .card-select-hint { display: none; }
+  .card-select-surface {
+    background-color: var(--bs-body-bg);
+    color: var(--bs-body-color);
+  }
+  .selection-panel {
+    background-color: var(--bs-tertiary-bg, var(--bs-gray-100, #f8f9fa));
+    border: 1px solid var(--bs-border-color);
+    color: var(--bs-body-color);
+  }
+</style>
 <h4 class="mb-3">{{ location.name }}</h4>
 
 <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+  {% if location.latitude is not none and location.longitude is not none %}
+  <button type="button" class="btn btn-outline-secondary" id="copyLocationCoordBtn">复制坐标</button>
+  {% endif %}
   <button type="button" class="btn btn-outline-secondary" id="shareLocationLinkBtn" data-url="{{ request.url }}">分享链接</button>
   <button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#addExistingItemsModal" {% if not available_items %}disabled{% endif %}>
     ➕ 加入已有物品
@@ -28,12 +58,7 @@
 <div class="row">
   <div class="col-md-6">
     <ul class="list-group mb-3">
-      <li class="list-group-item">
-        <strong>名称：</strong>{{ location.name }}
-        {% if location_meta.is_public %}
-        <span class="badge bg-success-subtle text-success-emphasis border ms-2">公共共享</span>
-        {% endif %}
-      </li>
+      <li class="list-group-item"><strong>名称：</strong>{{ location.name }}</li>
       <li class="list-group-item">
         <strong>负责人：</strong>
         {% if location.responsible_members %}
@@ -102,7 +127,6 @@
             </span>
             {% endif %}
           </div>
-          <button type="button" class="btn btn-outline-secondary btn-sm" id="copyLocationCoordBtn">复制坐标</button>
         </div>
         <div class="btn-group btn-group-sm mt-3" role="group">
           <a class="btn btn-outline-primary" href="geo:{{ '%.6f'|format(location.latitude) }},{{ '%.6f'|format(location.longitude) }}">系统地图</a>
@@ -130,6 +154,9 @@
           <span class="badge bg-light text-dark border">参与 {{ event_summary.participants }}</span>
           {% endif %}
           <span class="badge bg-light text-dark border">成员关联 {{ affiliation_total }}</span>
+          {% if location_meta.is_public %}
+          <span class="badge bg-success-subtle text-success-emphasis border">公共共享</span>
+          {% endif %}
         </div>
         {% if status_stats %}
         <hr class="my-3">
@@ -214,34 +241,38 @@
           {% if available_items %}
             <p class="text-muted small mb-2">可多选，支持搜索。</p>
             <input type="text" class="form-control form-control-sm mb-3" id="existingItemsSearch" placeholder="搜索物品或负责人">
-            <div class="border rounded p-2 existing-items-container" style="max-height: 320px; overflow-y: auto;">
+            <div class="selection-panel rounded p-2 existing-items-container" style="max-height: 320px; overflow-y: auto;">
               {% for item in available_items %}
                 {% set lead = item.primary_responsible %}
-                <div class="form-check existing-item-row py-1" data-label="{{ item.name|lower }} {% if lead %}{{ (lead.name or lead.username)|lower }}{% endif %}">
-                  <input class="form-check-input existing-item-checkbox" type="checkbox" value="{{ item.id }}" name="existing_item_ids" id="existingItem{{ item.id }}">
-                  <label class="form-check-label d-flex justify-content-between align-items-center gap-2" for="existingItem{{ item.id }}">
-                    <div>
-                      <span class="fw-semibold">{{ item.name }}</span>
-                      {% if lead %}
-                      <span class="badge bg-light text-dark border ms-2">{{ lead.name or lead.username }}</span>
-                      {% endif %}
-                    </div>
-                    <div class="text-end">
-                      {% if item.stock_status %}
-                      {% set status_intent = stock_status_intent(item.stock_status) %}
-                      <span class="badge badge-item-status badge-item-status-{{ status_intent }}">{{ item.stock_status }}</span>
-                      {% endif %}
-                      {% if item.category %}
-                      <small class="text-muted ms-2">{{ item.category }}</small>
-                      {% endif %}
-                    </div>
-                  </label>
+            <div class="existing-item-row mb-2" data-label="{{ item.name|lower }} {% if lead %}{{ (lead.name or lead.username)|lower }}{% endif %}">
+              <input class="btn-check existing-item-checkbox" type="checkbox" value="{{ item.id }}" name="existing_item_ids" id="existingItem{{ item.id }}">
+              <label class="card-select card-select-surface d-flex justify-content-between align-items-center gap-2 w-100 p-3 border rounded-3 shadow-sm" for="existingItem{{ item.id }}">
+                <div>
+                  <span class="fw-semibold">{{ item.name }}</span>
+                  {% if lead %}
+                  <span class="badge bg-light text-dark border ms-2">{{ lead.name or lead.username }}</span>
+                  {% endif %}
                 </div>
-              {% endfor %}
+                <div class="text-end">
+                  {% if item.stock_status %}
+                  {% set status_intent = stock_status_intent(item.stock_status) %}
+                  <span class="badge badge-item-status badge-item-status-{{ status_intent }}">{{ item.stock_status }}</span>
+                  {% endif %}
+                  {% if item.category %}
+                  <small class="text-muted ms-2">{{ item.category }}</small>
+                  {% endif %}
+                  <div class="text-muted small">
+                    <span class="card-select-mark badge bg-primary-subtle text-primary-emphasis border">已选</span>
+                    <span class="card-select-hint">点击选择</span>
+                  </div>
+                </div>
+              </label>
             </div>
-          {% else %}
-            <p class="text-muted mb-0">暂无可加入的物品。</p>
-          {% endif %}
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="text-muted mb-0">暂无可加入的物品。</p>
+      {% endif %}
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
@@ -266,35 +297,39 @@
           {% if items %}
             <p class="text-muted small mb-2">选择需要移出的物品，支持搜索。</p>
             <input type="text" class="form-control form-control-sm mb-3" id="removeItemsSearch" placeholder="搜索物品或负责人">
-            <div class="border rounded p-2 existing-items-container" style="max-height: 320px; overflow-y: auto;">
+            <div class="selection-panel rounded p-2 existing-items-container" style="max-height: 320px; overflow-y: auto;">
               {% for it in items %}
-                <div class="form-check remove-item-row py-1" data-label="{{ it.name|lower }} {% if it.responsible_members %}{% for member in it.responsible_members %}{{ member.name|lower }} {% endfor %}{% endif %}">
-                  <input class="form-check-input remove-item-checkbox" type="checkbox" value="{{ it.id }}" name="remove_item_ids" id="removeModalItem{{ it.id }}">
-                  <label class="form-check-label d-flex justify-content-between align-items-center gap-2" for="removeModalItem{{ it.id }}">
-                    <div>
-                      <span class="fw-semibold">{{ it.name }}</span>
-                      {% if it.responsible_members %}
-                        {% for member in it.responsible_members %}
-                        <span class="badge bg-light text-dark border ms-2">{{ member.name or member.username }}</span>
-                        {% endfor %}
-                      {% endif %}
-                    </div>
-                    <div class="text-end">
-                      {% if it.stock_status %}
-                      {% set status_intent = stock_status_intent(it.stock_status) %}
-                      <span class="badge badge-item-status badge-item-status-{{ status_intent }}">{{ it.stock_status }}</span>
-                      {% endif %}
-                      {% if it.category %}
-                      <small class="text-muted ms-2">{{ it.category }}</small>
-                      {% endif %}
-                    </div>
-                  </label>
+            <div class="remove-item-row mb-2" data-label="{{ it.name|lower }} {% if it.responsible_members %}{% for member in it.responsible_members %}{{ member.name|lower }} {% endfor %}{% endif %}">
+              <input class="btn-check remove-item-checkbox" type="checkbox" value="{{ it.id }}" name="remove_item_ids" id="removeModalItem{{ it.id }}">
+              <label class="card-select card-select-surface d-flex justify-content-between align-items-center gap-2 w-100 p-3 border rounded-3 shadow-sm" for="removeModalItem{{ it.id }}">
+                <div>
+                  <span class="fw-semibold">{{ it.name }}</span>
+                  {% if it.responsible_members %}
+                    {% for member in it.responsible_members %}
+                    <span class="badge bg-light text-dark border ms-2">{{ member.name or member.username }}</span>
+                    {% endfor %}
+                  {% endif %}
                 </div>
-              {% endfor %}
+                <div class="text-end">
+                  {% if it.stock_status %}
+                  {% set status_intent = stock_status_intent(it.stock_status) %}
+                  <span class="badge badge-item-status badge-item-status-{{ status_intent }}">{{ it.stock_status }}</span>
+                  {% endif %}
+                  {% if it.category %}
+                  <small class="text-muted ms-2">{{ it.category }}</small>
+                  {% endif %}
+                  <div class="text-muted small">
+                    <span class="card-select-mark badge bg-primary-subtle text-primary-emphasis border">已选</span>
+                    <span class="card-select-hint">点击选择</span>
+                  </div>
+                </div>
+              </label>
             </div>
-          {% else %}
-            <p class="text-muted mb-0">当前位置暂无物品，无需移除。</p>
-          {% endif %}
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="text-muted mb-0">当前位置暂无物品，无需移除。</p>
+      {% endif %}
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>

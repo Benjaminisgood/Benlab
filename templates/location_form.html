@@ -1,6 +1,33 @@
 {% extends "base.html" %}
 {% block content %}
 {% set form_id = 'locationForm' %}
+<style>
+  .card-select {
+    border: 1px solid var(--bs-border-color);
+    transition: all .12s ease-in-out;
+  }
+  .btn-check:checked + .card-select {
+    border-color: rgba(var(--bs-primary-rgb, 13, 110, 253), 0.9);
+    background-color: var(--bs-primary-bg-subtle, rgba(var(--bs-primary-rgb, 13, 110, 253), 0.08));
+    box-shadow: 0 .35rem 1rem rgba(var(--bs-primary-rgb, 13, 110, 253), 0.25);
+  }
+  .btn-check:focus + .card-select {
+    outline: 2px solid rgba(var(--bs-primary-rgb, 13, 110, 253), 0.2);
+    outline-offset: 2px;
+  }
+  .card-select-mark { display: none; }
+  .btn-check:checked + .card-select .card-select-mark { display: inline-flex; align-items: center; gap: .25rem; }
+  .btn-check:checked + .card-select .card-select-hint { display: none; }
+  .card-select-surface {
+    background-color: var(--bs-body-bg);
+    color: var(--bs-body-color);
+  }
+  .selection-panel {
+    background-color: var(--bs-tertiary-bg, var(--bs-gray-100, #f8f9fa));
+    border: 1px solid var(--bs-border-color);
+    color: var(--bs-body-color);
+  }
+</style>
 <h4 class="mb-3">{{ location and '编辑空间' or '新增空间' }}</h4>
 <form method="post" id="{{ form_id }}" enctype="multipart/form-data" action="{% if location %}{{ url_for('edit_location', loc_id=location.id) }}{% else %}{{ url_for('add_location') }}{% endif %}">
   <div class="mb-3">
@@ -10,7 +37,7 @@
   <div class="mb-3">
     <label class="form-label">负责人</label>
     <div class="d-flex flex-wrap align-items-center gap-2">
-      <div id="locationResponsibleSummary" class="d-flex flex-wrap gap-2"></div>
+      <div id="locationResponsibleSummary" class="d-flex flex-wrap gap-2 border rounded-3 px-3 py-2 bg-body-secondary text-body"></div>
       <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#locationResponsibleModal">
         管理负责人
       </button>
@@ -32,11 +59,9 @@
     <label class="form-label d-block">空间属性</label>
     <div class="d-flex flex-wrap gap-2">
       {% for value, label in location_usage_choices %}
-      <div class="form-check form-check-inline">
-        <input class="form-check-input" type="checkbox" id="usageTag{{ loop.index }}" name="usage_tags" value="{{ value }}"
-               {% if value in location_meta.usage_tags %}checked{% endif %}>
-        <label class="form-check-label" for="usageTag{{ loop.index }}">{{ label }}</label>
-      </div>
+        <input class="btn-check" type="checkbox" id="usageTag{{ loop.index }}" name="usage_tags" value="{{ value }}"
+               autocomplete="off" {% if value in location_meta.usage_tags %}checked{% endif %}>
+        <label class="btn btn-outline-primary btn-sm rounded-pill px-3" for="usageTag{{ loop.index }}">{{ label }}</label>
       {% endfor %}
     </div>
     <div class="form-text text-muted">用于描述空间的主要用途，可多选；示例：学习空间、休闲娱乐、活动场地、储物空间、旅游推荐等。</div>
@@ -44,7 +69,7 @@
   <div class="mb-3">
     <label class="form-label">上级空间（可选）</label>
     <div class="d-flex flex-wrap align-items-center gap-2">
-      <div id="parentLocationSummary" class="badge bg-light text-dark border">
+      <div id="parentLocationSummary" class="badge bg-body-secondary text-body border">
         {% if location and location.parent %}
           {{ location.parent.name }}
         {% else %}
@@ -216,21 +241,27 @@
         </div>
         <div class="modal-body">
           <input type="search" class="form-control form-control-sm mb-3" id="locationResponsibleSearch" placeholder="搜索姓名或用户名">
-          <div class="border rounded p-2" style="max-height: 320px; overflow-y: auto;">
+          <div class="selection-panel rounded-3 p-2" style="max-height: 320px; overflow-y: auto;">
             {% for m in members %}
-            <div class="form-check location-responsible-row py-1" data-label="{{ (m.name or m.username)|lower }}">
-              <input class="form-check-input location-responsible-checkbox" type="checkbox" form="{{ form_id }}" name="responsible_ids" value="{{ m.id }}"
+            <div class="location-responsible-row mb-2" data-label="{{ (m.name or m.username)|lower }}">
+              <input class="btn-check location-responsible-checkbox" type="checkbox" form="{{ form_id }}" name="responsible_ids" value="{{ m.id }}"
                      id="locationResp{{ m.id }}" data-label="{{ m.name or m.username }}"
                      {% if location and m in location.responsible_members %}
                        checked
                      {% elif not location and not location_meta.is_public and m.id == current_user.id %}
                        checked
                      {% endif %}>
-              <label class="form-check-label d-flex justify-content-between align-items-center w-100" for="locationResp{{ m.id }}">
-                <span>{{ m.name or m.username }}</span>
-                {% if m.username and m.name and m.username != m.name %}
-                  <small class="text-muted">@{{ m.username }}</small>
-                {% endif %}
+              <label class="card-select card-select-surface d-flex justify-content-between align-items-center w-100 p-3 border rounded-3 shadow-sm" for="locationResp{{ m.id }}">
+                <div class="d-flex align-items-center gap-2">
+                  <span class="fw-semibold">{{ m.name or m.username }}</span>
+                  {% if m.username and m.name and m.username != m.name %}
+                    <span class="badge bg-light text-muted border">@{{ m.username }}</span>
+                  {% endif %}
+                </div>
+                <span class="text-muted small">
+                  <span class="card-select-mark badge bg-primary-subtle text-primary-emphasis border">已选</span>
+                  <span class="card-select-hint">点击选择</span>
+                </span>
               </label>
             </div>
             {% endfor %}
@@ -252,20 +283,32 @@
         </div>
         <div class="modal-body">
           <input type="search" class="form-control form-control-sm mb-3" id="parentLocationSearch" placeholder="搜索空间名称">
-          <div class="border rounded p-2" style="max-height: 320px; overflow-y: auto;">
-            <div class="form-check parent-location-row py-1" data-label="顶层空间">
-              <input class="form-check-input parent-location-radio" type="radio" form="{{ form_id }}" name="parent_location_select" value=""
+          <div class="selection-panel rounded-3 p-2" style="max-height: 320px; overflow-y: auto;">
+            <div class="parent-location-row mb-2" data-label="顶层空间">
+              <input class="btn-check parent-location-radio" type="radio" form="{{ form_id }}" name="parent_location_select" value=""
                      id="parentLocationNone" {% if not location or not location.parent_id %}checked{% endif %}>
-              <label class="form-check-label" for="parentLocationNone">顶层空间</label>
+              <label class="card-select card-select-surface d-flex justify-content-between align-items-center w-100 p-3 border rounded-3 shadow-sm" for="parentLocationNone">
+                <span class="fw-semibold">顶层空间</span>
+                <span class="text-muted small">
+                  <span class="card-select-mark badge bg-primary-subtle text-primary-emphasis border">已选</span>
+                  <span class="card-select-hint">无上级</span>
+                </span>
+              </label>
             </div>
             {% for parent in parents %}
               {% if not (location and parent.id == location.id) %}
-              <div class="form-check parent-location-row py-1" data-label="{{ parent.name|lower }}">
-                <input class="form-check-input parent-location-radio" type="radio" form="{{ form_id }}" name="parent_location_select" value="{{ parent.id }}"
+              <div class="parent-location-row mb-2" data-label="{{ parent.name|lower }}">
+                <input class="btn-check parent-location-radio" type="radio" form="{{ form_id }}" name="parent_location_select" value="{{ parent.id }}"
                        id="parentLocation{{ parent.id }}"
                        data-display="{{ parent.name }}"
                        {% if location and location.parent_id == parent.id %}checked{% endif %}>
-                <label class="form-check-label" for="parentLocation{{ parent.id }}">{{ parent.name }}</label>
+                <label class="card-select card-select-surface d-flex justify-content-between align-items-center w-100 p-3 border rounded-3 shadow-sm" for="parentLocation{{ parent.id }}">
+                  <span class="fw-semibold">{{ parent.name }}</span>
+                  <span class="text-muted small">
+                    <span class="card-select-mark badge bg-primary-subtle text-primary-emphasis border">已选</span>
+                    <span class="card-select-hint">设为上级</span>
+                  </span>
+                </label>
               </div>
               {% endif %}
             {% endfor %}

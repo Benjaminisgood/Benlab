@@ -98,7 +98,7 @@
             <span id="locationCoordinates">{{ '%.6f'|format(location.latitude) }}, {{ '%.6f'|format(location.longitude) }}</span>
             {% if location.coordinate_source %}
             <span class="badge bg-secondary ms-2">
-              {% if location.coordinate_source == 'device' %}自动定位{% elif location.coordinate_source == 'manual' %}手动输入{% else %}{{ location.coordinate_source }}{% endif %}
+              {% if location.coordinate_source == 'device' %}自动定位{% elif location.coordinate_source == 'manual' %}手动输入{% elif location.coordinate_source == 'map' %}地图选点{% else %}{{ location.coordinate_source }}{% endif %}
             </span>
             {% endif %}
           </div>

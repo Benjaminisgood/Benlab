@@ -4,46 +4,52 @@
 {% macro render_location(loc, level=0) %}
 {% set loc_meta = location_meta_map.get(loc.id) %}
 {% set usage_tags = loc_meta.usage_tags if loc_meta else [] %}
+{% set is_public = loc_meta.is_public if loc_meta else False %}
 <tr class="indent-{{ level }}{% if level == 0 %} location-row-root{% endif %}">
-  <td>
-    {% if level > 0 %}↳ {% endif %}
-    <a href="{{ url_for('view_location', loc_id=loc.id) }}">{{ loc.name }}</a>
-    {% if loc_meta and loc_meta.is_public %}
-      <span class="badge bg-success-subtle text-success-emphasis border ms-1">公共</span>
-    {% endif %}
+  <td class="col-location-name">
+    <div class="d-flex align-items-center flex-wrap gap-2">
+      {% if level > 0 %}<span class="text-muted">↳</span>{% endif %}
+      <a href="{{ url_for('view_location', loc_id=loc.id) }}">{{ loc.name }}</a>
+    </div>
+  </td>
+  <td class="col-location-usage">
     {% if usage_tags %}
-      <div class="d-inline-flex flex-wrap gap-1 mt-1">
+      <div class="d-flex flex-wrap gap-1">
         {% for tag in usage_tags %}
           <span class="badge bg-light text-dark border">{{ location_usage_labels.get(tag, tag) }}</span>
         {% endfor %}
       </div>
-    {% endif %}
-  </td>
-  <td>
-    {% if loc.responsible_members and loc.responsible_members|length > 0 %}
-      {%- for member in loc.responsible_members %}
-        <a href="{{ url_for('profile', member_id=member.id) }}">{{ member.name }}</a>{% if not loop.last %}，{% endif %}
-      {%- endfor %}
-    {% elif loc_meta and loc_meta.is_public %}
-      <span class="text-muted">公共空间</span>
     {% else %}
-      -
+      <span class="text-muted">-</span>
     {% endif %}
   </td>
-  <td>{{ loc.items|length }}</td>
-  <td>
-    {% set event_total = event_counts.get(loc.id, 0) %}
-    {% if event_total %}
-      <span class="badge bg-light text-dark border">{{ event_total }}</span>
-    {% else %}
-      <span class="text-muted">0</span>
-    {% endif %}
+  <td class="col-location-responsible">
+    <div class="d-flex flex-wrap align-items-center gap-2">
+      {% if is_public %}
+        <span class="badge bg-success-subtle text-success-emphasis border">公共</span>
+      {% else %}
+        <span class="badge bg-secondary-subtle text-secondary-emphasis border">私人</span>
+      {% endif %}
+      {% if loc.responsible_members and loc.responsible_members|length > 0 %}
+        <div class="d-flex flex-wrap align-items-center gap-2">
+          {%- for member in loc.responsible_members %}
+            <a href="{{ url_for('profile', member_id=member.id) }}">{{ member.name }}</a>{% if not loop.last %}，{% endif %}
+          {%- endfor %}
+        </div>
+      {% elif is_public %}
+        <span class="text-muted">公共空间</span>
+      {% else %}
+        <span class="text-muted">-</span>
+      {% endif %}
+    </div>
   </td>
-  <td>
-    <a href="{{ url_for('edit_location', loc_id=loc.id) }}" class="btn btn-sm btn-outline-primary">编辑</a>
-    <form action="{{ url_for('delete_location', loc_id=loc.id) }}" method="post" class="d-inline" onsubmit="return confirm('确定删除该空间吗？');">
-      <button type="submit" class="btn btn-sm btn-outline-danger">删除</button>
-    </form>
+  <td class="col-location-actions text-nowrap text-end">
+    <div class="d-flex flex-wrap justify-content-end gap-1">
+      <a href="{{ url_for('edit_location', loc_id=loc.id) }}" class="btn btn-sm btn-outline-primary">编辑</a>
+      <form action="{{ url_for('delete_location', loc_id=loc.id) }}" method="post" class="d-inline" onsubmit="return confirm('确定删除该空间吗？');">
+        <button type="submit" class="btn btn-sm btn-outline-danger">删除</button>
+      </form>
+    </div>
   </td>
 </tr>
 
@@ -61,27 +67,28 @@
   <input type="text" id="filterInput" class="form-control" placeholder="按空间名称筛选 / 导航">
   <div id="locationsSuggestions" class="list-group position-absolute w-100 shadow-sm d-none" style="z-index: 20;"></div>
 </div>
-<table class="table table-hover" id="locationsTable">
-  <thead class="table-light">
-    <tr>
-      <th>名称</th>
-      <th>负责人</th>
-      <th>包含物品数量</th>
-      <th>关联活动</th>
-      <th>操作</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for loc in locations if not loc.parent_id %}
-      {{ render_location(loc) }}
-    {% endfor %}
-    {% if locations|length == 0 %}
-    <tr>
-      <td colspan="5" class="text-center text-muted">暂无空间记录</td>
-    </tr>
-    {% endif %}
-  </tbody>
-</table>
+<div class="table-responsive">
+  <table class="table table-hover align-middle" id="locationsTable">
+    <thead class="table-light">
+      <tr>
+        <th class="col-location-name">名称</th>
+        <th class="col-location-usage">用途</th>
+        <th class="col-location-responsible">负责人 / 空间性质</th>
+        <th class="col-location-actions text-end">操作</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for loc in locations if not loc.parent_id %}
+        {{ render_location(loc) }}
+      {% endfor %}
+      {% if locations|length == 0 %}
+      <tr>
+        <td colspan="4" class="text-center text-muted">暂无空间记录</td>
+      </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
 
 <style>
   .indent-1 td { padding-left: 2rem; background-color: var(--location-indent-bg-1); }

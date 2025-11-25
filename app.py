@@ -88,6 +88,9 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # app.config['UPLOAD_FOLDER'] = os.path.join(BASE_DIR, 'static', 'images')
 app.config['UPLOAD_FOLDER'] = os.path.join(BASE_DIR, 'images')
 TEMP_PAGE_DIR = app.instance_path
+# 确保运行所需的本地目录存在（上传目录、实例目录）
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+os.makedirs(TEMP_PAGE_DIR, exist_ok=True)
 app.config['MAX_CONTENT_LENGTH'] = 2500 * 1024 * 1024  # 限制上传2500MB以内的文件
 OSS_ENDPOINT = os.getenv('ALIYUN_OSS_ENDPOINT')
 OSS_ACCESS_KEY_ID = os.getenv('ALIYUN_OSS_ACCESS_KEY_ID')
@@ -802,6 +805,8 @@ _LOCATION_USAGE_CHOICES = [
     ('event', '活动场地'),
     ('public', '公共设施'),
     ('rental', '出租空间'),
+    ('storage', '储物空间'),
+    ('travel', '旅游推荐'),
     ('residence', '生活社区'),
     ('other', '其他')
 ]
@@ -3179,6 +3184,31 @@ def withdraw_event(event_id):
         flash('已退出该事项', 'info')
     return redirect(url_for('event_detail', event_id=event.id))
 
+
+def _build_item_category_payload(items):
+    category_map = {}
+    uncategorized_bucket = []
+    for item in items:
+        category_name = (item.category or '').strip()
+        if category_name:
+            category_map.setdefault(category_name, []).append(item)
+        else:
+            uncategorized_bucket.append(item)
+    categories = sorted(category_map.keys(), key=lambda name: name.lower())
+    category_payload = []
+    for name in categories:
+        members = sorted(category_map[name], key=lambda x: x.name.lower())
+        category_payload.append({
+            'name': name,
+            'items': [{'id': it.id, 'name': it.name} for it in members]
+        })
+    uncategorized_payload = [
+        {'id': it.id, 'name': it.name}
+        for it in sorted(uncategorized_bucket, key=lambda x: x.name.lower())
+    ]
+    return categories, category_payload, uncategorized_payload
+
+
 @app.route('/items')
 @login_required
 def items():
@@ -3202,26 +3232,7 @@ def items():
             func.count(event_items.c.event_id)
         ).group_by(event_items.c.item_id).all()
     )
-    category_map = {}
-    uncategorized_bucket = []
-    for item in items_list:
-        category_name = (item.category or '').strip()
-        if category_name:
-            category_map.setdefault(category_name, []).append(item)
-        else:
-            uncategorized_bucket.append(item)
-    categories = sorted(category_map.keys(), key=lambda name: name.lower())
-    category_payload = []
-    for name in categories:
-        members = sorted(category_map[name], key=lambda x: x.name.lower())
-        category_payload.append({
-            'name': name,
-            'items': [{'id': it.id, 'name': it.name} for it in members]
-        })
-    uncategorized_payload = [
-        {'id': it.id, 'name': it.name}
-        for it in sorted(uncategorized_bucket, key=lambda x: x.name.lower())
-    ]
+    categories, category_payload, uncategorized_payload = _build_item_category_payload(items_list)
     return render_template(
         'items.html',
         items=items_list,
@@ -3276,6 +3287,12 @@ def item_detail(item_id):
             'label': interest_relation_lookup.get(rel_key, rel_key),
             'count': count
         })
+    category_seed = (
+        Item.query.options(load_only(Item.id, Item.name, Item.category))
+        .order_by(func.lower(Item.name))
+        .all()
+    )
+    categories, category_payload, uncategorized_payload = _build_item_category_payload(category_seed)
     return render_template(
         'item_detail.html',
         item=item,
@@ -3288,7 +3305,10 @@ def item_detail(item_id):
         past_events_total=event_bundle['past_total'],
         interest_summary=members_interest_summary,
         interest_total=interest_total,
-        interest_relation_lookup=interest_relation_lookup
+        interest_relation_lookup=interest_relation_lookup,
+        categories=categories,
+        category_payload=category_payload,
+        uncategorized_items=uncategorized_payload
     )
 
 @app.route('/items/add', methods=['GET', 'POST'])
@@ -3558,9 +3578,16 @@ def delete_item(item_id):
 @login_required
 def manage_item_category():
     category_name = (request.form.get('category_name') or '').strip()
+    origin_item_id = request.form.get('origin_item_id', type=int)
+
+    def redirect_target():
+        if origin_item_id:
+            return redirect(url_for('item_detail', item_id=origin_item_id))
+        return redirect(url_for('items'))
+
     if not category_name:
         flash('请输入要管理的类别名称', 'warning')
-        return redirect(url_for('items'))
+        return redirect_target()
 
     def parse_ids(key):
         raw = request.form.getlist(key)
@@ -3571,7 +3598,7 @@ def manage_item_category():
 
     if not add_ids and not remove_ids:
         flash('未选择任何需要调整的物品', 'info')
-        return redirect(url_for('items'))
+        return redirect_target()
 
     added_items = []
     removed_items = []
@@ -3622,7 +3649,7 @@ def manage_item_category():
         if migration_needed:
             db.session.commit()
         flash('没有物品符合调整条件', 'info')
-        return redirect(url_for('items'))
+        return redirect_target()
 
     db.session.commit()
     summary = []
@@ -3631,7 +3658,7 @@ def manage_item_category():
     if removed_items:
         summary.append(f"取消 {len(removed_items)} 个物品")
     flash('，'.join(summary) + f' 于类别 {category_name}', 'success')
-    return redirect(url_for('items'))
+    return redirect_target()
 
 @app.route('/locations')
 @login_required

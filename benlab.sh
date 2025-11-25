@@ -244,6 +244,10 @@ ensure_gunicorn() {
   fi
 }
 
+ensure_runtime_dirs() {
+  mkdir -p "$PROJECT_PATH/images" "$PROJECT_PATH/instance"
+}
+
 wait_for_pid_file() {
   local retries=${1:-30}
   local delay=${2:-0.5}
@@ -304,6 +308,7 @@ start() {
   ensure_venv
   ensure_requirements
   ensure_gunicorn
+  ensure_runtime_dirs
 
   if [ -f "$PID_FILE" ]; then
     local existing_pid
@@ -425,7 +430,7 @@ ip() {
   else
     warn "无法获取局域网IP"
   fi
-  echo "—— 公网访问（如配置了frp/nginx反向代理）：http://<你的公网IP或域名>:$PORT"
+  echo "—— 公网访问（如配置了frp/nginx反向代理的话）：http://<你的公网IP或域名>:$PORT"
 }
 
 # ===== 主入口 =====

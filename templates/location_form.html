@@ -39,7 +39,24 @@
       </div>
       {% endfor %}
     </div>
-    <div class="form-text text-muted">用于描述空间的主要用途，可多选；示例：学习空间、休闲娱乐、活动场地等。</div>
+    <div class="form-text text-muted">用于描述空间的主要用途，可多选；示例：学习空间、休闲娱乐、活动场地、储物空间、旅游推荐等。</div>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">上级空间（可选）</label>
+    <div class="d-flex flex-wrap align-items-center gap-2">
+      <div id="parentLocationSummary" class="badge bg-light text-dark border">
+        {% if location and location.parent %}
+          {{ location.parent.name }}
+        {% else %}
+          顶层空间
+        {% endif %}
+      </div>
+      <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#parentLocationModal">
+        选择空间
+      </button>
+    </div>
+    <input type="hidden" name="parent_id" id="parentIdInput" value="{{ location.parent_id if location else '' }}">
+    <div class="form-text">用于构建层级结构，留空表示顶层空间。</div>
   </div>
   <div class="mb-3">
     <label class="form-label">精准坐标</label>
@@ -55,9 +72,10 @@
     </div>
     <div class="d-flex gap-2 mt-2">
       <button type="button" class="btn btn-outline-primary btn-sm" id="detectLocationBtn">自动获取当前位置</button>
+      <button type="button" class="btn btn-outline-success btn-sm" id="openMapPickerBtn" data-bs-toggle="modal" data-bs-target="#mapPickerModal">在地图上选取</button>
       <button type="button" class="btn btn-outline-secondary btn-sm" id="clearLocationBtn">清除坐标</button>
     </div>
-    <div class="form-text">可从手机定位自动填充，也可手动输入；保留为空则不记录坐标。</div>
+    <div class="form-text">可从手机定位或地图选点自动填充，也可手动输入；保留为空则不记录坐标。</div>
     <input type="hidden" id="coordinate_source" name="coordinate_source"
            value="{{ location.coordinate_source if location and location.coordinate_source else '' }}">
   </div>
@@ -163,36 +181,19 @@
     <input type="text" class="form-control" id="access_info" name="access_info"
            value="{{ location_meta.access_info }}" placeholder="如：需提前预约 / 仅周末开放 / 联系前台办理通行证">
   </div>
-  {% set loc_adv_open = location and (location.clean_status or location.parent_id) %}
+  {% set loc_adv_open = location and location.clean_status %}
   <div class="accordion mb-3" id="locationAdvancedAccordion">
     <div class="accordion-item">
       <h2 class="accordion-header" id="locationAdvancedHeader">
         <button class="accordion-button {% if not loc_adv_open %}collapsed{% endif %}" type="button"
                 data-bs-toggle="collapse" data-bs-target="#locationAdvancedSection"
                 aria-expanded="{{ 'true' if loc_adv_open else 'false' }}" aria-controls="locationAdvancedSection">
-          更多属性（上级空间 / 卫生状态）
+          更多属性（卫生状态）
         </button>
       </h2>
       <div id="locationAdvancedSection" class="accordion-collapse collapse {% if loc_adv_open %}show{% endif %}"
            data-bs-parent="#locationAdvancedAccordion">
         <div class="accordion-body">
-          <div class="mb-3">
-            <label class="form-label">上级空间（可选）</label>
-            <div class="d-flex flex-wrap align-items-center gap-2">
-              <div id="parentLocationSummary" class="badge bg-light text-dark border">
-                {% if location and location.parent %}
-                  {{ location.parent.name }}
-                {% else %}
-                  顶层空间
-                {% endif %}
-              </div>
-              <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#parentLocationModal">
-                选择空间
-              </button>
-            </div>
-            <input type="hidden" name="parent_id" id="parentIdInput" value="{{ location.parent_id if location else '' }}">
-            <div class="form-text">用于构建层级结构，留空表示顶层空间。</div>
-          </div>
           <div class="mb-0">
             <label for="clean_status" class="form-label">卫生状态</label>
             <select name="clean_status" class="form-select">
@@ -273,6 +274,24 @@
         <div class="modal-footer">
           <button type="button" class="btn btn-outline-secondary btn-sm" id="parentLocationClearBtn">清除选择</button>
           <button type="button" class="btn btn-primary btn-sm" data-bs-dismiss="modal">完成</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="modal fade" id="mapPickerModal" tabindex="-1" aria-labelledby="mapPickerModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="mapPickerModalLabel">在地图上选取坐标</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+        </div>
+        <div class="modal-body">
+          <div id="mapPicker" class="rounded border" style="height: 380px;"></div>
+          <div class="form-text mt-2" id="mapPickStatus">点击地图放置标记</div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+          <button type="button" class="btn btn-primary btn-sm" id="confirmMapPickBtn">使用该位置</button>
         </div>
       </div>
     </div>
@@ -418,6 +437,9 @@
 
   (function registerGeoButtons() {
     const detectBtn = document.getElementById('detectLocationBtn');
+    const mapModalEl = document.getElementById('mapPickerModal');
+    const mapConfirmBtn = document.getElementById('confirmMapPickBtn');
+    const mapStatus = document.getElementById('mapPickStatus');
     const clearBtn = document.getElementById('clearLocationBtn');
     const latInput = document.getElementById('latitude');
     const lngInput = document.getElementById('longitude');
@@ -428,6 +450,136 @@
     const markManual = () => { sourceInput.value = latInput.value && lngInput.value ? 'manual' : ''; };
     latInput.addEventListener('input', markManual);
     lngInput.addEventListener('input', markManual);
+    let leafletLoading = null;
+    let mapInstance = null;
+    let mapMarker = null;
+    let pendingLatLng = null;
+    const updateMapStatus = function (latlng) {
+      if (!mapStatus) {
+        return;
+      }
+      if (latlng) {
+        mapStatus.textContent = latlng.lat.toFixed(6) + ', ' + latlng.lng.toFixed(6);
+      } else {
+        mapStatus.textContent = '点击地图放置标记';
+      }
+    };
+    const ensureLeaflet = function () {
+      if (window.L) {
+        return Promise.resolve(window.L);
+      }
+      if (leafletLoading) {
+        return leafletLoading;
+      }
+      leafletLoading = new Promise(function (resolve, reject) {
+        const cssId = 'leaflet-css';
+        if (!document.getElementById(cssId)) {
+          const link = document.createElement('link');
+          link.id = cssId;
+          link.rel = 'stylesheet';
+          link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+          document.head.appendChild(link);
+        }
+        if (document.getElementById('leaflet-js')) {
+          const existing = document.getElementById('leaflet-js');
+          existing.addEventListener('load', function () { resolve(window.L); }, { once: true });
+          existing.addEventListener('error', function (err) {
+            leafletLoading = null;
+            reject(err || new Error('Leaflet load failed'));
+          }, { once: true });
+          return;
+        }
+        const script = document.createElement('script');
+        script.id = 'leaflet-js';
+        script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+        script.async = true;
+        script.onload = function () { resolve(window.L); };
+        script.onerror = function (err) {
+          leafletLoading = null;
+          reject(err || new Error('Leaflet load failed'));
+        };
+        document.head.appendChild(script);
+      });
+      return leafletLoading;
+    };
+    const setMarker = function (latlng) {
+      pendingLatLng = latlng;
+      if (!mapInstance || !window.L) {
+        updateMapStatus(latlng);
+        return;
+      }
+      if (!latlng) {
+        if (mapMarker) {
+          mapInstance.removeLayer(mapMarker);
+          mapMarker = null;
+        }
+        updateMapStatus(null);
+        return;
+      }
+      if (!mapMarker) {
+        mapMarker = window.L.marker(latlng).addTo(mapInstance);
+      } else {
+        mapMarker.setLatLng(latlng);
+      }
+      updateMapStatus(latlng);
+    };
+    const openMapModal = function () {
+      ensureLeaflet().then(function (L) {
+        if (!mapInstance) {
+          mapInstance = L.map('mapPicker', { zoomControl: true });
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; OpenStreetMap contributors'
+          }).addTo(mapInstance);
+          mapInstance.on('click', function (e) { setMarker(e.latlng); });
+        }
+        const latVal = parseFloat(latInput.value);
+        const lngVal = parseFloat(lngInput.value);
+        const hasExisting = !isNaN(latVal) && !isNaN(lngVal);
+        if (hasExisting) {
+          mapInstance.setView([latVal, lngVal], 15);
+          setMarker(L.latLng(latVal, lngVal));
+        } else {
+          mapInstance.setView([39.9042, 116.4074], 4);
+          setMarker(null);
+        }
+        setTimeout(function () { mapInstance.invalidateSize(); }, 120);
+      }).catch(function () {
+        updateMapStatus(null);
+        if (mapStatus) {
+          mapStatus.textContent = '地图加载失败，请检查网络后重试';
+        }
+      });
+    };
+    const applyMapPick = function () {
+      const currentLat = parseFloat(latInput.value);
+      const currentLng = parseFloat(lngInput.value);
+      const fallback = (!isNaN(currentLat) && !isNaN(currentLng)) ? { lat: currentLat, lng: currentLng } : null;
+      const chosen = pendingLatLng || fallback;
+      if (!chosen) {
+        alert('请先在地图上点击选择位置。');
+        return;
+      }
+      latInput.value = chosen.lat.toFixed(6);
+      lngInput.value = chosen.lng.toFixed(6);
+      sourceInput.value = 'map';
+      if (mapModalEl && window.bootstrap) {
+        const modal = window.bootstrap.Modal.getInstance(mapModalEl);
+        if (modal) {
+          modal.hide();
+        }
+      }
+    };
+    if (mapModalEl) {
+      mapModalEl.addEventListener('shown.bs.modal', openMapModal);
+      mapModalEl.addEventListener('hidden.bs.modal', function () {
+        pendingLatLng = null;
+        updateMapStatus(null);
+      });
+    }
+    if (mapConfirmBtn) {
+      mapConfirmBtn.addEventListener('click', applyMapPick);
+    }
     if (detectBtn && navigator.geolocation) {
       detectBtn.addEventListener('click', function () {
         detectBtn.disabled = true;

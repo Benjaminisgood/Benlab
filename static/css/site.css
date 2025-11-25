@@ -363,12 +363,18 @@ body {
   min-height: 100vh;
 }
 
+.page-body,
+html {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
 .page-body {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
   position: relative;
-  overflow-x: hidden;
 }
 
 .page-body::after {
@@ -399,12 +405,13 @@ body {
 .page-shell::before {
   content: "";
   position: absolute;
-  inset: 2.5rem -5% auto;
+  inset: 2.5rem 0 auto;
   height: 55vh;
   background: var(--benlab-rainbow);
   opacity: 0.35;
   filter: blur(120px);
   z-index: -1;
+  pointer-events: none;
 }
 
 .navbar-rainbow {
@@ -888,8 +895,112 @@ body {
   vertical-align: middle;
 }
 
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-inventory th,
+.table-inventory td,
+#locationsTable th,
+#locationsTable td {
+  word-break: break-word;
+  white-space: normal;
+}
+
 .table-inventory {
   border: 1px solid var(--app-border);
+}
+
+.table-inventory .col-item-name {
+  min-width: 180px;
+}
+
+.table-inventory .col-item-location {
+  min-width: 150px;
+}
+
+.table-inventory .col-item-responsible {
+  min-width: 160px;
+}
+
+.table-inventory .col-item-actions {
+  min-width: 140px;
+}
+
+#locationsTable .col-location-name {
+  min-width: 200px;
+}
+
+#locationsTable .col-location-usage {
+  min-width: 170px;
+}
+
+#locationsTable .col-location-responsible {
+  min-width: 210px;
+}
+
+#locationsTable .col-location-actions {
+  min-width: 140px;
+}
+
+#membersTable {
+  width: 100%;
+}
+
+#membersTable .col-member-username {
+  min-width: 170px;
+}
+
+#membersTable .col-member-contact {
+  min-width: 200px;
+}
+
+#membersTable .col-member-count {
+  min-width: 120px;
+}
+
+#membersTable td.member-cell-username,
+#membersTable td.member-cell-contact {
+  white-space: normal;
+  word-break: break-word;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+}
+
+#membersTable td.member-cell-username a {
+  display: inline-block;
+  max-width: 100%;
+}
+
+#followManageModal .modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+#followManageModal .follow-manage-list {
+  flex: 1 1 auto;
+  max-height: 60vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.member-legend .badge {
+  min-width: 4.5rem;
+}
+
+@media (max-width: 768px) {
+  #followManageModal .follow-manage-list {
+    max-height: 55vh;
+  }
+}
+
+@media (max-width: 576px) {
+  #membersTable .col-member-contact {
+    min-width: 230px;
+  }
 }
 
 .table-inventory .inventory-row {

@@ -12,18 +12,17 @@
   </div>
 </div>
 
-<table class="table table-hover align-middle table-inventory" id="itemsTable">
-  <thead class="table-light">
-    <tr>
-      <th>名称</th>
-      <th>类别</th>
-      <th>存放位置</th>
-      <th>负责人</th>
-      <th>关联活动</th>
-      <th>操作</th>
-    </tr>
-  </thead>
-  <tbody>
+<div class="table-responsive">
+  <table class="table table-hover align-middle table-inventory" id="itemsTable">
+    <thead class="table-light">
+      <tr>
+        <th class="col-item-name">名称</th>
+        <th class="col-item-location">存放位置</th>
+        <th class="col-item-responsible">负责人</th>
+        <th class="col-item-actions text-end">操作</th>
+      </tr>
+    </thead>
+    <tbody>
     {% set active_items = [] %}
     {% set discarded_items = [] %}
 
@@ -51,7 +50,7 @@
       {% set search_blob = (item.name ~ ' ' ~ (item.category or '-') ~ ' ' ~ (item.stock_status or '-') ~ ' ' ~ (item.features or '-') ~ ' ' ~ (detail_links_blob|join(' ')) ~ ' ' ~ (item.notes or '-') ~ ' ' ~ (responsible_labels|join(' ')) ~ ' ' ~ (location_names|join(' '))) %}
 
       <tr class="{{ row_class }}" data-search="{{ search_blob|lower }}">
-        <td>
+        <td class="col-item-name">
           <div class="d-flex flex-wrap align-items-center gap-2">
             <a href="{{ url_for('item_detail', item_id=item.id) }}">{{ item.name }}</a>
             {% if item.features %}
@@ -63,42 +62,21 @@
             {% endif %}
           </div>
         </td>
-        <td>
-          {% if item.category %}
-            <button type="button"
-                    class="btn btn-link p-0 align-baseline category-manage-trigger"
-                    data-bs-toggle="modal"
-                    data-bs-target="#manageCategoryModal"
-                    data-category="{{ item.category }}">
-              {{ item.category }}
-            </button>
-          {% else %}
-            <span class="text-muted">-</span>
-          {% endif %}
-        </td>
-        <td>
+        <td class="col-item-location">
           {% if item.locations and item.locations|length > 0 %}
             {% for loc in item.locations %}
               <a href="{{ url_for('view_location', loc_id=loc.id) }}" class="me-1">{{ loc.name }}</a>{% if not loop.last %}, {% endif %}
             {% endfor %}
           {% else %}-{% endif %}
         </td>
-        <td>
+        <td class="col-item-responsible">
           {% if item.responsible_members %}
             {% for member in item.responsible_members %}
               <a href="{{ url_for('profile', member_id=member.id) }}">{{ member.name or member.username }}</a>{% if not loop.last %}, {% endif %}
             {% endfor %}
           {% else %}-{% endif %}
         </td>
-        <td>
-          {% set event_total = item_event_counts.get(item.id, 0) %}
-          {% if event_total %}
-            <span class="badge bg-light text-dark border">{{ event_total }}</span>
-          {% else %}
-            <span class="text-muted">0</span>
-          {% endif %}
-        </td>
-        <td>
+        <td class="col-item-actions text-nowrap text-end">
           <a href="{{ url_for('edit_item', item_id=item.id) }}" class="btn btn-sm btn-outline-primary">编辑</a>
           <form action="{{ url_for('delete_item', item_id=item.id) }}" method="post" class="d-inline" onsubmit="return confirm('确定删除该物品吗？');">
             <button type="submit" class="btn btn-sm btn-outline-danger">删除</button>
@@ -107,70 +85,11 @@
       </tr>
     {% endfor %}
 
-    <tr id="itemsNoResultRow" class="text-center text-muted {% if items|length > 0 %}d-none{% endif %}">
-      <td colspan="6">没有找到物品</td>
-    </tr>
-  </tbody>
-</table>
-
-<div class="modal fade" id="manageCategoryModal" tabindex="-1" aria-labelledby="manageCategoryLabel" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content">
-      <form method="post" action="{{ url_for('manage_item_category') }}" id="manageCategoryForm">
-        <div class="modal-header">
-          <h5 class="modal-title" id="manageCategoryLabel">管理物品类别</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
-        </div>
-        <div class="modal-body">
-          <input type="hidden" name="category_name" id="categoryNameField">
-          <div class="mb-3">
-            <label for="categorySelectorInput" class="form-label mb-1">选择或输入类别</label>
-            <input type="text" id="categorySelectorInput" class="form-control form-control-sm" list="categoryOptions" placeholder="直接输入或选择已有类别名称">
-            <datalist id="categoryOptions">
-              {% for cat in categories %}
-                <option value="{{ cat }}"></option>
-              {% endfor %}
-            </datalist>
-            <div class="form-text">可输入新类别名称，或从现有类别中选择。</div>
-          </div>
-          <div class="row g-3">
-            <div class="col-lg-6">
-              <div class="d-flex justify-content-between align-items-center mb-2">
-                <h6 class="mb-0">当前类别内的物品</h6>
-                <small id="currentCategoryCounter" class="text-muted">0 个</small>
-              </div>
-              <div class="border rounded p-2" style="max-height: 280px; overflow-y: auto;" id="currentCategoryContainer">
-                <p class="text-muted mb-0">请选择类别查看现有物品。</p>
-              </div>
-            </div>
-            <div class="col-lg-6">
-              <div class="d-flex justify-content-between align-items-center mb-2">
-                <h6 class="mb-0">可加入的未分类物品</h6>
-                <small id="availableCategoryCounter" class="text-muted">0 个</small>
-              </div>
-              <div class="border rounded p-2" style="max-height: 280px; overflow-y: auto;" id="availableCategoryContainer">
-                {% if uncategorized_items %}
-                  {% for entry in uncategorized_items %}
-                    <div class="form-check form-check-sm py-1">
-                      <input class="form-check-input category-add-checkbox" type="checkbox" name="add_item_ids" value="{{ entry.id }}" id="addCategoryItem{{ entry.id }}">
-                      <label class="form-check-label" for="addCategoryItem{{ entry.id }}">{{ entry.name }}</label>
-                    </div>
-                  {% endfor %}
-                {% else %}
-                  <p class="text-muted mb-0">暂无未分类物品。</p>
-                {% endif %}
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <span class="text-muted small me-auto" id="categoryChangeSummary">未选择变更</span>
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-          <button type="submit" class="btn btn-primary" id="categorySubmitBtn" disabled>保存变更</button>
-        </div>
-      </form>
-    </div>
-  </div>
+      <tr id="itemsNoResultRow" class="text-center text-muted {% if items|length > 0 %}d-none{% endif %}">
+        <td colspan="4">没有找到物品</td>
+      </tr>
+    </tbody>
+  </table>
 </div>
 
 <script>
@@ -287,191 +206,6 @@
           suggestionBox.classList.add('d-none');
         }
       }, 200);
-    });
-  }
-
-  var modalEl = document.getElementById('manageCategoryModal');
-  if (!modalEl) {
-    return;
-  }
-  var categoryData = {{ category_payload|tojson }};
-  var categorySelector = document.getElementById('categorySelectorInput');
-  var hiddenField = document.getElementById('categoryNameField');
-  var currentContainer = document.getElementById('currentCategoryContainer');
-  var availableContainer = document.getElementById('availableCategoryContainer');
-  var currentCounter = document.getElementById('currentCategoryCounter');
-  var availableCounter = document.getElementById('availableCategoryCounter');
-  var summaryEl = document.getElementById('categoryChangeSummary');
-  var submitBtn = document.getElementById('categorySubmitBtn');
-  var addCheckboxes = Array.prototype.slice.call(document.querySelectorAll('.category-add-checkbox'));
-  var manageForm = document.getElementById('manageCategoryForm');
-
-  function getCategoryEntry(name) {
-    for (var i = 0; i < categoryData.length; i += 1) {
-      if (categoryData[i].name === name) {
-        return categoryData[i];
-      }
-    }
-    return null;
-  }
-
-  function rebuildCurrentList(name) {
-    if (!currentContainer) {
-      return;
-    }
-    currentContainer.innerHTML = '';
-    var entry = getCategoryEntry(name);
-    if (!entry || !entry.items.length) {
-      currentContainer.innerHTML = '<p class="text-muted mb-0">尚无物品属于该类别。</p>';
-      if (currentCounter) {
-        currentCounter.textContent = '0 个';
-      }
-      return;
-    }
-    entry.items.forEach(function (item) {
-      var wrapper = document.createElement('div');
-      wrapper.className = 'form-check form-check-sm py-1';
-      var checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.className = 'form-check-input category-remove-checkbox';
-      checkbox.name = 'remove_item_ids';
-      checkbox.value = item.id;
-      checkbox.id = 'removeCategoryItem' + item.id;
-      var label = document.createElement('label');
-      label.className = 'form-check-label';
-      label.setAttribute('for', checkbox.id);
-      label.textContent = item.name;
-      wrapper.appendChild(checkbox);
-      wrapper.appendChild(label);
-      currentContainer.appendChild(wrapper);
-    });
-    if (currentCounter) {
-      currentCounter.textContent = entry.items.length + ' 个';
-    }
-  }
-
-  function updateAvailableCounter() {
-    if (!availableCounter || !availableContainer) {
-      return;
-    }
-    var total = availableContainer.querySelectorAll('.category-add-checkbox').length;
-    availableCounter.textContent = total + ' 个';
-  }
-
-  function updateSummary() {
-    if (!summaryEl) {
-      return;
-    }
-    var selectedAdds = availableContainer ? availableContainer.querySelectorAll('.category-add-checkbox:checked').length : 0;
-    var selectedRemoves = currentContainer ? currentContainer.querySelectorAll('.category-remove-checkbox:checked').length : 0;
-    var categoryName = hiddenField ? hiddenField.value.trim() : '';
-    if (!categoryName) {
-      summaryEl.textContent = '请先选择或输入类别';
-      if (submitBtn) {
-        submitBtn.disabled = true;
-      }
-      return;
-    }
-    if (selectedAdds === 0 && selectedRemoves === 0) {
-      summaryEl.textContent = '未选择变更';
-      if (submitBtn) {
-        submitBtn.disabled = true;
-      }
-    } else {
-      summaryEl.textContent = '即将新增 ' + selectedAdds + ' / 取消 ' + selectedRemoves + ' 个物品';
-      if (submitBtn) {
-        submitBtn.disabled = false;
-      }
-    }
-  }
-
-  function resetModal() {
-    if (categorySelector) {
-      categorySelector.value = '';
-      categorySelector.removeAttribute('readonly');
-    }
-    if (hiddenField) {
-      hiddenField.value = '';
-    }
-    if (currentContainer) {
-      currentContainer.innerHTML = '<p class="text-muted mb-0">请选择类别查看现有物品。</p>';
-    }
-    if (currentCounter) {
-      currentCounter.textContent = '0 个';
-    }
-    if (summaryEl) {
-      summaryEl.textContent = '未选择变更';
-    }
-    if (submitBtn) {
-      submitBtn.disabled = true;
-    }
-    addCheckboxes.forEach(function (cb) { cb.checked = false; });
-  }
-
-  if (modalEl) {
-    modalEl.addEventListener('hidden.bs.modal', resetModal);
-    modalEl.addEventListener('shown.bs.modal', function () {
-      if (categorySelector) {
-        categorySelector.focus();
-      }
-    });
-    modalEl.addEventListener('show.bs.modal', function (evt) {
-      var trigger = evt.relatedTarget || null;
-      var categoryName = '';
-      if (trigger && trigger.getAttribute('data-category')) {
-        categoryName = trigger.getAttribute('data-category');
-      }
-      if (categorySelector) {
-        categorySelector.value = categoryName;
-        if (categoryName) {
-          categorySelector.setAttribute('readonly', 'readonly');
-        } else {
-          categorySelector.removeAttribute('readonly');
-        }
-      }
-      if (hiddenField) {
-        hiddenField.value = categoryName;
-      }
-      rebuildCurrentList(categoryName);
-      updateSummary();
-    });
-  }
-
-  if (categorySelector) {
-    categorySelector.addEventListener('input', function () {
-      var name = (this.value || '').trim();
-      if (hiddenField) {
-        hiddenField.value = name;
-      }
-      rebuildCurrentList(name);
-      updateSummary();
-    });
-  }
-
-  if (availableContainer) {
-    availableContainer.addEventListener('change', function (evt) {
-      if (evt.target && evt.target.classList.contains('category-add-checkbox')) {
-        updateSummary();
-      }
-    });
-    updateAvailableCounter();
-  }
-  if (currentContainer) {
-    currentContainer.addEventListener('change', function (evt) {
-      if (evt.target && evt.target.classList.contains('category-remove-checkbox')) {
-        updateSummary();
-      }
-    });
-  }
-  if (manageForm) {
-    manageForm.addEventListener('submit', function (evt) {
-      var name = hiddenField ? hiddenField.value.trim() : '';
-      var addCount = availableContainer ? availableContainer.querySelectorAll('.category-add-checkbox:checked').length : 0;
-      var removeCount = currentContainer ? currentContainer.querySelectorAll('.category-remove-checkbox:checked').length : 0;
-      if (!name || (addCount === 0 && removeCount === 0)) {
-        evt.preventDefault();
-        updateSummary();
-      }
     });
   }
 })();

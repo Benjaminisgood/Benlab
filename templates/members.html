@@ -1,41 +1,5 @@
 {% extends "base.html" %}
 {% block content %}
-<style>
-  .member-legend .badge {
-    min-width: 4.5rem;
-  }
-  #membersTable {
-    width: 100%;
-  }
-  #membersTable td.member-cell-username,
-  #membersTable td.member-cell-contact {
-    white-space: normal;
-    word-break: break-word;
-    word-wrap: break-word;
-    overflow-wrap: anywhere;
-  }
-  #membersTable td.member-cell-username a {
-    display: inline-block;
-    max-width: 100%;
-  }
-  #followManageModal .modal-body {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-  }
-  #followManageModal .follow-manage-list {
-    flex: 1 1 auto;
-    max-height: 60vh;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-  @media (max-width: 768px) {
-    #followManageModal .follow-manage-list {
-      max-height: 55vh;
-    }
-  }
-</style>
-
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h3 class="mb-0">社区成员总览</h3>
   <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#followManageModal">
@@ -48,7 +12,13 @@
 <div class="table-responsive">
   <table class="table table-hover align-middle" id="membersTable">
     <thead class="table-light">
-      <tr><th>用户名</th><th>联系方式</th><th>负责物品数</th><th>负责位置数</th><th>举办活动数</th></tr>
+      <tr>
+        <th class="col-member-username">用户名</th>
+        <th class="col-member-contact">联系方式</th>
+        <th class="col-member-count text-center">负责物品数</th>
+        <th class="col-member-count text-center">负责位置数</th>
+        <th class="col-member-count text-center">举办活动数</th>
+      </tr>
     </thead>
     <tbody>
       {% for mem in members %}
@@ -63,15 +33,15 @@
         {% set row_class = 'member-row-followed' %}
       {% endif %}
       <tr class="{{ row_class }}" data-search="{{ search_blob|lower }}">
-        <td class="member-cell-username">
+        <td class="member-cell-username col-member-username">
           <a class="fw-semibold text-decoration-none" href="{{ url_for('profile', member_id=mem.id) }}">
             {{ mem.username }}
           </a>
         </td>
-        <td class="member-cell-contact">{{ mem.contact or '-' }}</td>
-        <td>{{ items_count }}</td>
-        <td>{{ locations_count }}</td>
-        <td>{{ events_count }}</td>
+        <td class="member-cell-contact col-member-contact">{{ mem.contact or '-' }}</td>
+        <td class="col-member-count text-center">{{ items_count }}</td>
+        <td class="col-member-count text-center">{{ locations_count }}</td>
+        <td class="col-member-count text-center">{{ events_count }}</td>
       </tr>
       {% endfor %}
       <tr id="membersEmptyRow" class="text-center text-muted {% if members|length > 0 %}d-none{% endif %}">

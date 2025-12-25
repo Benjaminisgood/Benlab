@@ -10,6 +10,7 @@ static/**/*
 !static/js/*.js
 !static/css/
 !static/css/*.css
+!static/logo.png
 *.pyc
 *.sqlite3
 instance/

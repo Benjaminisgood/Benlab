@@ -5,23 +5,6 @@
 
 set -e
 
-# ===== 项目配置 =====
-PROJECT_PATH="/Users/benserver/Desktop/Benlab"
-PID_FILE="$PROJECT_PATH/flask.pid"
-LOG_FILE="$PROJECT_PATH/flask.log"
-ACCESS_LOG_FILE="$PROJECT_PATH/flask-access.log"
-ENV_FILE="$PROJECT_PATH/.env"
-PORT=5001
-REQ_FILE="$PROJECT_PATH/requirements.txt"
-BIND_HOST="${BIND_HOST:-0.0.0.0}"
-GUNICORN_APP="${GUNICORN_APP:-app:app}"
-GUNICORN_BIN="${GUNICORN_BIN:-gunicorn}"
-GUNICORN_TIMEOUT="${GUNICORN_TIMEOUT:-120}"
-GUNICORN_WORKER_CLASS="${GUNICORN_WORKER_CLASS:-gevent}"
-GUNICORN_WORKERS="${GUNICORN_WORKERS:-}"
-
-cd "$PROJECT_PATH"
-
 # ===== 输出颜色 =====
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -31,6 +14,67 @@ NC='\033[0m' # No Color
 info() { echo -e "${GREEN}✅ $1${NC}"; }
 warn() { echo -e "${YELLOW}⚠️  $1${NC}"; }
 error() { echo -e "${RED}❌ $1${NC}"; }
+
+# ===== 项目路径 =====
+resolve_project_path() {
+  local candidate=""
+  local script_dir=""
+
+  if [ -n "${PROJECT_PATH:-}" ]; then
+    candidate="$PROJECT_PATH"
+  elif [ -n "${BENLAB_HOME:-}" ]; then
+    candidate="$BENLAB_HOME"
+  fi
+
+  if [ -n "$candidate" ]; then
+    if [ ! -d "$candidate" ]; then
+      error "PROJECT_PATH 不存在: $candidate"
+      exit 1
+    fi
+    PROJECT_PATH="$(cd -- "$candidate" && pwd -P)"
+    return
+  fi
+
+  if [ -n "${BASH_SOURCE[0]:-}" ]; then
+    script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
+  fi
+
+  if [ -n "$script_dir" ] && {
+    [ -f "$script_dir/app.py" ] || [ -f "$script_dir/requirements.txt" ] || [ -d "$script_dir/templates" ];
+  }; then
+    PROJECT_PATH="$script_dir"
+    return
+  fi
+
+  if [ -f "$PWD/app.py" ] || [ -f "$PWD/requirements.txt" ] || [ -d "$PWD/templates" ]; then
+    PROJECT_PATH="$PWD"
+    return
+  fi
+
+  error "无法定位项目目录，请设置 PROJECT_PATH 环境变量"
+  exit 1
+}
+
+resolve_project_path
+
+# ===== 项目配置 =====
+PID_FILE="${PID_FILE:-$PROJECT_PATH/flask.pid}"
+LOG_FILE="${LOG_FILE:-$PROJECT_PATH/flask.log}"
+ACCESS_LOG_FILE="${ACCESS_LOG_FILE:-$PROJECT_PATH/flask-access.log}"
+ENV_FILE="${ENV_FILE:-$PROJECT_PATH/.env}"
+PORT="${PORT:-5001}"
+REQ_FILE="${REQ_FILE:-$PROJECT_PATH/requirements.txt}"
+BIND_HOST="${BIND_HOST:-0.0.0.0}"
+GUNICORN_APP="${GUNICORN_APP:-app:app}"
+GUNICORN_BIN="${GUNICORN_BIN:-gunicorn}"
+GUNICORN_TIMEOUT="${GUNICORN_TIMEOUT:-120}"
+GUNICORN_WORKER_CLASS="${GUNICORN_WORKER_CLASS:-gevent}"
+GUNICORN_WORKERS="${GUNICORN_WORKERS:-}"
+
+if ! cd "$PROJECT_PATH"; then
+  error "无法进入项目目录: $PROJECT_PATH"
+  exit 1
+fi
 
 load_env_file() {
   if [ -z "${ENV_FILE:-}" ]; then

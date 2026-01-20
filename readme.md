@@ -115,8 +115,9 @@ chmod +x benlab.sh
 | `PORT` / `FLASK_RUN_PORT` / `BENSCI_PORT` | `5001` | 多级端口回退，优先级 `PORT` → `FLASK_RUN_PORT` → `BENSCI_PORT` |
 | `SQLALCHEMY_DATABASE_URI` | `sqlite:///lab.db?timeout=30` | 支持改为 PostgreSQL/MySQL 等，例如 `postgresql+psycopg://user:pass@host/db` |
 | `UPLOAD_FOLDER` | `./images` | 上传文件保存目录，默认位于项目根目录 |
-| `MEDIA_STORAGE_MODE` | `auto` | 媒资上传存储策略：`auto`（能用 OSS 就用，失败退回本地）、`oss`（强制 OSS，配置缺失会报错）、`local`（始终使用本地 `UPLOAD_FOLDER`） |
-| `ENABLE_DIRECT_OSS_UPLOAD` | `true` | 当启用 OSS 时允许前端直接上传到 OSS 并回传对象键，`false` 可恢复为服务器中转上传 |
+| `PUBLIC_BASE_URL` | `''` | 事项分享/二维码使用的外部访问域名（不影响 OSS） |
+| `ALIYUN_OSS_PUBLIC_BASE_URL` | `''` | OSS 绑定域名/CNAME（可选） |
+| `ALIYUN_OSS_ASSUME_PUBLIC` | `false` | 是否假定 OSS Bucket 公共可读；为 `false` 时生成签名 URL 并使用默认域名 |
 | `MAX_CONTENT_LENGTH` | `2500 * 1024 * 1024` | 上传文件体积上限（2500MB） |
 
 > 若使用 `.env` / `.flaskenv` 管理变量，可借助 `python-dotenv` 自动加载。
@@ -204,21 +205,22 @@ Benlab/
 如需查看或扩展字段，请查阅 `app.py` 中模型定义区域。
 
 ## 图片与存储策略
-- 上传文件统一保存至 `images/`，可映射至对象存储或专用磁盘。
-- `/uploads/<filename>` 动态路由确保端口/域名变更后链接仍可用。
+- 默认使用 OSS 存储；`images/` 仅用于历史本地文件或临时处理。
+- `/uploads/<filename>` 动态路由可访问历史本地文件，方便迁移或排查。
 - 编辑表单允许批量删除旧图片，系统会自动清理冗余文件。
-- **OSS 直传**：`ALIYUN_OSS_PUBLIC_BASE_URL` 控制对外访问域名，可选的 `ALIYUN_OSS_DIRECT_UPLOAD_BASE_URL` 用于前端直传签名 URL。
-  - 默认回落到公共域名，再不行则使用 bucket 默认域名并自动升级为 HTTPS。
+- **OSS 直传**：启用 OSS 时默认使用前端直传，无需额外开关。
+  - `ALIYUN_OSS_PUBLIC_BASE_URL` 可配置绑定域名/CNAME；当 `ALIYUN_OSS_ASSUME_PUBLIC=1` 时会用作对外访问域名。
+  - `ALIYUN_OSS_ASSUME_PUBLIC=0`（默认）会使用默认 bucket 域名并生成签名 URL，不依赖公共域名。
   - 若需要 HTTP，可显式写成 `http://...`。
 
 **OSS 配置示例**
 ```bash
-export MEDIA_STORAGE_MODE=oss
 export ALIYUN_OSS_BUCKET=example-bucket
 export ALIYUN_OSS_ENDPOINT=oss-cn-hangzhou.aliyuncs.com
 export ALIYUN_OSS_ACCESS_KEY_ID=xxx
 export ALIYUN_OSS_ACCESS_KEY_SECRET=yyy
-export ALIYUN_OSS_PUBLIC_BASE_URL=https://example-bucket.oss-cn-hangzhou.aliyuncs.com
+export ALIYUN_OSS_PUBLIC_BASE_URL=https://oss.example.com
+export ALIYUN_OSS_ASSUME_PUBLIC=0
 ```
 
 ## 日常运维与数据管理
@@ -255,7 +257,7 @@ export ALIYUN_OSS_PUBLIC_BASE_URL=https://example-bucket.oss-cn-hangzhou.aliyunc
 - [ ] 设置强随机 `FLASK_SECRET_KEY`。
 - [ ] 配置反向代理与 HTTPS。
 - [ ] 开启数据库备份与日志留存策略。
-- [ ] 如使用 OSS，确保对外域名与签名回调配置正确。
+- [ ] 如使用 OSS，确保 Bucket 权限与签名配置正确（私有桶需签名访问）。
 
 ## 常见问题
 - **图片无法显示？** 确认 `images/` 目录写权限，以及反向代理是否放行 `/uploads/<filename>` 路由。

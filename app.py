@@ -66,6 +66,13 @@ def _normalize_base_url(value, default_scheme='https'):
     return token
 
 
+def _parse_env_flag(value, default=False):
+    """Return a boolean from environment-style values."""
+    if value is None:
+        return default
+    return str(value).strip().lower() not in {'0', 'false', 'no', 'off'}
+
+
 # 优先从环境变量读取，生产环境请设置强随机串：export FLASK_SECRET_KEY='...'
 app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'dev-only-change-me')
 # 记住登录状态的 cookie 时长（天）
@@ -98,43 +105,26 @@ OSS_ACCESS_KEY_SECRET = os.getenv('ALIYUN_OSS_ACCESS_KEY_SECRET')
 OSS_BUCKET_NAME = os.getenv('ALIYUN_OSS_BUCKET')
 OSS_PREFIX = (os.getenv('ALIYUN_OSS_PREFIX') or '').strip('/ ')
 OSS_PUBLIC_BASE_URL = _normalize_base_url(os.getenv('ALIYUN_OSS_PUBLIC_BASE_URL'))
-OSS_DIRECT_UPLOAD_BASE_URL = _normalize_base_url(os.getenv('ALIYUN_OSS_DIRECT_UPLOAD_BASE_URL'))
-MEDIA_STORAGE_MODE = (os.getenv('MEDIA_STORAGE_MODE') or 'auto').strip().lower()
-if MEDIA_STORAGE_MODE not in {'auto', 'oss', 'local'}:
-    MEDIA_STORAGE_MODE = 'auto'
-app.config['MEDIA_STORAGE_MODE'] = MEDIA_STORAGE_MODE
+OSS_ASSUME_PUBLIC = _parse_env_flag(os.getenv('ALIYUN_OSS_ASSUME_PUBLIC'), default=False)
 _oss_env_ready = bool(OSS_ENDPOINT and OSS_ACCESS_KEY_ID and OSS_ACCESS_KEY_SECRET and OSS_BUCKET_NAME)
-_can_use_oss = bool(oss2 and _oss_env_ready)
-if MEDIA_STORAGE_MODE == 'oss':
-    if not _can_use_oss:
-        raise RuntimeError(
-            'MEDIA_STORAGE_MODE=oss 但 OSS 配置或 oss2 依赖缺失，请检查环境变量与依赖安装。'
-        )
-    USE_OSS = True
-elif MEDIA_STORAGE_MODE == 'local':
-    USE_OSS = False
-else:
-    USE_OSS = _can_use_oss
+if not _oss_env_ready:
+    raise RuntimeError('OSS 配置缺失，请检查环境变量。')
+if not oss2:
+    raise RuntimeError('oss2 library not available but OSS is enabled.')
+USE_OSS = True
 app.config['USE_OSS'] = USE_OSS
-if USE_OSS:
-    app.config['OSS_ENDPOINT'] = OSS_ENDPOINT
-    app.config['OSS_ACCESS_KEY_ID'] = OSS_ACCESS_KEY_ID
-    app.config['OSS_ACCESS_KEY_SECRET'] = OSS_ACCESS_KEY_SECRET
-    app.config['OSS_BUCKET'] = OSS_BUCKET_NAME
+app.config['OSS_ENDPOINT'] = OSS_ENDPOINT
+app.config['OSS_ACCESS_KEY_ID'] = OSS_ACCESS_KEY_ID
+app.config['OSS_ACCESS_KEY_SECRET'] = OSS_ACCESS_KEY_SECRET
+app.config['OSS_BUCKET'] = OSS_BUCKET_NAME
 app.config['OSS_PREFIX'] = OSS_PREFIX
 app.config['OSS_PUBLIC_BASE_URL'] = OSS_PUBLIC_BASE_URL
-app.config['OSS_DIRECT_UPLOAD_BASE_URL'] = OSS_DIRECT_UPLOAD_BASE_URL
-app.config['OSS_UPLOAD_BASE_URL'] = OSS_DIRECT_UPLOAD_BASE_URL or OSS_PUBLIC_BASE_URL
-_direct_upload_flag = os.getenv('ENABLE_DIRECT_OSS_UPLOAD')
-if _direct_upload_flag is None:
-    _enable_direct_upload = True
-else:
-    _enable_direct_upload = _direct_upload_flag.strip().lower() not in {'0', 'false', 'no', 'off'}
+app.config['OSS_ASSUME_PUBLIC'] = OSS_ASSUME_PUBLIC
 try:
     direct_upload_expiration = int(os.getenv('DIRECT_UPLOAD_URL_EXPIRATION', '900'))
 except (TypeError, ValueError):
     direct_upload_expiration = 900
-app.config['DIRECT_OSS_UPLOAD_ENABLED'] = bool(USE_OSS and _enable_direct_upload)
+app.config['DIRECT_OSS_UPLOAD_ENABLED'] = bool(USE_OSS)
 app.config['DIRECT_UPLOAD_URL_EXPIRATION'] = max(60, direct_upload_expiration)
 REMOTE_FIELD_SUFFIX = '_remote_keys'
 _oss_bucket = None
@@ -1455,11 +1445,35 @@ def remove_uploaded_file(filename):
         pass
 
 
+def _sign_oss_get_url(key):
+    if not key:
+        return None
+    bucket = _get_oss_bucket()
+    if not bucket:
+        return None
+    expiry = app.config.get('DIRECT_UPLOAD_URL_EXPIRATION', 900)
+    try:
+        expires_in = int(expiry)
+    except (TypeError, ValueError):
+        expires_in = 900
+    expires_in = max(60, expires_in)
+    try:
+        signed_url = bucket.sign_url('GET', key, expires_in)
+    except Exception:
+        return None
+    return _finalize_signed_upload_url(signed_url)
+
+
 def _build_oss_url(key):
     key = key.lstrip('/')
+    assume_public = bool(app.config.get('OSS_ASSUME_PUBLIC'))
     public_base = app.config.get('OSS_PUBLIC_BASE_URL')
-    if public_base:
+    if assume_public and public_base:
         return f"{public_base}/{key}"
+    if not assume_public:
+        signed = _sign_oss_get_url(key)
+        if signed:
+            return signed
     endpoint = app.config.get('OSS_ENDPOINT', '')
     endpoint = endpoint.replace('https://', '').replace('http://', '')
     bucket = app.config.get('OSS_BUCKET')
@@ -1584,7 +1598,9 @@ def _finalize_signed_upload_url(url):
     """Rewrite signed OSS URL to desired domain/scheme for front-end direct uploads."""
     if not url:
         return url
-    preferred_base = app.config.get('OSS_UPLOAD_BASE_URL') or ''
+    preferred_base = ''
+    if app.config.get('OSS_ASSUME_PUBLIC'):
+        preferred_base = app.config.get('OSS_PUBLIC_BASE_URL') or ''
     parsed = urlsplit(url)
     path = parsed.path or ''
     if preferred_base:

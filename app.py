@@ -96,11 +96,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 attachments_root = (os.getenv('ATTACHMENTS_FOLDER') or os.getenv('ATTACHMENTS_DIR') or '').strip()
 if not attachments_root:
     attachments_root = os.path.join(BASE_DIR, 'attachments')
-legacy_upload_root = os.path.join(BASE_DIR, 'images')
 app.config['ATTACHMENTS_FOLDER'] = attachments_root
-app.config['LEGACY_UPLOAD_FOLDER'] = legacy_upload_root
-# 兼容旧配置字段
-app.config['UPLOAD_FOLDER'] = attachments_root
 TEMP_PAGE_DIR = app.instance_path
 # 确保运行所需的实例目录存在
 os.makedirs(TEMP_PAGE_DIR, exist_ok=True)
@@ -145,8 +141,29 @@ try:
 except (TypeError, ValueError):
     cleanup_grace_seconds = 86400
 app.config['ATTACHMENTS_CLEANUP_GRACE_SECONDS'] = max(0, cleanup_grace_seconds)
+db_backup_source = (os.getenv('DB_BACKUP_SOURCE_PATH') or '').strip()
+if not db_backup_source:
+    db_backup_source = os.path.join(app.instance_path, 'lab.db')
+app.config['DB_BACKUP_SOURCE_PATH'] = db_backup_source
+app.config['DB_BACKUP_ON_START'] = _parse_env_flag(
+    os.getenv('DB_BACKUP_ON_START'),
+    default=True
+)
+try:
+    db_backup_interval = int(os.getenv('DB_BACKUP_INTERVAL_SECONDS', '0'))
+except (TypeError, ValueError):
+    db_backup_interval = 0
+app.config['DB_BACKUP_INTERVAL_SECONDS'] = max(0, db_backup_interval)
+db_backup_prefix = (os.getenv('DB_BACKUP_PREFIX') or 'db-backups').strip('/ ')
+app.config['DB_BACKUP_PREFIX'] = db_backup_prefix
+try:
+    db_backup_retention_days = int(os.getenv('DB_BACKUP_RETENTION_DAYS', '0'))
+except (TypeError, ValueError):
+    db_backup_retention_days = 0
+app.config['DB_BACKUP_RETENTION_DAYS'] = max(0, db_backup_retention_days)
 REMOTE_FIELD_SUFFIX = '_remote_keys'
 _oss_bucket = None
+_db_backup_lock = threading.Lock()
 
 UTC = timezone.utc
 if ZoneInfo:
@@ -1387,14 +1404,8 @@ def _get_oss_bucket():
 
 
 def _attachment_storage_roots():
-    roots = []
     attachments_root = app.config.get('ATTACHMENTS_FOLDER')
-    if attachments_root:
-        roots.append(attachments_root)
-    legacy_root = app.config.get('LEGACY_UPLOAD_FOLDER')
-    if legacy_root and legacy_root not in roots:
-        roots.append(legacy_root)
-    return roots
+    return [attachments_root] if attachments_root else []
 
 
 def _local_attachment_root():
@@ -1789,6 +1800,169 @@ def _start_attachment_housekeeping():
                 _cleanup_orphaned_attachments()
 
     thread = threading.Thread(target=runner, name='attachment-housekeeping', daemon=True)
+    thread.start()
+
+
+def _resolve_db_backup_source_path():
+    source = app.config.get('DB_BACKUP_SOURCE_PATH') or ''
+    source = source.strip()
+    if not source:
+        source = os.path.join(app.instance_path, 'lab.db')
+    source = os.path.abspath(source)
+    if not os.path.isfile(source):
+        return None
+    return source
+
+
+def _db_backup_object_key(source_path):
+    prefix = (app.config.get('DB_BACKUP_PREFIX') or '').strip('/ ')
+    base = os.path.basename(source_path) or 'lab.db'
+    name, ext = os.path.splitext(base)
+    if not ext:
+        ext = '.db'
+    timestamp = datetime.utcnow().strftime('%Y%m%d%H%M%S')
+    filename = f"{name}-{timestamp}{ext}"
+    parts = []
+    oss_prefix = (app.config.get('OSS_PREFIX') or '').strip('/ ')
+    if oss_prefix:
+        parts.append(oss_prefix)
+    if prefix:
+        parts.append(prefix)
+    if parts:
+        return '/'.join(parts + [filename])
+    return filename
+
+
+def _db_backup_list_prefix():
+    prefix = (app.config.get('DB_BACKUP_PREFIX') or '').strip('/ ')
+    oss_prefix = (app.config.get('OSS_PREFIX') or '').strip('/ ')
+    parts = [part for part in (oss_prefix, prefix) if part]
+    if not parts:
+        return None
+    return '/'.join(parts) + '/'
+
+
+def _snapshot_sqlite_database(source_path):
+    if not source_path or not os.path.isfile(source_path):
+        return None
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
+    snapshot_path = temp_file.name
+    temp_file.close()
+    source_conn = None
+    dest_conn = None
+    try:
+        source_conn = sqlite3.connect(source_path, timeout=30)
+        dest_conn = sqlite3.connect(snapshot_path, timeout=30)
+        source_conn.backup(dest_conn)
+        return snapshot_path
+    except Exception:
+        try:
+            os.remove(snapshot_path)
+        except OSError:
+            pass
+        return None
+    finally:
+        if dest_conn:
+            dest_conn.close()
+        if source_conn:
+            source_conn.close()
+
+
+def _upload_db_backup_to_oss(snapshot_path, source_path):
+    if not snapshot_path or not app.config.get('USE_OSS'):
+        return None
+    bucket = _get_oss_bucket()
+    if not bucket:
+        return None
+    object_key = _db_backup_object_key(source_path)
+    try:
+        bucket.put_object_from_file(object_key, snapshot_path)
+    except Exception:
+        return None
+    return object_key
+
+
+def _cleanup_oss_db_backups(retention_days):
+    if retention_days <= 0 or not app.config.get('USE_OSS'):
+        return {'removed': 0, 'scanned': 0}
+    bucket = _get_oss_bucket()
+    if not bucket:
+        return {'removed': 0, 'scanned': 0}
+    prefix = _db_backup_list_prefix()
+    if not prefix:
+        return {'removed': 0, 'scanned': 0}
+    cutoff_ts = time.time() - (retention_days * 86400)
+    removed = 0
+    scanned = 0
+    for obj in _iter_oss_objects(prefix=prefix):
+        key = getattr(obj, 'key', None)
+        if not key or key.endswith('/'):
+            continue
+        scanned += 1
+        last_modified = getattr(obj, 'last_modified', None)
+        if isinstance(last_modified, datetime):
+            last_ts = last_modified.replace(tzinfo=None).timestamp()
+        elif isinstance(last_modified, (int, float)):
+            last_ts = float(last_modified)
+        else:
+            continue
+        if last_ts >= cutoff_ts:
+            continue
+        try:
+            bucket.delete_object(key)
+            removed += 1
+        except Exception:
+            continue
+    return {'removed': removed, 'scanned': scanned}
+
+
+def _backup_instance_database():
+    if not app.config.get('USE_OSS'):
+        return None
+    source_path = _resolve_db_backup_source_path()
+    if not source_path:
+        return None
+    if not _db_backup_lock.acquire(blocking=False):
+        return None
+    snapshot_path = None
+    try:
+        snapshot_path = _snapshot_sqlite_database(source_path)
+        if not snapshot_path:
+            return None
+        object_key = _upload_db_backup_to_oss(snapshot_path, source_path)
+        retention_days = app.config.get('DB_BACKUP_RETENTION_DAYS', 0)
+        if object_key and retention_days:
+            _cleanup_oss_db_backups(retention_days)
+        return object_key
+    except Exception:
+        return None
+    finally:
+        if snapshot_path:
+            try:
+                os.remove(snapshot_path)
+            except OSError:
+                pass
+        _db_backup_lock.release()
+
+
+def _start_db_backup_worker():
+    backup_on_start = bool(app.config.get('DB_BACKUP_ON_START'))
+    interval_seconds = app.config.get('DB_BACKUP_INTERVAL_SECONDS', 0)
+    if not backup_on_start and not interval_seconds:
+        return
+    if os.environ.get('FLASK_DEBUG') == '1' and os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
+        return
+
+    def runner():
+        with app.app_context():
+            if backup_on_start:
+                _backup_instance_database()
+            if interval_seconds:
+                while True:
+                    time.sleep(interval_seconds)
+                    _backup_instance_database()
+
+    thread = threading.Thread(target=runner, name='db-backup-worker', daemon=True)
     thread.start()
 
 
@@ -2470,6 +2644,7 @@ with app.app_context():
         db.session.commit()
 
 _start_attachment_housekeeping()
+_start_db_backup_worker()
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -2537,11 +2712,6 @@ def _send_local_attachment(filename):
 
 @app.route('/attachments/<path:filename>')
 def uploaded_attachment(filename):
-    return _send_local_attachment(filename)
-
-
-@app.route('/uploads/<path:filename>')
-def uploaded_file(filename):
     return _send_local_attachment(filename)
 
 
@@ -2949,10 +3119,7 @@ def add_event():
             'location_ids': list(location_ids),
             'participant_ids': list(participant_ids),
             'detail_link': detail_link,
-            'external_attachment_urls': (
-                request.form.get('external_event_attachment_urls')
-                or request.form.get('external_event_image_urls', '')
-            ),
+            'external_attachment_urls': request.form.get('external_event_attachment_urls', ''),
             'allow_participant_edit': allow_participant_edit,
             'participant_selection_touched': request.form.get('participant_selection_touched', '0'),
             'location_selection_touched': request.form.get('location_selection_touched', '0'),
@@ -2996,9 +3163,7 @@ def add_event():
         remote_event_refs = _collect_remote_object_keys('event_attachments')
         if remote_event_refs:
             _append_media_records(event.attachments, EventAttachment, remote_event_refs)
-        external_urls = _extract_external_urls(
-            request.form.get('external_event_attachment_urls') or request.form.get('external_event_image_urls')
-        )
+        external_urls = _extract_external_urls(request.form.get('external_event_attachment_urls'))
         if external_urls:
             existing_refs = {att.filename for att in event.attachments}
             for url in external_urls:
@@ -3007,7 +3172,6 @@ def add_event():
                     existing_refs.add(url)
         event.touch()
         db.session.commit()
-        _sync_attachments_async(event.attachment_filenames)
         _sync_attachments_async(event.attachment_filenames)
 
         missing_items, missing_locations = compute_missing_resources(event)
@@ -3308,10 +3472,7 @@ def edit_event(event_id):
             'location_ids': list(location_ids),
             'participant_ids': list(participant_ids),
             'detail_link': detail_link,
-            'external_attachment_urls': (
-                request.form.get('external_event_attachment_urls')
-                or request.form.get('external_event_image_urls', '')
-            ),
+            'external_attachment_urls': request.form.get('external_event_attachment_urls', ''),
             'allow_participant_edit': allow_participant_edit,
             'participant_selection_touched': '1' if participant_selection_touched else '0',
             'location_selection_touched': '1' if location_selection_touched else '0',
@@ -3374,9 +3535,7 @@ def edit_event(event_id):
         remote_event_refs = _collect_remote_object_keys('event_attachments')
         if remote_event_refs:
             _append_media_records(event.attachments, EventAttachment, remote_event_refs)
-        external_urls = _extract_external_urls(
-            request.form.get('external_event_attachment_urls') or request.form.get('external_event_image_urls')
-        )
+        external_urls = _extract_external_urls(request.form.get('external_event_attachment_urls'))
         if external_urls:
             existing_refs = {att.filename for att in event.attachments}
             for url in external_urls:
@@ -3667,11 +3826,6 @@ def add_item():
 
         # 附件处理（支持多选）
         uploaded_files = request.files.getlist('attachments')
-        if not uploaded_files:
-            uploaded_files = request.files.getlist('images')
-        if not uploaded_files:
-            fallback_file = request.files.get('attachment') or request.files.get('image')
-            uploaded_files = [fallback_file] if fallback_file else []
 
         saved_refs = []
         for attachment_file in uploaded_files:
@@ -3679,9 +3833,7 @@ def add_item():
             if stored_name:
                 saved_refs.append(stored_name)
 
-        external_urls = _extract_external_urls(
-            request.form.get('external_attachment_urls') or request.form.get('external_image_urls')
-        )
+        external_urls = _extract_external_urls(request.form.get('external_attachment_urls'))
         primary_attachment = saved_refs[0] if saved_refs else (external_urls[0] if external_urls else None)
 
         # ✅ 创建新的 Item 实例（已更新字段）
@@ -3824,11 +3976,6 @@ def edit_item(item_id):
 
         # 处理新增上传（支持多选）
         uploaded_files = request.files.getlist('attachments')
-        if not uploaded_files:
-            uploaded_files = request.files.getlist('images')
-        if not uploaded_files:
-            fallback_file = request.files.get('attachment') or request.files.get('image')
-            uploaded_files = [fallback_file] if fallback_file else []
         for attachment_file in uploaded_files:
             stored_name = save_uploaded_media(attachment_file)
             if stored_name:
@@ -3837,9 +3984,7 @@ def edit_item(item_id):
         if remote_refs:
             _append_media_records(item.attachments, ItemAttachment, remote_refs)
 
-        external_urls = _extract_external_urls(
-            request.form.get('external_attachment_urls') or request.form.get('external_image_urls')
-        )
+        external_urls = _extract_external_urls(request.form.get('external_attachment_urls'))
         if external_urls:
             existing_refs = {att.filename for att in item.attachments}
             if item.primary_attachment:
@@ -4099,11 +4244,6 @@ def add_location():
         serialized_notes = _serialize_location_notes(notes_meta)
 
         uploaded_files = request.files.getlist('attachments')
-        if not uploaded_files:
-            uploaded_files = request.files.getlist('images')
-        if not uploaded_files:
-            fallback_file = request.files.get('attachment') or request.files.get('image')
-            uploaded_files = [fallback_file] if fallback_file else []
 
         saved_refs = []
         for attachment_file in uploaded_files:
@@ -4111,9 +4251,7 @@ def add_location():
             if stored_name:
                 saved_refs.append(stored_name)
         saved_refs.extend(_collect_remote_object_keys('attachments'))
-        external_urls = _extract_external_urls(
-            request.form.get('external_attachment_urls') or request.form.get('external_image_urls')
-        )
+        external_urls = _extract_external_urls(request.form.get('external_attachment_urls'))
         primary_attachment = saved_refs[0] if saved_refs else (external_urls[0] if external_urls else None)
         # 先创建 Location
         new_loc = Location(
@@ -4214,11 +4352,6 @@ def edit_location(loc_id):
             location.primary_attachment = None
 
         uploaded_files = request.files.getlist('attachments')
-        if not uploaded_files:
-            uploaded_files = request.files.getlist('images')
-        if not uploaded_files:
-            fallback_file = request.files.get('attachment') or request.files.get('image')
-            uploaded_files = [fallback_file] if fallback_file else []
         for attachment_file in uploaded_files:
             stored_name = save_uploaded_media(attachment_file)
             if stored_name:
@@ -4227,9 +4360,7 @@ def edit_location(loc_id):
         if remote_refs:
             _append_media_records(location.attachments, LocationAttachment, remote_refs)
 
-        external_urls = _extract_external_urls(
-            request.form.get('external_attachment_urls') or request.form.get('external_image_urls')
-        )
+        external_urls = _extract_external_urls(request.form.get('external_attachment_urls'))
         if external_urls:
             existing_refs = {att.filename for att in location.attachments}
             if location.primary_attachment:
@@ -4953,16 +5084,7 @@ def inject_attachment_helpers():
     def location_attachment_urls(location):
         return [entry['url'] for entry in location_media_entries(location) if entry['kind'] == 'image']
 
-    def item_image_urls(item):
-        return item_attachment_urls(item)
-
-    def location_image_urls(location):
-        return location_attachment_urls(location)
-
     def uploaded_attachment_url(filename):
-        return uploaded_media_url(filename)
-
-    def uploaded_image_url(filename):
         return uploaded_media_url(filename)
 
     return dict(
@@ -4973,9 +5095,6 @@ def inject_attachment_helpers():
         uploaded_attachment_url=uploaded_attachment_url,
         item_attachment_urls=item_attachment_urls,
         location_attachment_urls=location_attachment_urls,
-        item_image_urls=item_image_urls,
-        location_image_urls=location_image_urls,
-        uploaded_image_url=uploaded_image_url,
         media_kind=determine_media_kind,
         media_kind_labels=MEDIA_KIND_LABELS,
         media_display_name=media_display_name,

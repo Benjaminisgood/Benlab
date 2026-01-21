@@ -70,6 +70,10 @@ GUNICORN_BIN="${GUNICORN_BIN:-gunicorn}"
 GUNICORN_TIMEOUT="${GUNICORN_TIMEOUT:-120}"
 GUNICORN_WORKER_CLASS="${GUNICORN_WORKER_CLASS:-gevent}"
 GUNICORN_WORKERS="${GUNICORN_WORKERS:-}"
+BACKUP_DIR="${BACKUP_DIR:-$PROJECT_PATH/.benlab_backup}"
+BACKUP_ITEMS="${BACKUP_ITEMS:-attachments static .env instance}"
+UPDATE_RESTART="${UPDATE_RESTART:-auto}"
+GIT_PULL_ARGS="${GIT_PULL_ARGS:---ff-only}"
 
 if ! cd "$PROJECT_PATH"; then
   error "无法进入项目目录: $PROJECT_PATH"
@@ -347,6 +351,135 @@ wait_for_port_release() {
   return 1
 }
 
+is_running() {
+  if [ -f "$PID_FILE" ]; then
+    local pid
+    pid=$(cat "$PID_FILE" 2>/dev/null || true)
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+resolve_backup_dir() {
+  if [[ "$BACKUP_DIR" = /* ]]; then
+    echo "$BACKUP_DIR"
+  else
+    echo "$PROJECT_PATH/$BACKUP_DIR"
+  fi
+}
+
+create_backup() {
+  BACKUP_FILE=""
+  local -a items=()
+  local item
+
+  for item in $BACKUP_ITEMS; do
+    if [ -e "$PROJECT_PATH/$item" ]; then
+      items+=("$item")
+    else
+      warn "备份项不存在，跳过: $item"
+    fi
+  done
+
+  if [ "${#items[@]}" -eq 0 ]; then
+    error "没有可备份的数据"
+    return 1
+  fi
+
+  local backup_dir
+  backup_dir=$(resolve_backup_dir)
+  mkdir -p "$backup_dir"
+
+  local timestamp
+  timestamp=$(date +"%Y%m%d-%H%M%S")
+  BACKUP_FILE="$backup_dir/backup-$timestamp.tar.gz"
+
+  if ! tar -czf "$BACKUP_FILE" -C "$PROJECT_PATH" "${items[@]}"; then
+    error "备份失败"
+    BACKUP_FILE=""
+    return 1
+  fi
+
+  info "备份完成: $BACKUP_FILE"
+  return 0
+}
+
+restore_backup() {
+  local backup_file="${1:-$BACKUP_FILE}"
+
+  if [ -z "$backup_file" ]; then
+    error "未指定备份文件"
+    return 1
+  fi
+
+  if [ ! -f "$backup_file" ]; then
+    error "备份文件不存在: $backup_file"
+    return 1
+  fi
+
+  if ! tar -xzf "$backup_file" -C "$PROJECT_PATH"; then
+    error "还原备份失败"
+    return 1
+  fi
+
+  info "备份已还原"
+}
+
+ensure_git_ready() {
+  if ! command -v git &>/dev/null; then
+    error "未检测到 git，请先安装"
+    return 1
+  fi
+
+  if ! git rev-parse --is-inside-work-tree &>/dev/null; then
+    error "当前目录不是 git 仓库，无法更新"
+    return 1
+  fi
+
+  if [ -n "$(git status --porcelain)" ]; then
+    if [ "${ALLOW_DIRTY_UPDATE:-}" = "1" ]; then
+      warn "检测到未提交变更，但 ALLOW_DIRTY_UPDATE=1，继续更新"
+    else
+      error "检测到未提交变更，请先提交/清理或设置 ALLOW_DIRTY_UPDATE=1"
+      return 1
+    fi
+  fi
+}
+
+git_pull_latest() {
+  info "拉取最新代码..."
+  if ! git pull $GIT_PULL_ARGS; then
+    error "git 拉取失败"
+    return 1
+  fi
+  info "代码更新完成"
+}
+
+should_restart_after_update() {
+  local was_running=$1
+  local mode="${UPDATE_RESTART:-auto}"
+
+  case "$mode" in
+    auto|"")
+      [ "$was_running" -eq 1 ]
+      return
+      ;;
+    always|yes|true|1)
+      return 0
+      ;;
+    never|no|false|0)
+      return 1
+      ;;
+    *)
+      warn "未知 UPDATE_RESTART=$mode，使用 auto"
+      [ "$was_running" -eq 1 ]
+      return
+      ;;
+  esac
+}
+
 # ===== 功能函数 =====
 start() {
   ensure_venv
@@ -464,6 +597,60 @@ restart() {
   start
 }
 
+backup() {
+  if create_backup; then
+    info "备份文件: $BACKUP_FILE"
+  else
+    return 1
+  fi
+}
+
+update() {
+  if ! ensure_git_ready; then
+    return 1
+  fi
+
+  local was_running=0
+  if is_running; then
+    was_running=1
+    info "检测到服务正在运行，准备停止..."
+    stop
+  fi
+
+  if ! create_backup; then
+    error "备份失败，已取消更新"
+    if [ "$was_running" -eq 1 ]; then
+      warn "尝试恢复服务..."
+      start
+    fi
+    return 1
+  fi
+
+  if ! git_pull_latest; then
+    error "更新失败，已保留当前版本"
+    if [ "$was_running" -eq 1 ]; then
+      warn "尝试恢复服务..."
+      start
+    fi
+    return 1
+  fi
+
+  if ! restore_backup "$BACKUP_FILE"; then
+    error "备份还原失败，请检查 $BACKUP_FILE"
+    if [ "$was_running" -eq 1 ]; then
+      warn "尝试恢复服务..."
+      start
+    fi
+    return 1
+  fi
+
+  if should_restart_after_update "$was_running"; then
+    start
+  else
+    info "更新完成"
+  fi
+}
+
 ip() {
   echo "🌍 当前运行端口: $PORT"
   echo "—— 本地访问: http://localhost:$PORT"
@@ -484,9 +671,11 @@ case "$1" in
   status) status ;;
   restart) restart ;;
   logs) logs ;;
+  backup) backup ;;
+  update) update ;;
   ip) ip ;;
   *)
-    echo "用法: $0 {start|stop|status|restart|logs|ip}"
+    echo "用法: $0 {start|stop|status|restart|logs|backup|update|ip}"
     exit 1
     ;;
 esac

@@ -296,7 +296,7 @@ ensure_gunicorn() {
 }
 
 ensure_runtime_dirs() {
-  mkdir -p "$PROJECT_PATH/images" "$PROJECT_PATH/instance"
+  mkdir -p "$PROJECT_PATH/attachments" "$PROJECT_PATH/instance"
 }
 
 wait_for_pid_file() {

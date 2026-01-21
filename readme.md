@@ -97,7 +97,7 @@ chmod +x benlab.sh
 ```bash
 ./benlab.sh start
 ```
-- 会自动创建/复用 `venv`、安装 `requirements.txt`、确保 `images/` 和 `instance/` 目录存在、计算合理的 Gunicorn workers，并默认监听 `0.0.0.0:5001`。
+- 会自动创建/复用 `venv`、安装 `requirements.txt`、确保 `attachments/` 和 `instance/` 目录存在、计算合理的 Gunicorn workers，并默认监听 `0.0.0.0:5001`。
 
 4) 其他常用命令：
 ```bash
@@ -114,7 +114,7 @@ chmod +x benlab.sh
 | `HOST` / `FLASK_RUN_HOST` | `0.0.0.0` | 服务监听地址 |
 | `PORT` / `FLASK_RUN_PORT` / `BENSCI_PORT` | `5001` | 多级端口回退，优先级 `PORT` → `FLASK_RUN_PORT` → `BENSCI_PORT` |
 | `SQLALCHEMY_DATABASE_URI` | `sqlite:///lab.db?timeout=30` | 支持改为 PostgreSQL/MySQL 等，例如 `postgresql+psycopg://user:pass@host/db` |
-| `UPLOAD_FOLDER` | `./images` | 上传文件保存目录，默认位于项目根目录 |
+| `ATTACHMENTS_FOLDER` | `./attachments` | 上传文件保存目录，默认位于项目根目录 |
 | `PUBLIC_BASE_URL` | `''` | 事项分享/二维码使用的外部访问域名（不影响 OSS） |
 | `ALIYUN_OSS_PUBLIC_BASE_URL` | `''` | OSS 绑定域名/CNAME（可选） |
 | `ALIYUN_OSS_ASSUME_PUBLIC` | `false` | 是否假定 OSS Bucket 公共可读；为 `false` 时生成签名 URL 并使用默认域名 |
@@ -128,7 +128,7 @@ chmod +x benlab.sh
 ```text
 Benlab/
 ├── app.py                # Flask 主应用，包含模型、路由、上传逻辑
-├── images/               # 图片上传目录（运行时生成，可挂载持久化存储）
+├── attachments/          # 附件上传目录（运行时生成，可挂载持久化存储）
 ├── instance/             # Flask 实例目录（可放置生产配置）
 ├── migrations/           # Flask-Migrate 管理的数据库迁移版本
 ├── requirements.txt      # Python 依赖列表
@@ -204,10 +204,10 @@ Benlab/
 
 如需查看或扩展字段，请查阅 `app.py` 中模型定义区域。
 
-## 图片与存储策略
-- 默认使用 OSS 存储；`images/` 仅用于历史本地文件或临时处理。
-- `/uploads/<filename>` 动态路由可访问历史本地文件，方便迁移或排查。
-- 编辑表单允许批量删除旧图片，系统会自动清理冗余文件。
+## 附件与存储策略
+- 默认使用 OSS 存储；`attachments/` 用于本地落盘或同步缓存。
+- `/attachments/<filename>` 动态路由可访问本地附件，方便迁移或排查。
+- 编辑表单允许批量删除旧附件，系统会自动清理冗余文件。
 - **OSS 直传**：启用 OSS 时默认使用前端直传，无需额外开关。
   - `ALIYUN_OSS_PUBLIC_BASE_URL` 可配置绑定域名/CNAME；当 `ALIYUN_OSS_ASSUME_PUBLIC=1` 时会用作对外访问域名。
   - `ALIYUN_OSS_ASSUME_PUBLIC=0`（默认）会使用默认 bucket 域名并生成签名 URL，不依赖公共域名。
@@ -224,7 +224,7 @@ export ALIYUN_OSS_ASSUME_PUBLIC=0
 ```
 
 ## 日常运维与数据管理
-- **备份**：定期复制 `lab.db`（或外部数据库备份）及 `images/` 目录。
+- **备份**：定期复制 `lab.db`（或外部数据库备份）及 `attachments/` 目录。
 - **数据清理**：测试环境可删除 `lab.db`、迁移目录后重新执行迁移；生产环境请使用 `flask db downgrade` / `upgrade` 维护版本。
 - **库存巡检**：结合二维码巡检，成员扫码即可看到责任人、库存状态与历史记录。
 - **导出审计**：导出 CSV 并导入数据仓库或 BI 工具开展年度资产盘点。
@@ -239,7 +239,7 @@ export ALIYUN_OSS_ASSUME_PUBLIC=0
   flask db migrate -m "描述"
   flask db upgrade
   ```
-- 上传调试：确认 `UPLOAD_FOLDER` 可写；必要时在 macOS/Linux 上执行 `chmod 755 images`。
+- 上传调试：确认 `ATTACHMENTS_FOLDER` 可写；必要时在 macOS/Linux 上执行 `chmod 755 attachments`。
 - 若需热加载，可使用 `FLASK_ENV=development flask run`。
 
 ## 部署建议
@@ -249,8 +249,8 @@ export ALIYUN_OSS_ASSUME_PUBLIC=0
   ```
 - 置于 Nginx/Caddy 反向代理之后，并启用 HTTPS；Flask 已通过 ProxyFix 支持 `X-Forwarded-*` 头。
 - 将 `FLASK_SECRET_KEY`、数据库凭据写入安全的环境变量或密钥管理服务。
-- 将数据库与 `images/` 目录放置在持久化存储，必要时配置对象存储 / CDN 加速。
-- 若部署在容器环境，记得挂载卷保存 `images/` 与数据库数据。
+- 将数据库与 `attachments/` 目录放置在持久化存储，必要时配置对象存储 / CDN 加速。
+- 若部署在容器环境，记得挂载卷保存 `attachments/` 与数据库数据。
 
 **生产环境检查清单**
 - [ ] 修改默认管理员账号密码。
@@ -260,11 +260,11 @@ export ALIYUN_OSS_ASSUME_PUBLIC=0
 - [ ] 如使用 OSS，确保 Bucket 权限与签名配置正确（私有桶需签名访问）。
 
 ## 常见问题
-- **图片无法显示？** 确认 `images/` 目录写权限，以及反向代理是否放行 `/uploads/<filename>` 路由。
+- **附件无法显示？** 确认 `attachments/` 目录写权限，以及反向代理是否放行 `/attachments/<filename>` 路由。
 - **SQLite 锁冲突？** 已默认启用 WAL、busy_timeout；若并发写入仍频繁，可切换到 PostgreSQL。
 - **默认账号安全性？** 部署后务必修改管理员密码，并视情况关闭注册入口。
 - **大文件上传失败？** 检查 `MAX_CONTENT_LENGTH` 与反向代理的上传限制（如 Nginx 的 `client_max_body_size`）。
-- **二维码无法访问？** 确认服务域名/端口正确，反向代理未拦截静态与 `/uploads/` 路由。
+- **二维码无法访问？** 确认服务域名/端口正确，反向代理未拦截静态与 `/attachments/` 路由。
 
 ## 路线图（Roadmap）
 - [ ] 支持批量导入（CSV/Excel）与模板校验

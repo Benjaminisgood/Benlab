@@ -76,6 +76,7 @@ UPDATE_RESTART="${UPDATE_RESTART:-auto}"
 GIT_PULL_ARGS="${GIT_PULL_ARGS:---ff-only}"
 UPDATE_REPO_URL="${UPDATE_REPO_URL:-https://github.com/Benjaminisgood/Benlab.git}"
 UPDATE_BRANCH="${UPDATE_BRANCH:-}"
+FORCE_UPDATE="${FORCE_UPDATE:-0}"
 
 if ! cd "$PROJECT_PATH"; then
   error "无法进入项目目录: $PROJECT_PATH"
@@ -449,10 +450,26 @@ ensure_git_ready() {
     if [ "${ALLOW_DIRTY_UPDATE:-}" = "1" ]; then
       warn "检测到未提交变更，但 ALLOW_DIRTY_UPDATE=1，继续更新"
     else
+      warn "检测到未提交变更"
+      if confirm_force_update; then
+        return 0
+      fi
       error "检测到未提交变更，请先提交/清理或设置 ALLOW_DIRTY_UPDATE=1"
       return 1
     fi
   fi
+}
+
+confirm_force_update() {
+  local ans
+  echo "是否强制更新并丢弃本地已跟踪修改？[y/N]"
+  read -r ans
+  if [[ "$ans" =~ ^[Yy]$ ]]; then
+    FORCE_UPDATE=1
+    warn "已选择强制更新，将丢弃本地已跟踪修改"
+    return 0
+  fi
+  return 1
 }
 
 resolve_update_branch() {
@@ -490,12 +507,25 @@ resolve_update_branch() {
 git_pull_latest() {
   local branch
   branch=$(resolve_update_branch)
-  info "从 $UPDATE_REPO_URL 拉取最新代码 (branch=$branch)..."
-  if ! git pull $GIT_PULL_ARGS "$UPDATE_REPO_URL" "$branch"; then
-    error "git 拉取失败"
-    return 1
+  if [ "${FORCE_UPDATE:-0}" = "1" ]; then
+    info "强制更新：从 $UPDATE_REPO_URL 拉取最新代码 (branch=$branch)..."
+    if ! git fetch "$UPDATE_REPO_URL" "$branch"; then
+      error "git 拉取失败"
+      return 1
+    fi
+    if ! git reset --hard FETCH_HEAD; then
+      error "强制更新失败（reset --hard）"
+      return 1
+    fi
+    info "强制更新完成"
+  else
+    info "从 $UPDATE_REPO_URL 拉取最新代码 (branch=$branch)..."
+    if ! git pull $GIT_PULL_ARGS "$UPDATE_REPO_URL" "$branch"; then
+      error "git 拉取失败"
+      return 1
+    fi
+    info "代码更新完成"
   fi
-  info "代码更新完成"
 }
 
 should_restart_after_update() {

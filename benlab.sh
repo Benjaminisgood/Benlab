@@ -74,6 +74,8 @@ BACKUP_DIR="${BACKUP_DIR:-$PROJECT_PATH/.benlab_backup}"
 BACKUP_ITEMS="${BACKUP_ITEMS:-attachments static .env instance}"
 UPDATE_RESTART="${UPDATE_RESTART:-auto}"
 GIT_PULL_ARGS="${GIT_PULL_ARGS:---ff-only}"
+UPDATE_REPO_URL="${UPDATE_REPO_URL:-https://github.com/Benjaminisgood/Benlab.git}"
+UPDATE_BRANCH="${UPDATE_BRANCH:-}"
 
 if ! cd "$PROJECT_PATH"; then
   error "无法进入项目目录: $PROJECT_PATH"
@@ -433,6 +435,11 @@ ensure_git_ready() {
     return 1
   fi
 
+  if [ -z "${UPDATE_REPO_URL:-}" ]; then
+    error "UPDATE_REPO_URL 不能为空"
+    return 1
+  fi
+
   if ! git rev-parse --is-inside-work-tree &>/dev/null; then
     error "当前目录不是 git 仓库，无法更新"
     return 1
@@ -448,9 +455,43 @@ ensure_git_ready() {
   fi
 }
 
+resolve_update_branch() {
+  if [ -n "${UPDATE_BRANCH:-}" ]; then
+    echo "$UPDATE_BRANCH"
+    return
+  fi
+
+  local current_branch=""
+  current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+  if [ -n "$current_branch" ] && [ "$current_branch" != "HEAD" ]; then
+    echo "$current_branch"
+    return
+  fi
+
+  local origin_head=""
+  origin_head=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)
+  if [ -n "$origin_head" ]; then
+    echo "${origin_head#origin/}"
+    return
+  fi
+
+  local remote_head=""
+  if [ -n "${UPDATE_REPO_URL:-}" ]; then
+    remote_head=$(git ls-remote --symref "$UPDATE_REPO_URL" HEAD 2>/dev/null | awk '/^ref:/ {print $2}' | sed 's#refs/heads/##')
+  fi
+  if [ -n "$remote_head" ]; then
+    echo "$remote_head"
+    return
+  fi
+
+  echo "main"
+}
+
 git_pull_latest() {
-  info "拉取最新代码..."
-  if ! git pull $GIT_PULL_ARGS; then
+  local branch
+  branch=$(resolve_update_branch)
+  info "从 $UPDATE_REPO_URL 拉取最新代码 (branch=$branch)..."
+  if ! git pull $GIT_PULL_ARGS "$UPDATE_REPO_URL" "$branch"; then
     error "git 拉取失败"
     return 1
   fi

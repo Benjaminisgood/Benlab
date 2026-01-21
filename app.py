@@ -3,6 +3,7 @@ import glob
 import tempfile
 import zipfile
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 import re
 import json
@@ -92,11 +93,16 @@ app.config['PUBLIC_BASE_URL'] = public_base.rstrip('/') if public_base else None
 app.config['PREFERRED_URL_SCHEME'] = os.getenv('PREFERRED_URL_SCHEME', 'https')
 # 使用绝对路径，避免工作目录变化导致保存失败
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# app.config['UPLOAD_FOLDER'] = os.path.join(BASE_DIR, 'static', 'images')
-app.config['UPLOAD_FOLDER'] = os.path.join(BASE_DIR, 'images')
+attachments_root = (os.getenv('ATTACHMENTS_FOLDER') or os.getenv('ATTACHMENTS_DIR') or '').strip()
+if not attachments_root:
+    attachments_root = os.path.join(BASE_DIR, 'attachments')
+legacy_upload_root = os.path.join(BASE_DIR, 'images')
+app.config['ATTACHMENTS_FOLDER'] = attachments_root
+app.config['LEGACY_UPLOAD_FOLDER'] = legacy_upload_root
+# 兼容旧配置字段
+app.config['UPLOAD_FOLDER'] = attachments_root
 TEMP_PAGE_DIR = app.instance_path
-# 确保运行所需的本地目录存在（上传目录、实例目录）
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+# 确保运行所需的实例目录存在
 os.makedirs(TEMP_PAGE_DIR, exist_ok=True)
 app.config['MAX_CONTENT_LENGTH'] = 2500 * 1024 * 1024  # 限制上传2500MB以内的文件
 OSS_ENDPOINT = os.getenv('ALIYUN_OSS_ENDPOINT')
@@ -126,6 +132,19 @@ except (TypeError, ValueError):
     direct_upload_expiration = 900
 app.config['DIRECT_OSS_UPLOAD_ENABLED'] = bool(USE_OSS)
 app.config['DIRECT_UPLOAD_URL_EXPIRATION'] = max(60, direct_upload_expiration)
+app.config['ATTACHMENTS_SYNC_ON_START'] = _parse_env_flag(
+    os.getenv('ATTACHMENTS_SYNC_ON_START'),
+    default=True
+)
+app.config['ATTACHMENTS_CLEANUP_ON_START'] = _parse_env_flag(
+    os.getenv('ATTACHMENTS_CLEANUP_ON_START'),
+    default=True
+)
+try:
+    cleanup_grace_seconds = int(os.getenv('ATTACHMENTS_CLEANUP_GRACE_SECONDS', '86400'))
+except (TypeError, ValueError):
+    cleanup_grace_seconds = 86400
+app.config['ATTACHMENTS_CLEANUP_GRACE_SECONDS'] = max(0, cleanup_grace_seconds)
 REMOTE_FIELD_SUFFIX = '_remote_keys'
 _oss_bucket = None
 
@@ -338,26 +357,13 @@ def _format_event_time_range(event):
 def _load_event_cover_image(event, target_size):
     if Image is None:
         return None
-    image_entry = next((img for img in (event.images or []) if img.filename), None)
+    image_entry = next(
+        (att for att in (event.attachments or []) if att.filename and determine_media_kind(att.filename) == 'image'),
+        None
+    )
     if not image_entry:
         return None
-    filename = image_entry.filename
-    data = None
-    try:
-        if _is_external_media(filename):
-            with urllib.request.urlopen(filename, timeout=5) as resp:
-                data = resp.read()
-        elif app.config.get('USE_OSS'):
-            url = _build_oss_url(filename)
-            with urllib.request.urlopen(url, timeout=5) as resp:
-                data = resp.read()
-        else:
-            path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            if os.path.exists(path):
-                with open(path, 'rb') as fh:
-                    data = fh.read()
-    except (URLError, HTTPError, OSError):
-        data = None
+    data = _read_media_bytes(image_entry.filename, timeout=5)
     if not data:
         return None
     try:
@@ -1380,6 +1386,64 @@ def _get_oss_bucket():
     return _oss_bucket
 
 
+def _attachment_storage_roots():
+    roots = []
+    attachments_root = app.config.get('ATTACHMENTS_FOLDER')
+    if attachments_root:
+        roots.append(attachments_root)
+    legacy_root = app.config.get('LEGACY_UPLOAD_FOLDER')
+    if legacy_root and legacy_root not in roots:
+        roots.append(legacy_root)
+    return roots
+
+
+def _local_attachment_root():
+    root = app.config.get('ATTACHMENTS_FOLDER')
+    if root and os.path.isdir(root):
+        return root
+    return None
+
+
+def _safe_attachment_path(root, ref):
+    if not root or not ref:
+        return None
+    root_abs = os.path.abspath(root)
+    candidate = os.path.abspath(os.path.join(root_abs, ref))
+    if not candidate.startswith(root_abs):
+        return None
+    return candidate
+
+
+def _find_local_attachment(ref):
+    if not ref:
+        return None
+    for root in _attachment_storage_roots():
+        if not root or not os.path.isdir(root):
+            continue
+        candidate = _safe_attachment_path(root, ref)
+        if candidate and os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def _resolve_local_attachment_ref(ref):
+    if not ref:
+        return None, None
+    for root in _attachment_storage_roots():
+        if not root or not os.path.isdir(root):
+            continue
+        candidate = _safe_attachment_path(root, ref)
+        if candidate and os.path.exists(candidate):
+            root_abs = os.path.abspath(root)
+            rel = os.path.relpath(candidate, root_abs)
+            return root_abs, rel
+    return None, None
+
+
+def _local_attachment_exists(ref):
+    return bool(_find_local_attachment(ref))
+
+
 def _generate_stored_filename(original_name):
     sanitized = secure_filename(original_name or '')
     if not sanitized:
@@ -1389,7 +1453,7 @@ def _generate_stored_filename(original_name):
 
 
 def save_uploaded_media(file_storage):
-    """Persist an uploaded media file and return the stored filename."""
+    """Persist an uploaded media file and return the stored object key."""
     if not file_storage or file_storage.filename == '':
         return None
     if not allowed_file(file_storage.filename):
@@ -1402,46 +1466,38 @@ def save_uploaded_media(file_storage):
         file_storage.stream.seek(0)
         bucket.put_object(object_key, file_storage.stream.read())
         return object_key
-    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-    filepath = os.path.join(app.config['UPLOAD_FOLDER'], stored_name)
+    attachments_root = app.config.get('ATTACHMENTS_FOLDER')
+    if not attachments_root:
+        return None
+    os.makedirs(attachments_root, exist_ok=True)
+    filepath = os.path.join(attachments_root, stored_name)
     file_storage.save(filepath)
     return stored_name
 
 
 def remove_uploaded_file(filename):
-    """Delete a previously saved image file if it still exists."""
+    """Delete a previously saved attachment file if it still exists."""
     if not filename or _is_external_media(filename):
         return
-    if app.config.get('USE_OSS'):
-        bucket = _get_oss_bucket()
-        prefix = app.config.get('OSS_PREFIX')
-        key = filename
-        if prefix and key and not key.startswith(prefix):
-            # legacy local path retained after切换：尝试删除本地文件
-            path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            try:
-                if os.path.exists(path):
-                    os.remove(path)
-            except OSError:
-                pass
-            return
-        if not prefix:
-            local_legacy_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            if os.path.exists(local_legacy_path):
-                try:
-                    os.remove(local_legacy_path)
-                except OSError:
-                    pass
+    for root in _attachment_storage_roots():
+        if not root or not os.path.isdir(root):
+            continue
+        local_path = _safe_attachment_path(root, filename)
+        if not local_path or not os.path.exists(local_path):
+            continue
         try:
-            bucket.delete_object(key)
-        except oss2.exceptions.NoSuchKey:  # type: ignore[attr-defined]
+            os.remove(local_path)
+        except OSError:
             pass
+    if not app.config.get('USE_OSS'):
         return
-    path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    bucket = _get_oss_bucket()
+    if not bucket:
+        return
+    key = filename
     try:
-        if os.path.exists(path):
-            os.remove(path)
-    except OSError:
+        bucket.delete_object(key)
+    except oss2.exceptions.NoSuchKey:  # type: ignore[attr-defined]
         pass
 
 
@@ -1495,19 +1551,16 @@ def _read_media_bytes(ref, timeout=10):
     url = None
     if _is_external_media(ref):
         url = _normalize_external_url(ref)
-    elif app.config.get('USE_OSS'):
-        url = _build_oss_url(ref)
     else:
-        upload_root = os.path.abspath(app.config['UPLOAD_FOLDER'])
-        path = os.path.abspath(os.path.join(app.config['UPLOAD_FOLDER'], ref))
-        if not path.startswith(upload_root):
-            return None
-        if os.path.exists(path):
+        local_path = _find_local_attachment(ref)
+        if local_path:
             try:
-                with open(path, 'rb') as fh:
+                with open(local_path, 'rb') as fh:
                     return fh.read()
             except OSError:
                 return None
+        if app.config.get('USE_OSS'):
+            url = _build_oss_url(ref)
     if not url:
         return None
     try:
@@ -1515,6 +1568,228 @@ def _read_media_bytes(ref, timeout=10):
             return resp.read()
     except (URLError, HTTPError, OSError, ValueError):
         return None
+
+
+def _iter_oss_objects(prefix=None):
+    bucket = _get_oss_bucket()
+    if not bucket:
+        return
+    marker = ''
+    while True:
+        result = bucket.list_objects(prefix=prefix or None, marker=marker, max_keys=1000)
+        for obj in result.object_list or []:
+            yield obj
+        if getattr(result, 'is_truncated', False):
+            marker = getattr(result, 'next_marker', '')
+            if not marker:
+                break
+        else:
+            break
+
+
+def _sync_oss_attachments_to_local():
+    if not app.config.get('USE_OSS'):
+        return {'downloaded': 0, 'skipped': 0}
+    attachments_root = _local_attachment_root()
+    if not attachments_root:
+        return {'downloaded': 0, 'skipped': 0}
+    bucket = _get_oss_bucket()
+    if not bucket:
+        return {'downloaded': 0, 'skipped': 0}
+    prefix = app.config.get('OSS_PREFIX') or None
+    if prefix:
+        prefix = f"{prefix}/"
+    downloaded = 0
+    skipped = 0
+    root_abs = os.path.abspath(attachments_root)
+    for obj in _iter_oss_objects(prefix=prefix):
+        key = getattr(obj, 'key', None)
+        if not key or key.endswith('/'):
+            continue
+        local_path = _safe_attachment_path(root_abs, key)
+        if not local_path:
+            continue
+        expected_size = getattr(obj, 'size', None)
+        if os.path.exists(local_path) and expected_size is not None:
+            try:
+                if os.path.getsize(local_path) == expected_size:
+                    skipped += 1
+                    continue
+            except OSError:
+                pass
+        local_dir = os.path.dirname(local_path)
+        if local_dir and not os.path.isdir(local_dir):
+            os.makedirs(local_dir, exist_ok=True)
+        try:
+            bucket.get_object_to_file(key, local_path)
+            downloaded += 1
+        except Exception:
+            continue
+    return {'downloaded': downloaded, 'skipped': skipped}
+
+
+def _sync_attachments_async(refs):
+    if not refs:
+        return
+    if not app.config.get('USE_OSS'):
+        return
+    if not _local_attachment_root():
+        return
+    unique_refs = []
+    seen = set()
+    for ref in refs:
+        if not ref or _is_external_media(ref) or ref in seen:
+            continue
+        seen.add(ref)
+        unique_refs.append(ref)
+    if not unique_refs:
+        return
+
+    def runner():
+        root = _local_attachment_root()
+        if not root:
+            return
+        bucket = _get_oss_bucket()
+        if not bucket:
+            return
+        root_abs = os.path.abspath(root)
+        for key in unique_refs:
+            local_path = _safe_attachment_path(root_abs, key)
+            if not local_path or os.path.exists(local_path):
+                continue
+            local_dir = os.path.dirname(local_path)
+            if local_dir and not os.path.isdir(local_dir):
+                os.makedirs(local_dir, exist_ok=True)
+            try:
+                bucket.get_object_to_file(key, local_path)
+            except Exception:
+                continue
+
+    thread = threading.Thread(target=runner, name='attachment-sync-on-demand', daemon=True)
+    thread.start()
+
+
+def _collect_referenced_attachment_keys():
+    refs = set()
+
+    def add_ref(ref):
+        if ref and not _is_external_media(ref):
+            refs.add(ref)
+
+    for (value,) in db.session.query(Member.photo).filter(Member.photo.isnot(None)):
+        add_ref(value)
+    for (value,) in db.session.query(Item.primary_attachment).filter(Item.primary_attachment.isnot(None)):
+        add_ref(value)
+    for (value,) in db.session.query(Location.primary_attachment).filter(Location.primary_attachment.isnot(None)):
+        add_ref(value)
+    for (value,) in db.session.query(ItemAttachment.filename):
+        add_ref(value)
+    for (value,) in db.session.query(LocationAttachment.filename):
+        add_ref(value)
+    for (value,) in db.session.query(EventAttachment.filename):
+        add_ref(value)
+    return refs
+
+
+def _cleanup_local_attachments(referenced, grace_seconds=0):
+    removed = 0
+    scanned = 0
+    now = time.time()
+    for root in _attachment_storage_roots():
+        if not root or not os.path.isdir(root):
+            continue
+        root_abs = os.path.abspath(root)
+        for base, _, files in os.walk(root_abs):
+            for fname in files:
+                scanned += 1
+                full_path = os.path.join(base, fname)
+                rel_path = os.path.relpath(full_path, root_abs)
+                if rel_path in referenced:
+                    continue
+                if grace_seconds:
+                    try:
+                        if now - os.path.getmtime(full_path) < grace_seconds:
+                            continue
+                    except OSError:
+                        pass
+                try:
+                    os.remove(full_path)
+                    removed += 1
+                except OSError:
+                    pass
+        for base, dirs, files in os.walk(root_abs, topdown=False):
+            if dirs or files:
+                continue
+            try:
+                os.rmdir(base)
+            except OSError:
+                pass
+    return {'removed': removed, 'scanned': scanned}
+
+
+def _cleanup_oss_attachments(referenced, grace_seconds=0):
+    if not app.config.get('USE_OSS'):
+        return {'removed': 0, 'scanned': 0}
+    bucket = _get_oss_bucket()
+    if not bucket:
+        return {'removed': 0, 'scanned': 0}
+    prefix = app.config.get('OSS_PREFIX') or None
+    if prefix:
+        prefix = f"{prefix}/"
+    removed = 0
+    scanned = 0
+    now = time.time()
+    for obj in _iter_oss_objects(prefix=prefix):
+        key = getattr(obj, 'key', None)
+        if not key or key.endswith('/'):
+            continue
+        scanned += 1
+        if key in referenced:
+            continue
+        if grace_seconds:
+            last_modified = getattr(obj, 'last_modified', None)
+            if isinstance(last_modified, (int, float)):
+                if now - last_modified < grace_seconds:
+                    continue
+            elif isinstance(last_modified, datetime):
+                delta = datetime.utcnow() - last_modified.replace(tzinfo=None)
+                if delta.total_seconds() < grace_seconds:
+                    continue
+        try:
+            bucket.delete_object(key)
+            removed += 1
+        except oss2.exceptions.NoSuchKey:  # type: ignore[attr-defined]
+            pass
+        except Exception:
+            continue
+    return {'removed': removed, 'scanned': scanned}
+
+
+def _cleanup_orphaned_attachments():
+    referenced = _collect_referenced_attachment_keys()
+    grace_seconds = app.config.get('ATTACHMENTS_CLEANUP_GRACE_SECONDS', 0)
+    local_stats = _cleanup_local_attachments(referenced, grace_seconds=grace_seconds)
+    oss_stats = _cleanup_oss_attachments(referenced, grace_seconds=grace_seconds)
+    return {'local': local_stats, 'oss': oss_stats}
+
+
+def _start_attachment_housekeeping():
+    sync_enabled = bool(app.config.get('ATTACHMENTS_SYNC_ON_START'))
+    cleanup_enabled = bool(app.config.get('ATTACHMENTS_CLEANUP_ON_START'))
+    if not sync_enabled and not cleanup_enabled:
+        return
+    if os.environ.get('FLASK_DEBUG') == '1' and os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
+        return
+
+    def runner():
+        with app.app_context():
+            if sync_enabled and _local_attachment_root():
+                _sync_oss_attachments_to_local()
+            if cleanup_enabled:
+                _cleanup_orphaned_attachments()
+
+    thread = threading.Thread(target=runner, name='attachment-housekeeping', daemon=True)
+    thread.start()
 
 
 def _safe_media_basename(ref, fallback_index=0):
@@ -1528,8 +1803,8 @@ def _safe_media_basename(ref, fallback_index=0):
 def _collect_event_media_refs(event, allow_external=True):
     media_refs = []
     seen = set()
-    for img in getattr(event, 'images', []) or []:
-        ref = getattr(img, 'filename', None)
+    for att in getattr(event, 'attachments', []) or []:
+        ref = getattr(att, 'filename', None)
         if not ref or ref in seen:
             continue
         if not allow_external and _is_external_media(ref):
@@ -1745,7 +2020,7 @@ class Item(db.Model):
     unit = db.Column(db.String(20))                # ✅ 单位（例如：瓶、包）
     purchase_date = db.Column(db.Date)             # ✅ 购入时间
     responsible_id = db.Column(db.Integer, db.ForeignKey('members.id'))  # 负责人（成员ID）
-    image = db.Column(db.String(200))                   # 图片文件名
+    primary_attachment = db.Column('image', db.String(200))          # 附件主文件名
     notes = db.Column(db.Text)                          # 备注说明
     last_modified = db.Column(db.DateTime, default=datetime.utcnow)  # 最后修改时间
     purchase_link = db.Column(db.String(200))           # 购买链接
@@ -1758,12 +2033,12 @@ class Item(db.Model):
     )
     logs = db.relationship('Log', backref='item', lazy=True)  # 操作日志
 
-    images = db.relationship(
-        'ItemImage',
+    attachments = db.relationship(
+        'ItemAttachment',
         backref='item',
         lazy='select',
         cascade='all, delete-orphan',
-        order_by='ItemImage.created_at'
+        order_by='ItemAttachment.created_at'
     )
 
     @property
@@ -1776,15 +2051,15 @@ class Item(db.Model):
         return trimmed
 
     @property
-    def image_filenames(self):
+    def attachment_filenames(self):
         filenames = []
         seen = set()
-        for img in self.images:
-            if img.filename and img.filename not in seen:
-                filenames.append(img.filename)
-                seen.add(img.filename)
-        if self.image and self.image not in seen:
-            filenames.insert(0, self.image)
+        for att in self.attachments:
+            if att.filename and att.filename not in seen:
+                filenames.append(att.filename)
+                seen.add(att.filename)
+        if self.primary_attachment and self.primary_attachment not in seen:
+            filenames.insert(0, self.primary_attachment)
         return filenames
 
     def assign_responsible_members(self, members):
@@ -1828,30 +2103,30 @@ class Location(db.Model):
                             cascade='all, delete-orphan')
     # 多对多负责人
     # responsible_members 关系由 Member.responsible_locations 的 backref 提供
-    image = db.Column(db.String(200))                   # 位置图片文件名
+    primary_attachment = db.Column('image', db.String(200))          # 位置附件主文件名
     notes = db.Column(db.Text)                          # 备注
     last_modified = db.Column(db.DateTime, default=datetime.utcnow)  # 最后修改时间
     logs = db.relationship('Log', backref='location', lazy=True)     # 操作日志
     detail_link = db.Column(db.String(200))
 
-    images = db.relationship(
-        'LocationImage',
+    attachments = db.relationship(
+        'LocationAttachment',
         backref='location',
         lazy='select',
         cascade='all, delete-orphan',
-        order_by='LocationImage.created_at'
+        order_by='LocationAttachment.created_at'
     )
 
     @property
-    def image_filenames(self):
+    def attachment_filenames(self):
         filenames = []
         seen = set()
-        for img in self.images:
-            if img.filename and img.filename not in seen:
-                filenames.append(img.filename)
-                seen.add(img.filename)
-        if self.image and self.image not in seen:
-            filenames.insert(0, self.image)
+        for att in self.attachments:
+            if att.filename and att.filename not in seen:
+                filenames.append(att.filename)
+                seen.add(att.filename)
+        if self.primary_attachment and self.primary_attachment not in seen:
+            filenames.insert(0, self.primary_attachment)
         return filenames
 
     def __repr__(self):
@@ -1943,18 +2218,18 @@ class Event(db.Model):
         lazy='select',
         backref=db.backref('events', lazy='select')
     )
-    images = db.relationship(
-        'EventImage',
+    attachments = db.relationship(
+        'EventAttachment',
         backref='event',
         lazy='select',
         cascade='all, delete-orphan',
-        order_by='EventImage.created_at'
+        order_by='EventAttachment.created_at'
     )
     logs = db.relationship('Log', backref='event', lazy=True)
 
     @property
-    def image_filenames(self):
-        return [img.filename for img in self.images if img.filename]
+    def attachment_filenames(self):
+        return [att.filename for att in self.attachments if att.filename]
 
     def can_view(self, member):
         if self.visibility == 'public':
@@ -2110,14 +2385,14 @@ def grant_internal_event_access(event, member, source='share-link'):
     return True
 
 
-def add_event_images(event, file_storages):
-    for image_file in file_storages:
-        stored_name = save_uploaded_media(image_file)
+def add_event_attachments(event, file_storages):
+    for attachment_file in file_storages:
+        stored_name = save_uploaded_media(attachment_file)
         if stored_name:
-            event.images.append(EventImage(filename=stored_name))
+            event.attachments.append(EventAttachment(filename=stored_name))
 
 
-class ItemImage(db.Model):
+class ItemAttachment(db.Model):
     __tablename__ = 'item_images'
     id = db.Column(db.Integer, primary_key=True)
     item_id = db.Column(db.Integer, db.ForeignKey('items.id'), nullable=False, index=True)
@@ -2125,10 +2400,10 @@ class ItemImage(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def __repr__(self):
-        return f'<ItemImage {self.filename}>'
+        return f'<ItemAttachment {self.filename}>'
 
 
-class LocationImage(db.Model):
+class LocationAttachment(db.Model):
     __tablename__ = 'location_images'
     id = db.Column(db.Integer, primary_key=True)
     location_id = db.Column(db.Integer, db.ForeignKey('locations.id'), nullable=False, index=True)
@@ -2136,10 +2411,10 @@ class LocationImage(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def __repr__(self):
-        return f'<LocationImage {self.filename}>'
+        return f'<LocationAttachment {self.filename}>'
 
 
-class EventImage(db.Model):
+class EventAttachment(db.Model):
     __tablename__ = 'event_images'
     id = db.Column(db.Integer, primary_key=True)
     event_id = db.Column(db.Integer, db.ForeignKey('events.id'), nullable=False, index=True)
@@ -2147,7 +2422,7 @@ class EventImage(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def __repr__(self):
-        return f'<EventImage {self.filename}>'
+        return f'<EventAttachment {self.filename}>'
 
 # 初始化数据库并创建默认用户
 with app.app_context():
@@ -2193,6 +2468,8 @@ with app.app_context():
         default_user.set_password("admin")
         db.session.add(default_user)
         db.session.commit()
+
+_start_attachment_housekeeping()
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -2251,9 +2528,21 @@ def logout():
     return redirect(url_for('login'))
 
 
+def _send_local_attachment(filename):
+    root, rel_path = _resolve_local_attachment_ref(filename)
+    if not root or not rel_path:
+        abort(404)
+    return send_from_directory(root, rel_path)
+
+
+@app.route('/attachments/<path:filename>')
+def uploaded_attachment(filename):
+    return _send_local_attachment(filename)
+
+
 @app.route('/uploads/<path:filename>')
 def uploaded_file(filename):
-    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+    return _send_local_attachment(filename)
 
 
 @app.route('/api/uploads/oss/presign', methods=['POST'])
@@ -2341,7 +2630,7 @@ def events_overview():
     events_query = Event.query.options(
         selectinload(Event.owner),
         selectinload(Event.locations),
-        selectinload(Event.images),
+        selectinload(Event.attachments),
         selectinload(Event.participant_links).selectinload(EventParticipant.member)
     )
     accessible_events = events_query.filter(
@@ -2613,7 +2902,7 @@ def add_event():
         'location_ids': [],
         'participant_ids': [],
         'detail_link': '',
-        'external_image_urls': '',
+        'external_attachment_urls': '',
         'allow_participant_edit': False,
         'participant_selection_touched': '0',
         'location_selection_touched': '0',
@@ -2660,7 +2949,10 @@ def add_event():
             'location_ids': list(location_ids),
             'participant_ids': list(participant_ids),
             'detail_link': detail_link,
-            'external_image_urls': request.form.get('external_event_image_urls', ''),
+            'external_attachment_urls': (
+                request.form.get('external_event_attachment_urls')
+                or request.form.get('external_event_image_urls', '')
+            ),
             'allow_participant_edit': allow_participant_edit,
             'participant_selection_touched': request.form.get('participant_selection_touched', '0'),
             'location_selection_touched': request.form.get('location_selection_touched', '0'),
@@ -2697,22 +2989,26 @@ def add_event():
         event.items = selected_items
         event.locations = selected_locations
 
-        uploaded_event_files = request.files.getlist('event_images')
+        uploaded_event_files = request.files.getlist('event_attachments')
         cleaned_files = [f for f in uploaded_event_files if f and getattr(f, 'filename', '')]
         if cleaned_files:
-            add_event_images(event, cleaned_files)
-        remote_event_refs = _collect_remote_object_keys('event_images')
+            add_event_attachments(event, cleaned_files)
+        remote_event_refs = _collect_remote_object_keys('event_attachments')
         if remote_event_refs:
-            _append_media_records(event.images, EventImage, remote_event_refs)
-        external_urls = _extract_external_urls(request.form.get('external_event_image_urls'))
+            _append_media_records(event.attachments, EventAttachment, remote_event_refs)
+        external_urls = _extract_external_urls(
+            request.form.get('external_event_attachment_urls') or request.form.get('external_event_image_urls')
+        )
         if external_urls:
-            existing_refs = {img.filename for img in event.images}
+            existing_refs = {att.filename for att in event.attachments}
             for url in external_urls:
                 if url not in existing_refs:
-                    event.images.append(EventImage(filename=url))
+                    event.attachments.append(EventAttachment(filename=url))
                     existing_refs.add(url)
         event.touch()
         db.session.commit()
+        _sync_attachments_async(event.attachment_filenames)
+        _sync_attachments_async(event.attachment_filenames)
 
         missing_items, missing_locations = compute_missing_resources(event)
         if missing_items:
@@ -2855,7 +3151,7 @@ def event_share_poster(event_id):
     event = Event.query.options(
         selectinload(Event.owner),
         selectinload(Event.locations),
-        selectinload(Event.images)
+        selectinload(Event.attachments)
     ).get_or_404(event_id)
 
     if event.visibility != 'public':
@@ -3012,7 +3308,10 @@ def edit_event(event_id):
             'location_ids': list(location_ids),
             'participant_ids': list(participant_ids),
             'detail_link': detail_link,
-            'external_image_urls': request.form.get('external_event_image_urls', ''),
+            'external_attachment_urls': (
+                request.form.get('external_event_attachment_urls')
+                or request.form.get('external_event_image_urls', '')
+            ),
             'allow_participant_edit': allow_participant_edit,
             'participant_selection_touched': '1' if participant_selection_touched else '0',
             'location_selection_touched': '1' if location_selection_touched else '0',
@@ -3059,28 +3358,30 @@ def edit_event(event_id):
         event.items = selected_items
         event.locations = selected_locations
 
-        remove_image_ids_raw = request.form.getlist('remove_event_image_ids')
-        remove_image_ids = {int(x) for x in remove_image_ids_raw if x.isdigit()}
-        if remove_image_ids:
-            for img in list(event.images):
-                if img.id in remove_image_ids:
-                    remove_uploaded_file(img.filename)
-                    event.images.remove(img)
-                    db.session.delete(img)
+        remove_attachment_ids_raw = request.form.getlist('remove_event_attachment_ids')
+        remove_attachment_ids = {int(x) for x in remove_attachment_ids_raw if x.isdigit()}
+        if remove_attachment_ids:
+            for att in list(event.attachments):
+                if att.id in remove_attachment_ids:
+                    remove_uploaded_file(att.filename)
+                    event.attachments.remove(att)
+                    db.session.delete(att)
 
-        uploaded_event_files = request.files.getlist('event_images')
+        uploaded_event_files = request.files.getlist('event_attachments')
         cleaned_files = [f for f in uploaded_event_files if f and getattr(f, 'filename', '')]
         if cleaned_files:
-            add_event_images(event, cleaned_files)
-        remote_event_refs = _collect_remote_object_keys('event_images')
+            add_event_attachments(event, cleaned_files)
+        remote_event_refs = _collect_remote_object_keys('event_attachments')
         if remote_event_refs:
-            _append_media_records(event.images, EventImage, remote_event_refs)
-        external_urls = _extract_external_urls(request.form.get('external_event_image_urls'))
+            _append_media_records(event.attachments, EventAttachment, remote_event_refs)
+        external_urls = _extract_external_urls(
+            request.form.get('external_event_attachment_urls') or request.form.get('external_event_image_urls')
+        )
         if external_urls:
-            existing_refs = {img.filename for img in event.images}
+            existing_refs = {att.filename for att in event.attachments}
             for url in external_urls:
                 if url not in existing_refs:
-                    event.images.append(EventImage(filename=url))
+                    event.attachments.append(EventAttachment(filename=url))
                     existing_refs.add(url)
 
         event.touch()
@@ -3114,7 +3415,7 @@ def edit_event(event_id):
         'location_ids': [loc.id for loc in event.locations],
         'participant_ids': [link.member_id for link in event.participant_links if link.member_id != event.owner_id],
         'detail_link': event.detail_link or '',
-        'external_image_urls': '',
+        'external_attachment_urls': '',
         'allow_participant_edit': bool(getattr(event, 'allow_participant_edit', False)),
         'participant_selection_touched': '0',
         'location_selection_touched': '0',
@@ -3133,8 +3434,8 @@ def delete_event(event_id):
         abort(403)
     event_title = event.title
     event_identifier = event.id
-    for img in list(event.images):
-        remove_uploaded_file(img.filename)
+    for att in list(event.attachments):
+        remove_uploaded_file(att.filename)
     db.session.delete(event)
     db.session.commit()
     log = Log(
@@ -3364,20 +3665,24 @@ def add_item():
         purchase_link = request.form.get('purchase_link')
         detail_links = _collect_detail_links_from_form(request.form)
 
-        # 图片处理（支持多张）
-        uploaded_files = request.files.getlist('images')
+        # 附件处理（支持多选）
+        uploaded_files = request.files.getlist('attachments')
         if not uploaded_files:
-            fallback_file = request.files.get('image')
+            uploaded_files = request.files.getlist('images')
+        if not uploaded_files:
+            fallback_file = request.files.get('attachment') or request.files.get('image')
             uploaded_files = [fallback_file] if fallback_file else []
 
-        saved_filenames = []
-        for image_file in uploaded_files:
-            stored_name = save_uploaded_media(image_file)
+        saved_refs = []
+        for attachment_file in uploaded_files:
+            stored_name = save_uploaded_media(attachment_file)
             if stored_name:
-                saved_filenames.append(stored_name)
+                saved_refs.append(stored_name)
 
-        external_urls = _extract_external_urls(request.form.get('external_image_urls'))
-        primary_image = saved_filenames[0] if saved_filenames else (external_urls[0] if external_urls else None)
+        external_urls = _extract_external_urls(
+            request.form.get('external_attachment_urls') or request.form.get('external_image_urls')
+        )
+        primary_attachment = saved_refs[0] if saved_refs else (external_urls[0] if external_urls else None)
 
         # ✅ 创建新的 Item 实例（已更新字段）
         new_item = Item(
@@ -3392,7 +3697,7 @@ def add_item():
             responsible_id=None,
             notes=notes,
             purchase_link=purchase_link,
-            image=primary_image
+            primary_attachment=primary_attachment
         )
         assigned_members = new_item.assign_responsible_members(responsible_members)
         if features_str == '私人' and not assigned_members:
@@ -3408,15 +3713,16 @@ def add_item():
             new_item.locations = Location.query.filter(Location.id.in_(loc_ids)).all()
         db.session.add(new_item)
         existing_refs = set()
-        for fname in saved_filenames:
+        for fname in saved_refs:
             if fname not in existing_refs:
-                new_item.images.append(ItemImage(filename=fname))
+                new_item.attachments.append(ItemAttachment(filename=fname))
                 existing_refs.add(fname)
         for url in external_urls:
             if url not in existing_refs:
-                new_item.images.append(ItemImage(filename=url))
+                new_item.attachments.append(ItemAttachment(filename=url))
                 existing_refs.add(url)
         db.session.commit()
+        _sync_attachments_async(new_item.attachment_filenames)
 
         # ✅ 写入日志
         log = Log(
@@ -3497,55 +3803,60 @@ def edit_item(item_id):
         item.notes = request.form.get('notes')
         item.purchase_link = request.form.get('purchase_link')
 
-        if item.image and not any(img.filename == item.image for img in item.images):
-            item.images.append(ItemImage(filename=item.image))
+        if item.primary_attachment and not any(att.filename == item.primary_attachment for att in item.attachments):
+            item.attachments.append(ItemAttachment(filename=item.primary_attachment))
 
-        # 删除勾选的旧图片
-        remove_image_ids_raw = request.form.getlist('remove_image_ids')
-        remove_image_ids = {int(x) for x in remove_image_ids_raw if x.isdigit()}
-        if remove_image_ids:
-            for img in list(item.images):
-                if img.id in remove_image_ids:
-                    remove_uploaded_file(img.filename)
-                    item.images.remove(img)
-                    db.session.delete(img)
+        # 删除勾选的旧附件
+        remove_attachment_ids_raw = request.form.getlist('remove_attachment_ids')
+        remove_attachment_ids = {int(x) for x in remove_attachment_ids_raw if x.isdigit()}
+        if remove_attachment_ids:
+            for att in list(item.attachments):
+                if att.id in remove_attachment_ids:
+                    remove_uploaded_file(att.filename)
+                    item.attachments.remove(att)
+                    db.session.delete(att)
 
-        remove_primary = request.form.get('remove_primary_image') in {'1', 'on', 'true'}
-        if remove_primary and item.image:
-            if not any(img.filename == item.image for img in item.images):
-                remove_uploaded_file(item.image)
-            item.image = None
+        remove_primary = request.form.get('remove_primary_attachment') in {'1', 'on', 'true'}
+        if remove_primary and item.primary_attachment:
+            if not any(att.filename == item.primary_attachment for att in item.attachments):
+                remove_uploaded_file(item.primary_attachment)
+            item.primary_attachment = None
 
-        # 处理新增上传（支持多张）
-        uploaded_files = request.files.getlist('images')
+        # 处理新增上传（支持多选）
+        uploaded_files = request.files.getlist('attachments')
         if not uploaded_files:
-            fallback_file = request.files.get('image')
+            uploaded_files = request.files.getlist('images')
+        if not uploaded_files:
+            fallback_file = request.files.get('attachment') or request.files.get('image')
             uploaded_files = [fallback_file] if fallback_file else []
-        for image_file in uploaded_files:
-            stored_name = save_uploaded_media(image_file)
+        for attachment_file in uploaded_files:
+            stored_name = save_uploaded_media(attachment_file)
             if stored_name:
-                item.images.append(ItemImage(filename=stored_name))
-        remote_refs = _collect_remote_object_keys('images')
+                item.attachments.append(ItemAttachment(filename=stored_name))
+        remote_refs = _collect_remote_object_keys('attachments')
         if remote_refs:
-            _append_media_records(item.images, ItemImage, remote_refs)
+            _append_media_records(item.attachments, ItemAttachment, remote_refs)
 
-        external_urls = _extract_external_urls(request.form.get('external_image_urls'))
+        external_urls = _extract_external_urls(
+            request.form.get('external_attachment_urls') or request.form.get('external_image_urls')
+        )
         if external_urls:
-            existing_refs = {img.filename for img in item.images}
-            if item.image:
-                existing_refs.add(item.image)
+            existing_refs = {att.filename for att in item.attachments}
+            if item.primary_attachment:
+                existing_refs.add(item.primary_attachment)
             for url in external_urls:
                 if url not in existing_refs:
-                    item.images.append(ItemImage(filename=url))
+                    item.attachments.append(ItemAttachment(filename=url))
                     existing_refs.add(url)
 
-        if item.images:
-            item.image = item.images[0].filename
+        if item.attachments:
+            item.primary_attachment = item.attachments[0].filename
         elif remove_primary:
-            item.image = None
+            item.primary_attachment = None
 
         item.last_modified = datetime.utcnow()
         db.session.commit()
+        _sync_attachments_async(item.attachment_filenames)
 
         # 记录日志
         log = Log(user_id=current_user.id, item_id=item.id, action_type="修改物品", details=f"Edited item {item.name}")
@@ -3579,7 +3890,7 @@ def delete_item(item_id):
         db.session.commit()
     if item.features == '私人' and current_user not in item.responsible_members:
         abort(403)
-    for fname in set(item.image_filenames):
+    for fname in set(item.attachment_filenames):
         remove_uploaded_file(fname)
     db.session.delete(item)
     db.session.commit()
@@ -3787,25 +4098,29 @@ def add_location():
         }
         serialized_notes = _serialize_location_notes(notes_meta)
 
-        uploaded_files = request.files.getlist('images')
+        uploaded_files = request.files.getlist('attachments')
         if not uploaded_files:
-            fallback_file = request.files.get('image')
+            uploaded_files = request.files.getlist('images')
+        if not uploaded_files:
+            fallback_file = request.files.get('attachment') or request.files.get('image')
             uploaded_files = [fallback_file] if fallback_file else []
 
-        saved_filenames = []
-        for image_file in uploaded_files:
-            stored_name = save_uploaded_media(image_file)
+        saved_refs = []
+        for attachment_file in uploaded_files:
+            stored_name = save_uploaded_media(attachment_file)
             if stored_name:
-                saved_filenames.append(stored_name)
-        saved_filenames.extend(_collect_remote_object_keys('images'))
-        external_urls = _extract_external_urls(request.form.get('external_image_urls'))
-        primary_image = saved_filenames[0] if saved_filenames else (external_urls[0] if external_urls else None)
+                saved_refs.append(stored_name)
+        saved_refs.extend(_collect_remote_object_keys('attachments'))
+        external_urls = _extract_external_urls(
+            request.form.get('external_attachment_urls') or request.form.get('external_image_urls')
+        )
+        primary_attachment = saved_refs[0] if saved_refs else (external_urls[0] if external_urls else None)
         # 先创建 Location
         new_loc = Location(
             name=name,
             parent_id=parent_id if parent_id else None,
             notes=serialized_notes,
-            image=primary_image,
+            primary_attachment=primary_attachment,
             clean_status=clean_status,
             detail_link=detail_link,
             latitude=latitude,
@@ -3814,13 +4129,13 @@ def add_location():
         )
         db.session.add(new_loc)
         existing_refs = set()
-        for fname in saved_filenames:
+        for fname in saved_refs:
             if fname not in existing_refs:
-                new_loc.images.append(LocationImage(filename=fname))
+                new_loc.attachments.append(LocationAttachment(filename=fname))
                 existing_refs.add(fname)
         for url in external_urls:
             if url not in existing_refs:
-                new_loc.images.append(LocationImage(filename=url))
+                new_loc.attachments.append(LocationAttachment(filename=url))
                 existing_refs.add(url)
         # 多负责人
         member_objs = []
@@ -3830,6 +4145,7 @@ def add_location():
             member_objs = [current_user]
         new_loc.responsible_members = member_objs
         db.session.commit()
+        _sync_attachments_async(new_loc.attachment_filenames)
         # 记录日志
         log = Log(user_id=current_user.id, location_id=new_loc.id, action_type="新增位置", details=f"Added location {new_loc.name}")
         db.session.add(log)
@@ -3879,50 +4195,54 @@ def edit_location(loc_id):
             longitude = None
             coordinate_source = None
 
-        if location.image and not any(img.filename == location.image for img in location.images):
-            location.images.append(LocationImage(filename=location.image))
+        if location.primary_attachment and not any(att.filename == location.primary_attachment for att in location.attachments):
+            location.attachments.append(LocationAttachment(filename=location.primary_attachment))
 
-        remove_image_ids_raw = request.form.getlist('remove_image_ids')
-        remove_image_ids = {int(x) for x in remove_image_ids_raw if x.isdigit()}
-        if remove_image_ids:
-            for img in list(location.images):
-                if img.id in remove_image_ids:
-                    remove_uploaded_file(img.filename)
-                    location.images.remove(img)
-                    db.session.delete(img)
+        remove_attachment_ids_raw = request.form.getlist('remove_attachment_ids')
+        remove_attachment_ids = {int(x) for x in remove_attachment_ids_raw if x.isdigit()}
+        if remove_attachment_ids:
+            for att in list(location.attachments):
+                if att.id in remove_attachment_ids:
+                    remove_uploaded_file(att.filename)
+                    location.attachments.remove(att)
+                    db.session.delete(att)
 
-        remove_primary = request.form.get('remove_primary_image') in {'1', 'on', 'true'}
-        if remove_primary and location.image:
-            if not any(img.filename == location.image for img in location.images):
-                remove_uploaded_file(location.image)
-            location.image = None
+        remove_primary = request.form.get('remove_primary_attachment') in {'1', 'on', 'true'}
+        if remove_primary and location.primary_attachment:
+            if not any(att.filename == location.primary_attachment for att in location.attachments):
+                remove_uploaded_file(location.primary_attachment)
+            location.primary_attachment = None
 
-        uploaded_files = request.files.getlist('images')
+        uploaded_files = request.files.getlist('attachments')
         if not uploaded_files:
-            fallback_file = request.files.get('image')
+            uploaded_files = request.files.getlist('images')
+        if not uploaded_files:
+            fallback_file = request.files.get('attachment') or request.files.get('image')
             uploaded_files = [fallback_file] if fallback_file else []
-        for image_file in uploaded_files:
-            stored_name = save_uploaded_media(image_file)
+        for attachment_file in uploaded_files:
+            stored_name = save_uploaded_media(attachment_file)
             if stored_name:
-                location.images.append(LocationImage(filename=stored_name))
-        remote_refs = _collect_remote_object_keys('images')
+                location.attachments.append(LocationAttachment(filename=stored_name))
+        remote_refs = _collect_remote_object_keys('attachments')
         if remote_refs:
-            _append_media_records(location.images, LocationImage, remote_refs)
+            _append_media_records(location.attachments, LocationAttachment, remote_refs)
 
-        external_urls = _extract_external_urls(request.form.get('external_image_urls'))
+        external_urls = _extract_external_urls(
+            request.form.get('external_attachment_urls') or request.form.get('external_image_urls')
+        )
         if external_urls:
-            existing_refs = {img.filename for img in location.images}
-            if location.image:
-                existing_refs.add(location.image)
+            existing_refs = {att.filename for att in location.attachments}
+            if location.primary_attachment:
+                existing_refs.add(location.primary_attachment)
             for url in external_urls:
                 if url not in existing_refs:
-                    location.images.append(LocationImage(filename=url))
+                    location.attachments.append(LocationAttachment(filename=url))
                     existing_refs.add(url)
 
-        if location.images:
-            location.image = location.images[0].filename
+        if location.attachments:
+            location.primary_attachment = location.attachments[0].filename
         elif remove_primary:
-            location.image = None
+            location.primary_attachment = None
         is_public = request.form.get('is_public') in {'1', 'on', 'true', 'yes'}
         usage_tags = [tag for tag in request.form.getlist('usage_tags') if tag in _LOCATION_USAGE_KEYS]
         description = request.form.get('description') or ''
@@ -3947,6 +4267,7 @@ def edit_location(loc_id):
         location.coordinate_source = coordinate_source
         location.last_modified = datetime.utcnow()
         db.session.commit()
+        _sync_attachments_async(location.attachment_filenames)
         # 记录日志
         log = Log(user_id=current_user.id, location_id=location.id, action_type="修改位置", details=f"Edited location {location.name}")
         db.session.add(log)
@@ -3968,7 +4289,7 @@ def delete_location(loc_id):
     location = Location.query.get_or_404(loc_id)
     if location.responsible_members and current_user not in location.responsible_members:
         abort(403)
-    for fname in set(location.image_filenames):
+    for fname in set(location.attachment_filenames):
         remove_uploaded_file(fname)
     db.session.delete(location)
     db.session.commit()
@@ -4501,6 +4822,7 @@ def edit_profile(member_id):
             member.photo = new_photo_ref
         member.last_modified = datetime.utcnow()
         db.session.commit()
+        _sync_attachments_async([member.photo])
         flash('个人信息已更新', 'success')
         return redirect(url_for('profile', member_id=member_id))
     locations = Location.query.order_by(func.lower(Location.name)).all()
@@ -4563,26 +4885,18 @@ def export_data(datatype):
 
 
 @app.context_processor
-def inject_image_helpers():
+def inject_attachment_helpers():
     def resolve_media_url(ref):
         if not ref:
             return None
         if _is_external_media(ref):
             return ref
+        if _local_attachment_exists(ref):
+            return url_for('uploaded_attachment', filename=ref)
         if app.config.get('USE_OSS'):
-            prefix = app.config.get('OSS_PREFIX')
             key = ref.lstrip('/')
-            looks_like_oss = False
-            if prefix and key.startswith(prefix):
-                looks_like_oss = True
-            elif '/' in key:
-                looks_like_oss = True
-            else:
-                local_path = os.path.join(app.config['UPLOAD_FOLDER'], ref)
-                looks_like_oss = not os.path.exists(local_path)
-            if looks_like_oss:
-                return _build_oss_url(key)
-        return url_for('uploaded_file', filename=ref)
+            return _build_oss_url(key)
+        return url_for('uploaded_attachment', filename=ref)
 
     def media_display_name(ref):
         if not ref:
@@ -4614,30 +4928,39 @@ def inject_image_helpers():
     def item_media_entries(item):
         if not item:
             return []
-        return _build_media_entries(getattr(item, 'image_filenames', []) or [])
+        return _build_media_entries(getattr(item, 'attachment_filenames', []) or [])
 
     def location_media_entries(location):
         if not location:
             return []
-        return _build_media_entries(getattr(location, 'image_filenames', []) or [])
+        return _build_media_entries(getattr(location, 'attachment_filenames', []) or [])
 
     def event_media_entries(event):
         if not event:
             return []
         filenames = []
-        for img in getattr(event, 'images', []) or []:
-            if img.filename:
-                filenames.append(img.filename)
+        for att in getattr(event, 'attachments', []) or []:
+            if att.filename:
+                filenames.append(att.filename)
         return _build_media_entries(filenames)
 
     def uploaded_media_url(filename):
         return resolve_media_url(filename)
 
-    def item_image_urls(item):
+    def item_attachment_urls(item):
         return [entry['url'] for entry in item_media_entries(item) if entry['kind'] == 'image']
 
-    def location_image_urls(location):
+    def location_attachment_urls(location):
         return [entry['url'] for entry in location_media_entries(location) if entry['kind'] == 'image']
+
+    def item_image_urls(item):
+        return item_attachment_urls(item)
+
+    def location_image_urls(location):
+        return location_attachment_urls(location)
+
+    def uploaded_attachment_url(filename):
+        return uploaded_media_url(filename)
 
     def uploaded_image_url(filename):
         return uploaded_media_url(filename)
@@ -4647,6 +4970,9 @@ def inject_image_helpers():
         location_media_entries=location_media_entries,
         event_media_entries=event_media_entries,
         uploaded_media_url=uploaded_media_url,
+        uploaded_attachment_url=uploaded_attachment_url,
+        item_attachment_urls=item_attachment_urls,
+        location_attachment_urls=location_attachment_urls,
         item_image_urls=item_image_urls,
         location_image_urls=location_image_urls,
         uploaded_image_url=uploaded_image_url,

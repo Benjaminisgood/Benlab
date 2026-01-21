@@ -432,7 +432,7 @@
           <div class="avatar-preview-wrapper">
             {% if member.photo %}
               {% set avatar_entries = [{
-                'url': uploaded_image_url(member.photo),
+                'url': uploaded_attachment_url(member.photo),
                 'kind': 'image',
                 'display_name': (member.name or member.username or '当前头像') ~ '的头像'
               }] %}
@@ -468,7 +468,7 @@
             <div class="form-text text-success">如果启用了 OSS，头像会直接上传到 OSS 并将链接保存到资料中。</div>
             {% endif %}
             {% if member.photo %}
-              <a href="{{ uploaded_image_url(member.photo) }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary align-self-start">查看当前头像</a>
+              <a href="{{ uploaded_attachment_url(member.photo) }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary align-self-start">查看当前头像</a>
             {% endif %}
           </div>
         </div>

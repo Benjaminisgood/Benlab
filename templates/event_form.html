@@ -83,19 +83,19 @@
         <div class="form-text">可选。如果有协作文档或活动公告，可贴上链接方便查阅。</div>
       </div>
       <div class="mb-3">
-        <label class="form-label" for="event_images">活动媒体（图片 / 视频 / 音频）</label>
-        <input type="file" class="form-control" id="event_images" name="event_images" accept="image/*,video/*,audio/*" multiple data-direct-upload="oss" data-remote-field="event_images_remote_keys">
+        <label class="form-label" for="event_attachments">活动媒体（图片 / 视频 / 音频）</label>
+        <input type="file" class="form-control" id="event_attachments" name="event_attachments" accept="image/*,video/*,audio/*" multiple data-direct-upload="oss" data-remote-field="event_attachments_remote_keys">
         <div class="form-text">支持批量上传，单个文件建议小于 2500 MB。</div>
         {% if direct_upload_config.enabled %}
         <div class="form-text text-success">文件选择后将直接上传到 OSS，上传完毕后提交表单即可。</div>
         {% endif %}
         <div class="mt-3">
-          <label class="form-label" for="externalEventImageUrls">外部媒体链接</label>
-          <textarea class="form-control" id="externalEventImageUrls" name="external_event_image_urls" rows="2" placeholder="每行一个 http(s):// 链接">{{ form_state.external_image_urls }}</textarea>
+          <label class="form-label" for="externalEventAttachmentUrls">外部媒体链接</label>
+          <textarea class="form-control" id="externalEventAttachmentUrls" name="external_event_attachment_urls" rows="2" placeholder="每行一个 http(s):// 链接">{{ form_state.external_attachment_urls }}</textarea>
           <div class="form-text">可粘贴 OSS / 图床 / 视频或音频外链，上传与外链的展示样式保持一致。</div>
         </div>
       </div>
-      {% if is_edit and event.images %}
+      {% if is_edit and event.attachments %}
       <div class="mb-3">
         <label class="form-label d-flex justify-content-between align-items-center">
           <span>已上传媒资</span>
@@ -107,10 +107,10 @@
         </label>
         {% set preview_limit = 4 %}
         <div class="d-flex flex-wrap gap-3" id="existingEventMedia">
-          {% for img in event.images %}
-            {% set media_kind_value = media_kind(img.filename) %}
-            {% set media_url = uploaded_media_url(img.filename) %}
-            {% set media_name = media_display_name(img.filename) %}
+          {% for attachment in event.attachments %}
+            {% set media_kind_value = media_kind(attachment.filename) %}
+            {% set media_url = uploaded_media_url(attachment.filename) %}
+            {% set media_name = media_display_name(attachment.filename) %}
             {% set is_collapsed = loop.index0 >= preview_limit %}
             <div class="media-card flex-column align-items-stretch{% if is_collapsed %} d-none{% endif %}"
                  data-kind="{{ media_kind_value }}"
@@ -145,21 +145,21 @@
               </a>
               {% endif %}
               <div class="form-check mt-2">
-                <input class="form-check-input" type="checkbox" value="{{ img.id }}" id="removeImg{{ img.id }}" name="remove_event_image_ids">
-                <label class="form-check-label small" for="removeImg{{ img.id }}">删除该媒资</label>
+                <input class="form-check-input" type="checkbox" value="{{ attachment.id }}" id="removeAttachment{{ attachment.id }}" name="remove_event_attachment_ids">
+                <label class="form-check-label small" for="removeAttachment{{ attachment.id }}">删除该媒资</label>
               </div>
             </div>
           {% endfor %}
         </div>
-        {% if event.images|length > preview_limit %}
+        {% if event.attachments|length > preview_limit %}
         <div class="mt-2">
           <button type="button"
                   class="btn btn-outline-secondary btn-sm"
                   data-action="toggle-media-collapse"
                   data-target="#existingEventMedia"
-                  data-collapsed-text="展开全部 {{ event.images|length }} 个媒资"
+                  data-collapsed-text="展开全部 {{ event.attachments|length }} 个媒资"
                   data-expanded-text="收起部分媒资">
-            展开全部 {{ event.images|length }} 个媒资
+            展开全部 {{ event.attachments|length }} 个媒资
           </button>
         </div>
         {% endif %}

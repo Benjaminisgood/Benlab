@@ -29,3 +29,5 @@ images/**/*
 flask.log
 flask.pid
 .env
+attachments/
+attachments/**/*

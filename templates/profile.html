@@ -190,7 +190,7 @@
     <div class="profile-avatar mb-3">
       {% if profile_user.photo %}
         {% set avatar_entries = [{
-          'url': uploaded_image_url(profile_user.photo),
+          'url': uploaded_attachment_url(profile_user.photo),
           'kind': 'image',
           'display_name': (profile_user.name or profile_user.username) ~ '的头像'
         }] %}

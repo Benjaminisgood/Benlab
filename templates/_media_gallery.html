@@ -19,16 +19,23 @@
   {% set entry_count = entries|length if entries else 0 %}
   {% set audio_entries = [] %}
   {% set should_collapse = entry_count > initial_visible %}
+  {% set oss_entries = entries | selectattr('source', 'equalto', 'oss') | list if entries else [] %}
+  {% set has_oss_entries = oss_entries|length > 0 %}
   {% if entry_count %}
     {% set audio_entries = entries | selectattr('kind', 'equalto', 'audio') | list %}
   {% endif %}
   {% if entries %}
   <div class="{{ gallery_class }}" id="{{ gallery_id }}" data-initial-visible="{{ initial_visible }}" data-total-count="{{ entry_count }}">
-    {% if (enable_focus_mode and entry_count) or download_all_url or should_collapse %}
+    {% if (enable_focus_mode and entry_count) or download_all_url or should_collapse or has_oss_entries %}
     <div class="media-gallery-toolbar">
-      {% if enable_focus_mode and entry_count %}
-      <span class="media-gallery-hint text-muted">点击任意卡片开启专注欣赏，双击退出</span>
-      {% endif %}
+      <div class="media-gallery-hints">
+        {% if enable_focus_mode and entry_count %}
+        <span class="media-gallery-hint text-muted">点击任意卡片开启专注欣赏，双击退出</span>
+        {% endif %}
+        {% if has_oss_entries %}
+        <span class="media-gallery-hint text-warning">当前媒体来自 OSS，加载将消耗流量</span>
+        {% endif %}
+      </div>
       <div class="media-gallery-actions">
         {% if download_all_oss_url %}
         <a class="btn btn-outline-success btn-sm" href="{{ download_all_oss_url }}">

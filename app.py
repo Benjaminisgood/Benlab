@@ -1415,6 +1415,17 @@ def _local_attachment_root():
     return None
 
 
+def _ensure_local_attachment_root():
+    root = app.config.get('ATTACHMENTS_FOLDER')
+    if not root:
+        return None
+    try:
+        os.makedirs(root, exist_ok=True)
+    except OSError:
+        return None
+    return root
+
+
 def _safe_attachment_path(root, ref):
     if not root or not ref:
         return None
@@ -1601,7 +1612,7 @@ def _iter_oss_objects(prefix=None):
 def _sync_oss_attachments_to_local():
     if not app.config.get('USE_OSS'):
         return {'downloaded': 0, 'skipped': 0}
-    attachments_root = _local_attachment_root()
+    attachments_root = _ensure_local_attachment_root()
     if not attachments_root:
         return {'downloaded': 0, 'skipped': 0}
     bucket = _get_oss_bucket()
@@ -1644,7 +1655,7 @@ def _sync_attachments_async(refs):
         return
     if not app.config.get('USE_OSS'):
         return
-    if not _local_attachment_root():
+    if not _ensure_local_attachment_root():
         return
     unique_refs = []
     seen = set()
@@ -1657,7 +1668,7 @@ def _sync_attachments_async(refs):
         return
 
     def runner():
-        root = _local_attachment_root()
+        root = _ensure_local_attachment_root()
         if not root:
             return
         bucket = _get_oss_bucket()
@@ -3201,6 +3212,7 @@ def event_detail(event_id):
     event = _load_event_for_edit(event_id)
     if not event.can_view(current_user):
         abort(403)
+    _sync_attachments_async(event.attachment_filenames)
 
     participant_links = sorted(
         event.participant_links,
@@ -3728,6 +3740,7 @@ def item_detail(item_id):
             selectinload(Item.locations)
         ).get_or_404(item_id)
     )
+    _sync_attachments_async(item.attachment_filenames)
     if _ensure_item_responsible_members(item):
         db.session.commit()
     events = (
@@ -4435,6 +4448,7 @@ def delete_location(loc_id):
 @login_required
 def view_location(loc_id):
     location = Location.query.get_or_404(loc_id)
+    _sync_attachments_async(location.attachment_filenames)
     # 获取该位置包含的所有物品（多对多）
     items_at_location = sorted(location.items, key=lambda item: item.name.lower())
     migrated = False
@@ -5017,17 +5031,21 @@ def export_data(datatype):
 
 @app.context_processor
 def inject_attachment_helpers():
-    def resolve_media_url(ref):
+    def _resolve_media_entry(ref):
         if not ref:
-            return None
+            return None, None
         if _is_external_media(ref):
-            return ref
+            return _normalize_external_url(ref), 'external'
         if _local_attachment_exists(ref):
-            return url_for('uploaded_attachment', filename=ref)
+            return url_for('uploaded_attachment', filename=ref), 'local'
         if app.config.get('USE_OSS'):
             key = ref.lstrip('/')
-            return _build_oss_url(key)
-        return url_for('uploaded_attachment', filename=ref)
+            return _build_oss_url(key), 'oss'
+        return url_for('uploaded_attachment', filename=ref), 'local'
+
+    def resolve_media_url(ref):
+        resolved, _source = _resolve_media_entry(ref)
+        return resolved
 
     def media_display_name(ref):
         if not ref:
@@ -5044,7 +5062,7 @@ def inject_attachment_helpers():
             if not fname or fname in seen:
                 continue
             seen.add(fname)
-            resolved = resolve_media_url(fname)
+            resolved, source = _resolve_media_entry(fname)
             if not resolved:
                 continue
             entries.append({
@@ -5052,7 +5070,8 @@ def inject_attachment_helpers():
                 'kind': determine_media_kind(fname),
                 'filename': fname,
                 'display_name': media_display_name(fname),
-                'is_remote': _is_external_media(fname)
+                'is_remote': _is_external_media(fname),
+                'source': source
             })
         return entries
 

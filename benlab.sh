@@ -528,6 +528,43 @@ git_pull_latest() {
   fi
 }
 
+describe_latest_merge() {
+  local merge_info=""
+  local merge_hash=""
+  local merge_subject=""
+  local merge_body=""
+
+  if merge_info=$(git log --merges -1 --pretty=format:'%H%n%s%n%b' 2>/dev/null); then
+    merge_hash=$(printf "%s" "$merge_info" | sed -n '1p')
+    merge_subject=$(printf "%s" "$merge_info" | sed -n '2p')
+    merge_body=$(printf "%s" "$merge_info" | sed -n '3,$p' | sed '/^[[:space:]]*$/d')
+  fi
+
+  if [ -z "$merge_hash" ]; then
+    merge_hash=$(git rev-parse --short HEAD 2>/dev/null || true)
+    merge_subject=$(git log -1 --pretty=format:'%s' 2>/dev/null || true)
+    if [ -n "$merge_hash" ] || [ -n "$merge_subject" ]; then
+      warn "未找到 merge 记录，当前版本: ${merge_hash:-unknown}"
+      if [ -n "$merge_subject" ]; then
+        echo "📝 最近提交说明: $merge_subject"
+      fi
+    else
+      warn "无法获取当前版本信息"
+    fi
+    return
+  fi
+
+  info "当前版本最新一次 merge:"
+  echo "🔖 $merge_hash"
+  if [ -n "$merge_subject" ]; then
+    echo "📝 $merge_subject"
+  fi
+  if [ -n "$merge_body" ]; then
+    echo "📌 说明:"
+    echo "$merge_body"
+  fi
+}
+
 should_restart_after_update() {
   local was_running=$1
   local mode="${UPDATE_RESTART:-auto}"
@@ -714,6 +751,8 @@ update() {
     fi
     return 1
   fi
+
+  describe_latest_merge
 
   if should_restart_after_update "$was_running"; then
     start

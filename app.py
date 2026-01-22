@@ -1408,6 +1408,34 @@ def _attachment_storage_roots():
     return [attachments_root] if attachments_root else []
 
 
+def _attachment_ref_candidates(ref, prefer_prefix=False):
+    if not ref or _is_external_media(ref):
+        return []
+    token = str(ref).strip().replace('\\', '/')
+    token = token.lstrip('/')
+    if not token:
+        return []
+    prefix = (app.config.get('OSS_PREFIX') or '').strip('/ ')
+    candidates = []
+    if not prefix:
+        candidates.append(token)
+        return candidates
+    prefix_token = f"{prefix}/"
+    if token.startswith(prefix_token):
+        candidates.append(token)
+        stripped = token[len(prefix_token):]
+        if stripped:
+            candidates.append(stripped)
+        return candidates
+    if prefer_prefix:
+        candidates.append(f"{prefix}/{token}")
+        candidates.append(token)
+    else:
+        candidates.append(token)
+        candidates.append(f"{prefix}/{token}")
+    return candidates
+
+
 def _local_attachment_root():
     root = app.config.get('ATTACHMENTS_FOLDER')
     if root and os.path.isdir(root):
@@ -1442,9 +1470,10 @@ def _find_local_attachment(ref):
     for root in _attachment_storage_roots():
         if not root or not os.path.isdir(root):
             continue
-        candidate = _safe_attachment_path(root, ref)
-        if candidate and os.path.exists(candidate):
-            return candidate
+        for candidate_ref in _attachment_ref_candidates(ref):
+            candidate = _safe_attachment_path(root, candidate_ref)
+            if candidate and os.path.exists(candidate):
+                return candidate
     return None
 
 
@@ -1454,11 +1483,12 @@ def _resolve_local_attachment_ref(ref):
     for root in _attachment_storage_roots():
         if not root or not os.path.isdir(root):
             continue
-        candidate = _safe_attachment_path(root, ref)
-        if candidate and os.path.exists(candidate):
-            root_abs = os.path.abspath(root)
-            rel = os.path.relpath(candidate, root_abs)
-            return root_abs, rel
+        for candidate_ref in _attachment_ref_candidates(ref):
+            candidate = _safe_attachment_path(root, candidate_ref)
+            if candidate and os.path.exists(candidate):
+                root_abs = os.path.abspath(root)
+                rel = os.path.relpath(candidate, root_abs)
+                return root_abs, rel
     return None, None
 
 
@@ -1582,7 +1612,9 @@ def _read_media_bytes(ref, timeout=10):
             except OSError:
                 return None
         if app.config.get('USE_OSS'):
-            url = _build_oss_url(ref)
+            candidates = _attachment_ref_candidates(ref, prefer_prefix=True)
+            key = candidates[0] if candidates else ref
+            url = _build_oss_url(key)
     if not url:
         return None
     try:
@@ -1660,10 +1692,13 @@ def _sync_attachments_async(refs):
     unique_refs = []
     seen = set()
     for ref in refs:
-        if not ref or _is_external_media(ref) or ref in seen:
+        if not ref or _is_external_media(ref):
             continue
-        seen.add(ref)
-        unique_refs.append(ref)
+        for candidate in _attachment_ref_candidates(ref, prefer_prefix=True):
+            if not candidate or candidate in seen:
+                continue
+            seen.add(candidate)
+            unique_refs.append(candidate)
     if not unique_refs:
         return
 
@@ -5036,10 +5071,12 @@ def inject_attachment_helpers():
             return None, None
         if _is_external_media(ref):
             return _normalize_external_url(ref), 'external'
-        if _local_attachment_exists(ref):
-            return url_for('uploaded_attachment', filename=ref), 'local'
+        root, rel_path = _resolve_local_attachment_ref(ref)
+        if root and rel_path:
+            return url_for('uploaded_attachment', filename=rel_path), 'local'
         if app.config.get('USE_OSS'):
-            key = ref.lstrip('/')
+            candidates = _attachment_ref_candidates(ref, prefer_prefix=True)
+            key = candidates[0] if candidates else ref.lstrip('/')
             return _build_oss_url(key), 'oss'
         return url_for('uploaded_attachment', filename=ref), 'local'
 

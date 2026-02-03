@@ -31,3 +31,5 @@ flask.pid
 .env
 attachments/
 attachments/**/*
+.benlab_backup/**/*
+.benlab_backup

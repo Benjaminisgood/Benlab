@@ -77,6 +77,7 @@
       this.directDisabled = false;
       this.entries = [];
       this.localFallbackFiles = [];
+      this._activeUploadXhr = null;
       this.hiddenContainer = document.createElement('div');
       this.hiddenContainer.className = 'direct-upload-hidden-inputs';
       this.hiddenContainer.hidden = true;
@@ -123,16 +124,21 @@
           if (objectKey) {
             batchKeys.push(objectKey);
           }
-        } catch (error) {
-          console.error(error);
-          this.rollbackEntries(batchKeys);
-          this.directDisabled = true;
-          this.appendFallbackFiles(files);
-          this.setStatus((error && error.message) || '上传失败，已切换为表单直传。', 'warning');
-          this.uploading = false;
-          return;
-        }
-      }
+	        } catch (error) {
+	          console.error(error);
+	          this.rollbackEntries(batchKeys);
+	          this.directDisabled = true;
+	          this.appendFallbackFiles(files);
+	          const detail = (error && error.message) ? String(error.message).trim() : '';
+	          let msg = '上传失败，已切换为表单直传，可直接提交。';
+	          if (detail) {
+	            msg = detail.includes('已切换为表单直传') ? detail : `${detail}（已切换为表单直传，可直接提交）`;
+	          }
+	          this.setStatus(msg, 'warning');
+	          this.uploading = false;
+	          return;
+	        }
+	      }
       this.uploading = false;
       this.localFallbackFiles = [];
       this.input.__preservedFiles = [];
@@ -191,9 +197,121 @@
       return response.json();
     }
 
+	    async verifyRemoteObjectViaHead(headUrl) {
+	      if (!headUrl) {
+	        return false;
+	      }
+	      try {
+	        const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+	        const timeoutMs = Number(config.verify_timeout_ms) > 0 ? Number(config.verify_timeout_ms) : 8000;
+	        const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+	        let resp;
+	        try {
+	          resp = await fetch(headUrl, {
+	            method: 'HEAD',
+	            mode: 'cors',
+	            cache: 'no-store',
+	            credentials: 'omit',
+	            signal: controller ? controller.signal : undefined
+	          });
+	        } finally {
+	          if (timer) {
+	            clearTimeout(timer);
+	          }
+	        }
+	        return Boolean(resp && resp.ok);
+	      } catch (error) {
+	        return false;
+	      }
+	    }
+
+	    async verifyRemoteObject(ticket) {
+	      if (!ticket) {
+	        return false;
+	      }
+	      if (ticket.head_url) {
+	        const ok = await this.verifyRemoteObjectViaHead(ticket.head_url);
+	        if (ok) {
+	          return true;
+	        }
+	      }
+	      const objectKey = ticket.object_key;
+	      if (!config.verify_url || !objectKey) {
+	        return false;
+	      }
+	      let response;
+	      try {
+	        response = await fetch(config.verify_url, {
+	          method: 'POST',
+	          headers: {
+	            'Content-Type': 'application/json',
+	            'X-Requested-With': 'XMLHttpRequest'
+	          },
+	          body: JSON.stringify({ object_key: objectKey })
+	        });
+	      } catch (error) {
+	        return false;
+	      }
+	      if (!response || !response.ok) {
+	        return false;
+	      }
+	      let payload = {};
+	      try {
+	        payload = await response.json();
+	      } catch (error) {
+	        payload = {};
+	      }
+	      return Boolean(payload && payload.exists);
+	    }
+
     performUpload(file, ticket) {
       return new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
+        this._activeUploadXhr = xhr;
+        let settled = false;
+        let finalizeTimer = null;
+
+        const clearFinalizeTimer = () => {
+          if (finalizeTimer) {
+            clearTimeout(finalizeTimer);
+            finalizeTimer = null;
+          }
+        };
+
+        const settle = (fn) => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          clearFinalizeTimer();
+          this._activeUploadXhr = null;
+          fn();
+        };
+
+	        const finishFromXhr = () => {
+	          if (settled || xhr.readyState !== 4) {
+	            return;
+	          }
+	          if (xhr.status >= 200 && xhr.status < 300) {
+	            settle(resolve);
+	            return;
+	          }
+	          if (xhr.status === 0) {
+	            // Some browsers report status=0 for cross-origin issues even when the object is stored.
+	            Promise.resolve(this.verifyRemoteObject(ticket))
+	              .then((exists) => {
+	                if (exists) {
+	                  settle(resolve);
+	                } else {
+	                  settle(() => reject(new Error(`上传 ${file.name} 失败，未能连通对象存储（请检查 OSS CORS 配置）。`)));
+                }
+              })
+              .catch(() => settle(() => reject(new Error(`上传 ${file.name} 失败，未能连通对象存储（请检查 OSS CORS 配置）。`))));
+            return;
+          }
+          settle(() => reject(new Error(`上传 ${file.name} 时 OSS 返回错误 ${xhr.status}`)));
+        };
+
         xhr.open('PUT', ticket.upload_url);
         const timeoutMs = Number(config.upload_timeout_ms) > 0 ? Number(config.upload_timeout_ms) : 180000;
         xhr.timeout = timeoutMs;
@@ -209,17 +327,79 @@
             this.setStatus(`正在上传 ${file.name}（${percent}%）`, 'info');
           }
         });
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            resolve();
-          } else if (xhr.status === 0) {
-            reject(new Error(`上传 ${file.name} 失败，未能连通对象存储（请检查 OSS CORS 配置）。`));
-          } else {
-            reject(new Error(`上传 ${file.name} 时 OSS 返回错误 ${xhr.status}`));
+
+	        // Upload bytes are fully sent, but we still need a server response to confirm.
+	        xhr.upload.addEventListener('loadend', () => {
+	          if (settled) {
+	            return;
+	          }
+	          this.setStatus(`已上传 ${file.name}（100%），等待 OSS 确认...`, 'info');
+
+	          const startMs = Date.now();
+	          const finalizeTimeoutMs = Number(config.finalize_timeout_ms) > 0 ? Number(config.finalize_timeout_ms) : 90000;
+	          const verifyDelays = [1500, 3000, 6000, 12000, 24000];
+	          let attempt = 0;
+
+	          const schedule = (delayMs) => {
+	            clearFinalizeTimer();
+	            finalizeTimer = setTimeout(async () => {
+	              if (settled) {
+	                return;
+	              }
+	              // If the request did complete but we missed the event, handle it now.
+	              if (xhr.readyState === 4) {
+	                finishFromXhr();
+	                return;
+	              }
+
+	              const exists = await this.verifyRemoteObject(ticket);
+	              if (settled) {
+	                return;
+	              }
+	              if (exists) {
+	                settle(resolve);
+	                try {
+	                  xhr.abort();
+	                } catch (error) {
+	                  /* ignore */
+	                }
+	                return;
+	              }
+
+	              if (Date.now() - startMs >= finalizeTimeoutMs) {
+	                settle(() => reject(new Error(`上传 ${file.name} 确认超时，已切换为表单直传。`)));
+	                try {
+	                  xhr.abort();
+	                } catch (error) {
+	                  /* ignore */
+	                }
+	                return;
+	              }
+
+	              attempt += 1;
+	              const nextDelay = verifyDelays[Math.min(attempt, verifyDelays.length - 1)];
+	              schedule(nextDelay);
+	            }, Math.max(200, delayMs));
+	          };
+
+	          schedule(verifyDelays[attempt]);
+	        });
+
+        xhr.addEventListener('load', finishFromXhr);
+        xhr.addEventListener('readystatechange', finishFromXhr);
+        xhr.addEventListener('loadend', finishFromXhr);
+        xhr.addEventListener('error', () => {
+          settle(() => reject(new Error(`上传 ${file.name} 时发生网络错误（可能是 OSS CORS 未放行）。`)));
+        });
+        xhr.addEventListener('timeout', () => {
+          settle(() => reject(new Error(`上传 ${file.name} 超时，请检查网络后重试。`)));
+        });
+        xhr.addEventListener('abort', () => {
+          if (settled) {
+            return;
           }
-        };
-        xhr.onerror = () => reject(new Error(`上传 ${file.name} 时发生网络错误（可能是 OSS CORS 未放行）。`));
-        xhr.ontimeout = () => reject(new Error(`上传 ${file.name} 超时，请检查网络后重试。`));
+          settle(() => reject(new Error(`上传 ${file.name} 已取消。`)));
+        });
         xhr.send(file);
       });
     }

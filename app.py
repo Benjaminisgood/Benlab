@@ -1537,8 +1537,10 @@ def _oss_direct_upload_ready():
             last_exc = exc
             time.sleep(0.4 * (attempt + 1))
     if last_exc is not None or cors_info is None:
-        app.logger.warning('读取 OSS CORS 配置失败，已关闭浏览器直传并回退为服务端上传: %s', last_exc)
-        return False
+        # OSS 网络波动时 get_bucket_cors() 可能失败；此时不应强制关闭浏览器直传，
+        # 否则会把流量全部推回服务端上传（同样依赖 OSS），更容易导致用户无法上传。
+        app.logger.warning('读取 OSS CORS 配置失败，将继续启用浏览器直传（如直传失败请检查 OSS CORS）: %s', last_exc)
+        return True
 
     rules = getattr(cors_info, 'cors_rule_list', None)
     if rules is None:
@@ -2780,6 +2782,7 @@ def _build_direct_upload_config():
         human_size = None
     config.update({
         'presign_url': url_for('create_direct_oss_upload'),
+        'verify_url': url_for('verify_direct_oss_upload'),
         'max_size': max_size,
         'max_size_label': human_size,
         'storage': 'oss'
@@ -3725,13 +3728,54 @@ def create_direct_oss_upload():
     headers = {'Content-Type': content_type}
     upload_url = bucket.sign_url('PUT', object_key, expires, headers=headers)
     upload_url = _finalize_signed_upload_url(upload_url)
+    # Browser-side verification: avoid server -> OSS calls for existence checks.
+    head_url = bucket.sign_url('HEAD', object_key, expires)
+    head_url = _finalize_signed_upload_url(head_url)
     return jsonify({
         'object_key': object_key,
         'upload_url': upload_url,
+        'head_url': head_url,
         'headers': headers,
         'access_url': _build_oss_url(object_key),
         'expires_in': expires,
         'max_size': max_size
+    })
+
+
+@app.route('/api/uploads/oss/verify', methods=['POST'])
+@login_required
+def verify_direct_oss_upload():
+    """Best-effort verification that a direct-upload object exists on OSS.
+
+    Used by the front-end as a fallback when the browser never receives the final
+    PUT response (some WebKit/Safari edge cases).
+    """
+    if not app.config.get('DIRECT_OSS_UPLOAD_ENABLED'):
+        abort(404)
+    if not app.config.get('USE_OSS'):
+        abort(404)
+    bucket = _get_oss_bucket()
+    if bucket is None:
+        abort(503)
+    payload = request.get_json(silent=True) or {}
+    raw_key = payload.get('object_key') or payload.get('key') or ''
+    object_key = _normalize_object_key(raw_key)
+    if not object_key:
+        return jsonify({'error': 'missing_object_key'}), 400
+    prefix = (app.config.get('OSS_PREFIX') or '').strip('/ ')
+    if prefix:
+        required_prefix = f"{prefix}/"
+        if not object_key.startswith(required_prefix):
+            return jsonify({'error': 'invalid_object_key'}), 400
+    try:
+        exists = bool(bucket.object_exists(object_key))
+    except Exception as exc:
+        app.logger.warning('OSS 直传校验失败: %s', exc)
+        return jsonify({'error': 'verify_failed'}), 503
+    return jsonify({
+        'object_key': object_key,
+        'exists': exists,
+        'access_url': _build_oss_url(object_key)
     })
 
 

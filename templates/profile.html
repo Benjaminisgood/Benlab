@@ -31,25 +31,29 @@
           {% endif %}
         </div>
         <div class="text-end">
+          {% set item_status = normalize_item_stock_status(entry.stock_status) %}
           <div class="d-flex flex-wrap justify-content-end gap-1">
-            {% if entry.stock_status %}
-              {% set status_intent = stock_status_intent(entry.stock_status) %}
-              <span class="badge badge-item-status badge-item-status-{{ status_intent }}">{{ entry.stock_status }}</span>
+            {% if item_status %}
+              {% set status_intent = stock_status_intent(item_status) %}
+              <span class="badge badge-item-status badge-item-status-{{ status_intent }}">{{ item_status }}</span>
             {% endif %}
             {% if entry.features %}
               {% set feature_tone = feature_intent(entry.features) %}
               <span class="badge badge-item-feature badge-item-feature-{{ feature_tone }}">{{ entry.features }}</span>
             {% endif %}
           </div>
-          {% if entry.stock_status and '用完' in entry.stock_status %}
-            <a href="{{ url_for('edit_item', item_id=entry.id) }}" class="btn btn-outline-danger btn-sm mt-2">补货处理</a>
+          {% if item_status and is_item_alert_status(item_status) %}
+            {% set action_label = item_alert_action_label(item_status) %}
+            {% set action_tone = item_alert_level(item_status) %}
+            <a href="{{ url_for('edit_item', item_id=entry.id) }}" class="btn btn-outline-{{ action_tone }} btn-sm mt-2">{{ action_label }}</a>
           {% endif %}
         </div>
       </div>
     </li>
   {% else %}
-    {% set status = entry.clean_status or '未评估' %}
-    {% set is_dirty = status == '脏/报修' %}
+    {% set status = normalize_location_status(entry.status) or '未评估' %}
+    {% set is_dirty = is_location_dirty(status) %}
+    {% set status_intent = location_status_intent(status) %}
     {% set lead_members = entry.responsible_members[:2] if entry.responsible_members else [] %}
     <li class="list-group-item">
       <div class="d-flex justify-content-between align-items-start gap-3">
@@ -58,7 +62,7 @@
         </div>
         <div class="text-end">
           <div class="d-flex flex-wrap justify-content-end gap-1">
-            <span class="badge {% if is_dirty %}bg-danger{% elif status == '一般' %}bg-warning text-dark{% else %}bg-secondary{% endif %}">{{ status }}</span>
+            <span class="badge {% if status_intent == 'critical' %}bg-danger{% elif status_intent == 'warning' %}bg-warning text-dark{% elif status_intent == 'positive' %}bg-success{% else %}bg-secondary{% endif %}">{{ status }}</span>
             {% for member in lead_members %}
               <a class="badge bg-light text-dark border text-decoration-none" href="{{ url_for('profile', member_id=member.id) }}">{{ member.name or member.username }}</a>
             {% endfor %}
@@ -249,11 +253,27 @@
     {% endif %}
   </div>
 </div>
-{% if is_self and any_item_empty %}
-  <div class="alert alert-danger">你有库存用完的物品，请尽快处理！</div>
+{% if is_self and item_alerts %}
+  {% for alert in item_alerts %}
+  <div class="alert alert-{{ alert.level }}">
+    <div class="fw-semibold">{{ alert.message }}</div>
+    <div class="small mt-1 text-muted">建议动作：{{ alert.action_label }}</div>
+    {% if alert.sample_items %}
+      <div class="small mt-1">
+        涉及：
+        {% for item in alert.sample_items %}
+          <a href="{{ url_for('item_detail', item_id=item.id) }}" class="text-decoration-none">{{ item.name }}</a>{% if not loop.last %}、{% endif %}
+        {% endfor %}
+        {% if alert.count > alert.sample_items|length %}
+          等 {{ alert.count }} 个
+        {% endif %}
+      </div>
+    {% endif %}
+  </div>
+  {% endfor %}
 {% endif %}
 {% if is_self and any_location_dirty %}
-  <div class="alert alert-danger">你有卫生差或需维修的位置，请尽快处理！</div>
+  <div class="alert alert-danger">你有脏/报修/危险状态的位置，请尽快处理！</div>
 {% endif %}
 <div class="card mb-4">
   <div class="card-header fw-semibold">个人展示 / 备注</div>
@@ -288,8 +308,9 @@
           {% endif %}
         </div>
         <div class="text-end text-muted small">
-          {% if entry.location.clean_status %}
-            状态：{{ entry.location.clean_status }}
+          {% set affiliation_status = normalize_location_status(entry.location.status) %}
+          {% if affiliation_status %}
+            状态：{{ affiliation_status }}
           {% endif %}
         </div>
       </div>
@@ -310,8 +331,9 @@
             {% endif %}
           </div>
           <div class="text-end text-muted small">
-            {% if entry.location.clean_status %}
-              状态：{{ entry.location.clean_status }}
+            {% set affiliation_status = normalize_location_status(entry.location.status) %}
+            {% if affiliation_status %}
+              状态：{{ affiliation_status }}
             {% endif %}
           </div>
         </div>
@@ -354,8 +376,9 @@
           {% endif %}
         </div>
         <div class="text-end text-muted small">
-          {% if entry.item.stock_status %}
-            库存：{{ entry.item.stock_status }}
+          {% set interest_stock_status = normalize_item_stock_status(entry.item.stock_status) %}
+          {% if interest_stock_status %}
+            库存：{{ interest_stock_status }}
           {% endif %}
         </div>
       </div>
@@ -376,8 +399,9 @@
             {% endif %}
           </div>
           <div class="text-end text-muted small">
-            {% if entry.item.stock_status %}
-              库存：{{ entry.item.stock_status }}
+            {% set interest_stock_status = normalize_item_stock_status(entry.item.stock_status) %}
+            {% if interest_stock_status %}
+              库存：{{ interest_stock_status }}
             {% endif %}
           </div>
         </div>

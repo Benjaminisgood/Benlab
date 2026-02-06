@@ -40,8 +40,16 @@
           </div>
         </div>
       </li>
-      <li class="list-group-item"><strong>库存状态：</strong>{{ item.stock_status or '未指定' }}</li>
-      <li class="list-group-item"><strong>物品特性：</strong>{{ item.features if item.features in ['公共','私人'] else '未指定' }}</li>
+      <li class="list-group-item"><strong>物品状态：</strong>{{ normalize_item_stock_status(item.stock_status) or '未指定' }}</li>
+      <li class="list-group-item">
+        <strong>物品归属：</strong>
+        {% if item.features in ['公共','私人'] %}
+          {% set feature_tone = feature_intent(item.features) %}
+          <span class="badge badge-item-feature badge-item-feature-{{ feature_tone }}">{{ item.features }}</span>
+        {% else %}
+          未指定
+        {% endif %}
+      </li>
       <li class="list-group-item"><strong>价值：</strong>{{ item.value if item.value is not none else '未指定' }}</li>
       <li class="list-group-item"><strong>数量：</strong>{% if item.quantity is not none and item.unit %}{{ item.quantity }} {{ item.unit }}{% else %}未指定{% endif %}</li>
       <li class="list-group-item"><strong>购入时间：</strong>{{ item.purchase_date.strftime('%Y-%m-%d') if item.purchase_date else '未指定' }}</li>

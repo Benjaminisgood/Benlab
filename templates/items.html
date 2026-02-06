@@ -28,7 +28,8 @@
 
     {# 将物品分为普通和“舍弃” #}
     {% for item in items %}
-      {% if item.stock_status and item.stock_status == '舍弃' %}
+      {% set normalized_status = normalize_item_stock_status(item.stock_status) %}
+      {% if normalized_status == '舍弃' %}
         {% set _ = discarded_items.append(item) %}
       {% else %}
         {% set _ = active_items.append(item) %}
@@ -36,7 +37,8 @@
     {% endfor %}
 
     {% for item in active_items + discarded_items %}
-      {% set status_intent = stock_status_intent(item.stock_status) %}
+      {% set item_status = normalize_item_stock_status(item.stock_status) %}
+      {% set status_intent = stock_status_intent(item_status) %}
       {% set row_class = 'inventory-row' %}
       {% if status_intent != 'neutral' %}
         {% set row_class = row_class ~ ' inventory-row-' ~ status_intent %}
@@ -47,18 +49,14 @@
       {% for member in item.responsible_members %}
         {% set _ = responsible_labels.append(member.name or member.username) %}
       {% endfor %}
-      {% set search_blob = (item.name ~ ' ' ~ (item.category or '-') ~ ' ' ~ (item.stock_status or '-') ~ ' ' ~ (item.features or '-') ~ ' ' ~ (detail_refs_blob|join(' ')) ~ ' ' ~ (item.notes or '-') ~ ' ' ~ (responsible_labels|join(' ')) ~ ' ' ~ (location_names|join(' '))) %}
+      {% set search_blob = (item.name ~ ' ' ~ (item.category or '-') ~ ' ' ~ (item_status or '-') ~ ' ' ~ (item.features or '-') ~ ' ' ~ (detail_refs_blob|join(' ')) ~ ' ' ~ (item.notes or '-') ~ ' ' ~ (responsible_labels|join(' ')) ~ ' ' ~ (location_names|join(' '))) %}
 
       <tr class="{{ row_class }}" data-search="{{ search_blob|lower }}">
         <td class="col-item-name">
           <div class="d-flex flex-wrap align-items-center gap-2">
             <a href="{{ url_for('item_detail', item_id=item.id) }}">{{ item.name }}</a>
-            {% if item.features %}
-              {% set feature_tone = feature_intent(item.features) %}
-              <span class="badge badge-item-feature badge-item-feature-{{ feature_tone }}">{{ item.features }}</span>
-            {% endif %}
-            {% if item.stock_status %}
-              <span class="badge badge-item-status badge-item-status-{{ status_intent }}">{{ item.stock_status }}</span>
+            {% if item_status %}
+              <span class="badge badge-item-status badge-item-status-{{ status_intent }}">{{ item_status }}</span>
             {% endif %}
           </div>
         </td>
@@ -70,11 +68,21 @@
           {% else %}-{% endif %}
         </td>
         <td class="col-item-responsible">
-          {% if item.responsible_members %}
-            {% for member in item.responsible_members %}
-              <a href="{{ url_for('profile', member_id=member.id) }}">{{ member.name or member.username }}</a>{% if not loop.last %}, {% endif %}
-            {% endfor %}
-          {% else %}-{% endif %}
+          <div class="d-flex flex-wrap align-items-center gap-2">
+            {% if item.features %}
+              {% set feature_tone = feature_intent(item.features) %}
+              <span class="badge badge-item-feature badge-item-feature-{{ feature_tone }}">{{ item.features }}</span>
+            {% endif %}
+            {% if item.responsible_members %}
+              <div class="d-flex flex-wrap align-items-center gap-1">
+                {% for member in item.responsible_members %}
+                  <a href="{{ url_for('profile', member_id=member.id) }}">{{ member.name or member.username }}</a>{% if not loop.last %}, {% endif %}
+                {% endfor %}
+              </div>
+            {% else %}
+              <span class="text-muted">-</span>
+            {% endif %}
+          </div>
         </td>
         <td class="col-item-actions text-nowrap text-end">
           <a href="{{ url_for('edit_item', item_id=item.id) }}" class="btn btn-sm btn-outline-primary">编辑</a>

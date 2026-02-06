@@ -1,33 +1,7 @@
 {% extends "base.html" %}
 {% from "_media_gallery.html" import render_media_gallery %}
 {% block content %}
-<style>
-  .card-select {
-    border: 1px solid var(--bs-border-color);
-    transition: all .12s ease-in-out;
-  }
-  .btn-check:checked + .card-select {
-    border-color: rgba(var(--bs-primary-rgb, 13, 110, 253), 0.9);
-    background-color: var(--bs-primary-bg-subtle, rgba(var(--bs-primary-rgb, 13, 110, 253), 0.08));
-    box-shadow: 0 .35rem 1rem rgba(var(--bs-primary-rgb, 13, 110, 253), 0.25);
-  }
-  .btn-check:focus + .card-select {
-    outline: 2px solid rgba(var(--bs-primary-rgb, 13, 110, 253), 0.2);
-    outline-offset: 2px;
-  }
-  .card-select-mark { display: none; }
-  .btn-check:checked + .card-select .card-select-mark { display: inline-flex; align-items: center; gap: .25rem; }
-  .btn-check:checked + .card-select .card-select-hint { display: none; }
-  .card-select-surface {
-    background-color: var(--bs-body-bg);
-    color: var(--bs-body-color);
-  }
-  .selection-panel {
-    background-color: var(--bs-tertiary-bg, var(--bs-gray-100, #f8f9fa));
-    border: 1px solid var(--bs-border-color);
-    color: var(--bs-body-color);
-  }
-</style>
+{% set detail_refs = location.detail_refs_without_usage_tags %}
 <h4 class="mb-3">{{ location.name }}</h4>
 
 <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
@@ -36,13 +10,13 @@
   {% endif %}
   <button type="button" class="btn btn-outline-secondary" id="shareLocationLinkBtn" data-url="{{ request.url }}">分享链接</button>
   <button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#addExistingItemsModal" {% if not available_items %}disabled{% endif %}>
-    ➕ 加入已有物品
+    加入已有物品
   </button>
   <a href="{{ url_for('add_item', loc_id=location.id) }}" class="btn btn-outline-success">
-    🆕 新建物品并加入
+    新建物品并加入
   </a>
   <button type="button" class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#removeItemsModal" {% if not items %}disabled{% endif %}>
-    ➖ 移除物品
+    移除物品
   </button>
   <a href="{{ url_for('edit_location', loc_id=location.id) }}" class="btn btn-primary">编辑</a>
   <form action="{{ url_for('delete_location', loc_id=location.id) }}" method="post" class="d-inline" onsubmit="return confirm('确定删除该空间吗？此操作无法恢复。');">
@@ -65,8 +39,8 @@
           {% for member in location.responsible_members %}
             <a href="{{ url_for('profile', member_id=member.id) }}">{{ member.name or member.username }}</a>{% if not loop.last %}，{% endif %}
           {% endfor %}
-        {% elif location_meta.is_public %}
-          <span class="text-muted">共享空间，社区共同维护</span>
+        {% elif location.is_public %}
+          <span class="text-muted">公共（社区共同维护）</span>
         {% else %}
           无
         {% endif %}
@@ -91,23 +65,53 @@
         </ul>
       </li>
       {% endif %}
-      {% if location.clean_status %}
+      {% set display_status = normalize_location_status(location.status) %}
+      {% if display_status %}
+      {% set status_intent = location_status_intent(display_status) %}
       <li class="list-group-item">
         <strong>属性状态：</strong>
         <span class="badge
-          {% if location.clean_status == '干净' %} bg-success
-          {% elif location.clean_status == '一般' %} bg-warning text-dark
-          {% elif location.clean_status == '脏/报修/危险' %} bg-danger
+          {% if status_intent == 'positive' %} bg-success
+          {% elif status_intent == 'warning' %} bg-warning text-dark
+          {% elif status_intent == 'critical' %} bg-danger
           {% else %} bg-secondary
           {% endif %}
-        ">{{ location.clean_status }}</span>
+        ">{{ display_status }}</span>
       </li>
       {% endif %}
-      {% if location_meta.description %}
-      <li class="list-group-item"><strong>空间简介：</strong>{{ location_meta.description }}</li>
+      {% if location.notes %}
+      <li class="list-group-item"><strong>备注：</strong>{{ location.notes }}</li>
       {% endif %}
-      {% if location_meta.access_info %}
-      <li class="list-group-item"><strong>出入说明：</strong>{{ location_meta.access_info }}</li>
+      {% if detail_refs %}
+      <li class="list-group-item">
+        <strong>参考信息：</strong>
+        <ul class="list-unstyled mt-2 mb-0">
+          {% for ref in detail_refs %}
+          {% set value = ref.value %}
+          {% set display_label = ref.label or ref.value %}
+          {% set is_http = value and (value.startswith('http://') or value.startswith('https://')) %}
+          <li class="mb-2">
+            {% if is_http %}
+              <a href="{{ value }}" target="_blank" rel="noopener" class="d-inline-flex align-items-center gap-2 text-decoration-none">
+                <span class="badge bg-primary-subtle text-primary-emphasis border">{{ loop.index }}</span>
+                <span>{{ display_label }}</span>
+              </a>
+              {% if ref.label and ref.label != value %}
+              <div class="small text-muted">{{ value }}</div>
+              {% endif %}
+            {% else %}
+              <span class="badge bg-primary-subtle text-primary-emphasis border">{{ loop.index }}</span>
+              {% if ref.label %}
+                <span class="fw-semibold ms-2">{{ ref.label }}</span>
+                <span class="text-muted ms-2">{{ value }}</span>
+              {% else %}
+                <span class="text-muted ms-2">{{ value }}</span>
+              {% endif %}
+            {% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+      </li>
       {% endif %}
       {% if location.detail_link %}
       <li class="list-group-item">
@@ -154,9 +158,8 @@
           <span class="badge bg-light text-dark border">参与 {{ event_summary.participants }}</span>
           {% endif %}
           <span class="badge bg-light text-dark border">成员关联 {{ affiliation_total }}</span>
-          {% if location_meta.is_public %}
-          <span class="badge bg-success-subtle text-success-emphasis border">公共共享</span>
-          {% endif %}
+          {% set ownership_tone = 'public' if location.is_public else 'private' %}
+          <span class="badge badge-item-feature badge-item-feature-{{ ownership_tone }}">{{ '公共' if location.is_public else '私人' }}</span>
         </div>
         {% if status_stats %}
         <hr class="my-3">
@@ -178,10 +181,11 @@
         {% endif %}
         {% if feature_stats %}
         <hr class="my-3">
-        <div class="text-muted small mb-2">物品特性</div>
+        <div class="text-muted small mb-2">物品归属</div>
         <div class="d-flex flex-wrap gap-2">
           {% for stat in feature_stats %}
-          <span class="badge bg-warning-subtle text-warning-emphasis border">{{ stat.label }} {{ stat.count }}</span>
+          {% set feature_tone = feature_intent(stat.label) %}
+          <span class="badge badge-item-feature badge-item-feature-{{ feature_tone }}">{{ stat.label }} {{ stat.count }}</span>
           {% endfor %}
         </div>
         {% endif %}
@@ -263,9 +267,10 @@
                   {% endif %}
                 </div>
                 <div class="text-end">
-                  {% if item.stock_status %}
-                  {% set status_intent = stock_status_intent(item.stock_status) %}
-                  <span class="badge badge-item-status badge-item-status-{{ status_intent }}">{{ item.stock_status }}</span>
+                  {% set item_status = normalize_item_stock_status(item.stock_status) %}
+                  {% if item_status %}
+                  {% set status_intent = stock_status_intent(item_status) %}
+                  <span class="badge badge-item-status badge-item-status-{{ status_intent }}">{{ item_status }}</span>
                   {% endif %}
                   {% if item.category %}
                   <small class="text-muted ms-2">{{ item.category }}</small>
@@ -320,9 +325,10 @@
                   {% endif %}
                 </div>
                 <div class="text-end">
-                  {% if it.stock_status %}
-                  {% set status_intent = stock_status_intent(it.stock_status) %}
-                  <span class="badge badge-item-status badge-item-status-{{ status_intent }}">{{ it.stock_status }}</span>
+                  {% set item_status = normalize_item_stock_status(it.stock_status) %}
+                  {% if item_status %}
+                  {% set status_intent = stock_status_intent(item_status) %}
+                  <span class="badge badge-item-status badge-item-status-{{ status_intent }}">{{ item_status }}</span>
                   {% endif %}
                   {% if it.category %}
                   <small class="text-muted ms-2">{{ it.category }}</small>

@@ -3,33 +3,6 @@
 {% set existing_detail_refs = item.detail_refs if item else [] %}
 {% set allowed_features = ['公共','私人'] %}
 {% set form_id = 'itemForm' %}
-<style>
-  .card-select {
-    border: 1px solid var(--bs-border-color);
-    transition: all .12s ease-in-out;
-  }
-  .btn-check:checked + .card-select {
-    border-color: rgba(var(--bs-primary-rgb, 13, 110, 253), 0.9);
-    background-color: var(--bs-primary-bg-subtle, rgba(var(--bs-primary-rgb, 13, 110, 253), 0.08));
-    box-shadow: 0 .35rem 1rem rgba(var(--bs-primary-rgb, 13, 110, 253), 0.25);
-  }
-  .btn-check:focus + .card-select {
-    outline: 2px solid rgba(var(--bs-primary-rgb, 13, 110, 253), 0.2);
-    outline-offset: 2px;
-  }
-  .card-select-mark { display: none; }
-  .btn-check:checked + .card-select .card-select-mark { display: inline-flex; align-items: center; gap: .25rem; }
-  .btn-check:checked + .card-select .card-select-hint { display: none; }
-  .card-select-surface {
-    background-color: var(--bs-body-bg);
-    color: var(--bs-body-color);
-  }
-  .selection-panel {
-    background-color: var(--bs-tertiary-bg, var(--bs-gray-100, #f8f9fa));
-    border: 1px solid var(--bs-border-color);
-    color: var(--bs-body-color);
-  }
-</style>
 <h4 class="mb-3">{{ item and item.id and '编辑物品' or '新增物品' }}</h4>
 <form method="post" id="{{ form_id }}" enctype="multipart/form-data" action="{% if item %}{{ url_for('edit_item', item_id=item.id) }}{% else %}{{ url_for('add_item') }}{% endif %}">
   <div class="mb-3">
@@ -37,29 +10,35 @@
     <input type="text" class="form-control" id="name" name="name" value="{{ item.name if item else '' }}" required>
   </div>
   <div class="mb-3">
-    <label for="stock_status">库存状态</label>
+    <label for="stock_status">物品状态</label>
+    {% set stock_status_choices = item_stock_status_choices if item_stock_status_choices is defined else ['正常','少量','用完','借出','舍弃'] %}
+    {% set selected_stock_status = normalize_item_stock_status(item.stock_status) if item else '正常' %}
     <select name="stock_status" class="form-select">
-      {% for opt in ['充足','少量','用完','舍弃','闲置','借出','待售','售出'] %}
-      <option value="{{ opt }}" {% if item and item.stock_status == opt %}selected{% endif %}>{{ opt }}</option>
+      {% for opt in stock_status_choices %}
+      <option value="{{ opt }}" {% if selected_stock_status == opt %}selected{% endif %}>{{ opt }}</option>
       {% endfor %}
     </select>
   </div>
 
+  {% set ownership_value = item.features if item and item.features in allowed_features else '私人' %}
   <div class="mb-3">
-    <label for="features" class="form-label">物品特性</label>
-    <select name="features" class="form-select" required>
-      <option value="">-- 请选择 --</option>
-      {% for opt in allowed_features %}
-      <option value="{{ opt }}" {% if item and item.features == opt %}selected{% endif %}>{{ opt }}</option>
-      {% endfor %}
-      {% if item and item.features and item.features not in allowed_features %}
-      <option value="{{ item.features }}" selected>保留原值：{{ item.features }}</option>
-      {% endif %}
-    </select>
+    <label for="itemOwnershipSwitch" class="form-label">物品归属</label>
+    <input type="hidden" name="features" id="itemOwnershipValue" value="{{ ownership_value }}">
+    <div class="form-check form-switch mb-1">
+      <input class="form-check-input" type="checkbox" role="switch" id="itemOwnershipSwitch"
+             aria-describedby="itemOwnershipCurrent"
+             {% if ownership_value == '公共' %}checked{% endif %}>
+      <label class="form-check-label" for="itemOwnershipSwitch">公共物品（关闭后为私人物品）</label>
+    </div>
+    <div class="small text-muted mb-1" id="itemOwnershipCurrent">
+      当前归属：
+      <span id="itemOwnershipLabel"
+            class="badge badge-item-feature {% if ownership_value == '公共' %}badge-item-feature-public{% else %}badge-item-feature-private{% endif %}">{{ ownership_value }}</span>
+    </div>
     {% if item and item.features and item.features not in allowed_features %}
-    <div class="form-text text-warning">保存后将恢复为空，请选择“公共”或“私人”。</div>
+    <div class="form-text text-warning">检测到历史值“{{ item.features }}”，保存后会按当前开关更新为“公共”或“私人”。</div>
     {% endif %}
-    <div class="form-text text-muted">私人物品仅负责人可编辑，请谨慎调整。</div>
+    <div class="form-text text-muted">关闭为私人物品，开启为公共物品；私人物品仅负责人可编辑，请谨慎调整。</div>
   </div>
 
   <div class="mb-3">
@@ -518,6 +497,29 @@
       }
     });
     renderSummary();
+  })();
+
+  (function initItemOwnershipSwitch() {
+    const switchInput = document.getElementById('itemOwnershipSwitch');
+    const valueInput = document.getElementById('itemOwnershipValue');
+    const label = document.getElementById('itemOwnershipLabel');
+    if (!switchInput || !valueInput || !label) {
+      return;
+    }
+    const sync = function () {
+      const isPublic = switchInput.checked;
+      const value = isPublic ? '公共' : '私人';
+      valueInput.value = value;
+      label.textContent = value;
+      label.classList.remove('badge-item-feature-public', 'badge-item-feature-private');
+      if (isPublic) {
+        label.classList.add('badge-item-feature-public');
+      } else {
+        label.classList.add('badge-item-feature-private');
+      }
+    };
+    switchInput.addEventListener('change', sync);
+    sync();
   })();
 </script>
 {% endblock %}

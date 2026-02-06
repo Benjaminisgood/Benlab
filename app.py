@@ -746,22 +746,6 @@ def _member_display_key(member):
     return (name, member.id or 0)
 
 
-def _ensure_item_responsible_members(item):
-    """Backfill legacy responsible relationship using responsible_id if needed."""
-    if not item:
-        return False
-    members = list(getattr(item, 'responsible_members', []) or [])
-    if members:
-        return False
-    legacy_id = getattr(item, 'responsible_id', None)
-    if not legacy_id:
-        return False
-    legacy_member = db.session.get(Member, legacy_id)
-    if not legacy_member:
-        return False
-    item.assign_responsible_members([legacy_member])
-    return True
-
 def determine_media_kind(ref):
     """Return media kind string for the given filename or URL."""
     ext = _extract_file_extension(ref)
@@ -785,15 +769,32 @@ _ITEM_FEATURE_INTENTS = {
     '公共': 'public',
     '私人': 'private'
 }
-_STOCK_STATUS_INTENTS = {
-    '充足': 'positive',
+_ITEM_STOCK_STATUS_CHOICES = ('正常', '少量', '用完', '借出', '舍弃')
+_ITEM_STOCK_STATUS_INTENTS = {
+    '正常': 'positive',
     '少量': 'warning',
     '用完': 'critical',
-    '舍弃': 'muted',
-    '闲置': 'muted',
     '借出': 'info',
-    '待售': 'warning',
-    '售出': 'muted'
+    '舍弃': 'muted'
+}
+_ITEM_ALERT_STOCK_STATUSES = ('用完', '少量', '借出')
+_ITEM_ALERT_STATUS_PRIORITY = {
+    status: idx for idx, status in enumerate(_ITEM_ALERT_STOCK_STATUSES)
+}
+_ITEM_ALERT_LEVELS = {
+    '用完': 'danger',
+    '少量': 'warning',
+    '借出': 'warning'
+}
+_ITEM_ALERT_ACTION_LABELS = {
+    '用完': '补货处理',
+    '少量': '补货处理',
+    '借出': '借出跟进'
+}
+_ITEM_ALERT_MESSAGE_TEMPLATES = {
+    '用完': '你有 {count} 个库存用完的物品，请立即补货！',
+    '少量': '你有 {count} 个库存少量的物品，建议尽快补货。',
+    '借出': '你有 {count} 个借出中的物品，请及时跟进归还。'
 }
 _MEMBER_RELATION_TYPES = {
     'study': '上学',
@@ -830,6 +831,14 @@ _LOCATION_USAGE_CHOICES = [
 ]
 _LOCATION_USAGE_KEYS = {key for key, _ in _LOCATION_USAGE_CHOICES}
 _LOCATION_USAGE_LABELS = dict(_LOCATION_USAGE_CHOICES)
+_LOCATION_USAGE_LABEL_TO_KEY = {label: key for key, label in _LOCATION_USAGE_CHOICES}
+_LOCATION_USAGE_REF_LABEL = '用途'
+_LOCATION_STATUS_CHOICES = ('正常', '脏', '报修', '危险', '禁止')
+_LOCATION_STATUS_INTENTS = {
+    '正常': 'positive',
+    '禁止': 'neutral'
+}
+_LOCATION_DIRTY_STATUS_VALUES = {'脏', '报修', '危险'}
 
 
 def _ensure_string(value):
@@ -937,15 +946,68 @@ def _feature_intent(value):
     return _ITEM_FEATURE_INTENTS.get(value, 'neutral')
 
 
+def _normalize_item_stock_status(value):
+    """Return normalized item stock status, or None when empty/invalid."""
+    status = _ensure_string(value).strip()
+    if not status:
+        return None
+    return status if status in _ITEM_STOCK_STATUS_CHOICES else None
+
+
+def _is_item_alert_status(value):
+    """Return whether item stock status should trigger reminder."""
+    status = _normalize_item_stock_status(value)
+    return status in _ITEM_ALERT_STOCK_STATUSES
+
+
+def _item_alert_level(value):
+    status = _normalize_item_stock_status(value)
+    return _ITEM_ALERT_LEVELS.get(status, 'warning')
+
+
+def _item_alert_action_label(value):
+    status = _normalize_item_stock_status(value)
+    return _ITEM_ALERT_ACTION_LABELS.get(status, '处理')
+
+
+def _item_alert_message(value, count):
+    status = _normalize_item_stock_status(value)
+    template = _ITEM_ALERT_MESSAGE_TEMPLATES.get(status)
+    if not template:
+        return ''
+    return template.format(count=count)
+
+
 def _stock_status_intent(value):
     """Return semantic intent token for inventory stock status badges/rows."""
-    if not value:
+    status = _normalize_item_stock_status(value)
+    if not status:
         return 'neutral'
-    tokens = [segment.strip() for segment in str(value).split(',') if segment.strip()]
-    for token in tokens:
-        if token in _STOCK_STATUS_INTENTS:
-            return _STOCK_STATUS_INTENTS[token]
-    return 'neutral'
+    return _ITEM_STOCK_STATUS_INTENTS.get(status, 'neutral')
+
+
+def _normalize_location_status(value):
+    """Return normalized location status, or None when empty/invalid."""
+    status = _ensure_string(value).strip()
+    if not status:
+        return None
+    return status if status in _LOCATION_STATUS_CHOICES else None
+
+
+def _is_location_dirty_status(value):
+    """Return whether location status should be treated as critical."""
+    normalized = _normalize_location_status(value)
+    return normalized in _LOCATION_DIRTY_STATUS_VALUES
+
+
+def _location_status_intent(value):
+    """Return semantic intent token for location status badges/rows."""
+    normalized = _normalize_location_status(value)
+    if not normalized:
+        return 'neutral'
+    if normalized in _LOCATION_DIRTY_STATUS_VALUES:
+        return 'critical'
+    return _LOCATION_STATUS_INTENTS.get(normalized, 'neutral')
 
 
 def _collect_detail_refs_from_form(form):
@@ -968,60 +1030,49 @@ def _collect_detail_refs_from_form(form):
     return []
 
 
-def _parse_location_notes(raw):
-    empty = {
-        'description': '',
-        'usage_tags': [],
-        'access_info': '',
-        'is_public': False
-    }
-    if not raw:
-        return empty, False
-    if isinstance(raw, dict):
-        data = raw
-    else:
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
-            empty['description'] = _ensure_string(raw)
-            return empty, False
-    if isinstance(data, dict) and 'description' in data:
-        description = _ensure_string(data.get('description'))
-        usage_raw = data.get('usage_tags') or []
-        usage_tags = []
-        if isinstance(usage_raw, list):
-            for tag in usage_raw:
-                tag = _ensure_string(tag)
-                if tag in _LOCATION_USAGE_KEYS:
-                    usage_tags.append(tag)
-        access_info = _ensure_string(data.get('access_info'))
-        is_public = bool(data.get('is_public'))
-        meta = {
-            'description': description,
-            'usage_tags': usage_tags,
-            'access_info': access_info,
-            'is_public': is_public
-        }
-        return meta, True
-    empty['description'] = _ensure_string(raw if isinstance(raw, str) else '')
-    return empty, False
-
-
-def _serialize_location_notes(meta):
-    payload = {
-        'description': _ensure_string(meta.get('description')),
-        'usage_tags': [],
-        'access_info': _ensure_string(meta.get('access_info')),
-        'is_public': bool(meta.get('is_public'))
-    }
-    usage_tags = meta.get('usage_tags') or []
+def _extract_usage_tags_from_detail_refs(entries):
+    tags = []
     seen = set()
-    for tag in usage_tags:
-        tag = _ensure_string(tag)
-        if tag in _LOCATION_USAGE_KEYS and tag not in seen:
-            payload['usage_tags'].append(tag)
-            seen.add(tag)
-    return json.dumps(payload, ensure_ascii=False)
+    for entry in entries or []:
+        if not isinstance(entry, dict):
+            continue
+        label = _ensure_string(entry.get('label')).strip()
+        value = _ensure_string(entry.get('value')).strip()
+        if label != _LOCATION_USAGE_REF_LABEL or not value:
+            continue
+        key = _LOCATION_USAGE_LABEL_TO_KEY.get(value)
+        if key and key not in seen:
+            tags.append(key)
+            seen.add(key)
+    return tags
+
+
+def _strip_usage_tag_refs(entries):
+    cleaned = []
+    for entry in entries or []:
+        if not isinstance(entry, dict):
+            continue
+        label = _ensure_string(entry.get('label')).strip()
+        value = _ensure_string(entry.get('value')).strip()
+        if label == _LOCATION_USAGE_REF_LABEL and value in _LOCATION_USAGE_LABEL_TO_KEY:
+            continue
+        if value:
+            cleaned.append({'label': label, 'value': value})
+    return cleaned
+
+
+def _merge_usage_tags_into_detail_refs(entries, usage_tags):
+    merged = _strip_usage_tag_refs(entries)
+    seen = {entry['value'] for entry in merged if entry.get('value')}
+    for tag in usage_tags or []:
+        if tag not in _LOCATION_USAGE_KEYS:
+            continue
+        value = _LOCATION_USAGE_LABELS.get(tag)
+        if not value or value in seen:
+            continue
+        merged.append({'label': _LOCATION_USAGE_REF_LABEL, 'value': value})
+        seen.add(value)
+    return merged
 
 
 def _parse_profile_notes(raw):
@@ -2297,8 +2348,7 @@ class Item(db.Model):
     quantity = db.Column(db.Float)                 # ✅ 数量
     unit = db.Column(db.String(20))                # ✅ 单位（例如：瓶、包）
     purchase_date = db.Column(db.Date)             # ✅ 购入时间
-    responsible_id = db.Column(db.Integer, db.ForeignKey('members.id'))  # 负责人（成员ID）
-    primary_attachment = db.Column('image', db.String(200))          # 附件主文件名
+    primary_attachment = db.Column(db.String(200))          # 附件主文件名
     notes = db.Column(db.Text)                          # 备注说明
     last_modified = db.Column(db.DateTime, default=datetime.utcnow)  # 最后修改时间
     purchase_link = db.Column(db.String(200))           # 购买链接
@@ -2353,7 +2403,6 @@ class Item(db.Model):
             seen_ids.add(member.id)
         unique.sort(key=_member_display_key)
         self.responsible_members = unique
-        self.responsible_id = unique[0].id if unique else None
         return unique
 
     @property
@@ -2372,7 +2421,7 @@ class Location(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)    # 位置名称
     parent_id = db.Column(db.Integer, db.ForeignKey('locations.id'))  # 父级位置
-    clean_status = db.Column(db.String(20))
+    status = db.Column(db.String(20))
     latitude = db.Column(db.Float, index=True)
     longitude = db.Column(db.Float, index=True)
     coordinate_source = db.Column(db.String(20))
@@ -2381,8 +2430,10 @@ class Location(db.Model):
                             cascade='all, delete-orphan')
     # 多对多负责人
     # responsible_members 关系由 Member.responsible_locations 的 backref 提供
-    primary_attachment = db.Column('image', db.String(200))          # 位置附件主文件名
-    notes = db.Column(db.Text)                          # 备注
+    primary_attachment = db.Column(db.String(200))          # 位置附件主文件名
+    notes = db.Column(db.Text)                          # 备注（纯文本）
+    is_public = db.Column(db.Boolean, nullable=False, default=False, server_default='0')
+    detail_refs_raw = db.Column('detail_refs', db.Text)  # 参考信息集合（字符串）
     last_modified = db.Column(db.DateTime, default=datetime.utcnow)  # 最后修改时间
     logs = db.relationship('Log', backref='location', lazy=True)     # 操作日志
     detail_link = db.Column(db.String(200))
@@ -2406,6 +2457,23 @@ class Location(db.Model):
         if self.primary_attachment and self.primary_attachment not in seen:
             filenames.insert(0, self.primary_attachment)
         return filenames
+
+    @property
+    def detail_refs(self):
+        return _parse_item_detail_refs(self.detail_refs_raw)
+
+    def set_detail_refs(self, entries):
+        serialized, trimmed = _serialize_item_detail_refs(entries)
+        self.detail_refs_raw = serialized
+        return trimmed
+
+    @property
+    def usage_tags(self):
+        return _extract_usage_tags_from_detail_refs(self.detail_refs)
+
+    @property
+    def detail_refs_without_usage_tags(self):
+        return _strip_usage_tag_refs(self.detail_refs)
 
     def __repr__(self):
         return f'<Location {self.name}>'
@@ -2715,16 +2783,96 @@ with app.app_context():
     if 'locations' in table_names:
         existing_cols = {col['name'] for col in inspector.get_columns('locations')}
         alter_statements = []
+        has_location_status = 'status' in existing_cols
+        has_legacy_status_column = 'clean_status' in existing_cols
+        has_location_primary_attachment = 'primary_attachment' in existing_cols
+        has_legacy_location_image_column = 'image' in existing_cols
+        drop_legacy_location_image_column = has_location_primary_attachment and has_legacy_location_image_column
+        if not has_location_status:
+            if has_legacy_status_column:
+                try:
+                    with db.engine.begin() as conn:
+                        conn.execute(text('ALTER TABLE locations RENAME COLUMN clean_status TO status'))
+                    existing_cols.discard('clean_status')
+                    existing_cols.add('status')
+                    has_legacy_status_column = False
+                    has_location_status = True
+                except Exception:
+                    alter_statements.append('ALTER TABLE locations ADD COLUMN status VARCHAR(20)')
+                    has_location_status = True
+            else:
+                alter_statements.append('ALTER TABLE locations ADD COLUMN status VARCHAR(20)')
+                has_location_status = True
+        if not has_location_primary_attachment:
+            if has_legacy_location_image_column:
+                try:
+                    with db.engine.begin() as conn:
+                        conn.execute(text('ALTER TABLE locations RENAME COLUMN image TO primary_attachment'))
+                    existing_cols.discard('image')
+                    existing_cols.add('primary_attachment')
+                    has_location_primary_attachment = True
+                    has_legacy_location_image_column = False
+                except Exception:
+                    alter_statements.append('ALTER TABLE locations ADD COLUMN primary_attachment VARCHAR(200)')
+                    has_location_primary_attachment = True
+            else:
+                alter_statements.append('ALTER TABLE locations ADD COLUMN primary_attachment VARCHAR(200)')
+                has_location_primary_attachment = True
         if 'latitude' not in existing_cols:
             alter_statements.append('ALTER TABLE locations ADD COLUMN latitude REAL')
         if 'longitude' not in existing_cols:
             alter_statements.append('ALTER TABLE locations ADD COLUMN longitude REAL')
         if 'coordinate_source' not in existing_cols:
             alter_statements.append('ALTER TABLE locations ADD COLUMN coordinate_source VARCHAR(20)')
+        if 'is_public' not in existing_cols:
+            alter_statements.append('ALTER TABLE locations ADD COLUMN is_public BOOLEAN DEFAULT 0')
+        if 'detail_refs' not in existing_cols:
+            alter_statements.append('ALTER TABLE locations ADD COLUMN detail_refs TEXT')
         if alter_statements:
             with db.engine.begin() as conn:
                 for stmt in alter_statements:
                     conn.execute(text(stmt))
+        if has_legacy_status_column and has_location_status:
+            with db.engine.begin() as conn:
+                try:
+                    conn.execute(text('ALTER TABLE locations DROP COLUMN clean_status'))
+                except Exception:
+                    pass
+        if drop_legacy_location_image_column:
+            with db.engine.begin() as conn:
+                try:
+                    conn.execute(text('ALTER TABLE locations DROP COLUMN image'))
+                except Exception:
+                    pass
+        migrated_locations = False
+        legacy_locations = (
+            Location.query
+            .filter(Location.notes.isnot(None), Location.notes != '')
+            .all()
+        )
+        for loc in legacy_locations:
+            try:
+                payload = json.loads(loc.notes)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if not isinstance(payload, dict):
+                continue
+            if not any(key in payload for key in ('description', 'usage_tags', 'is_public')):
+                continue
+            loc.notes = _ensure_string(payload.get('description'))
+            if 'is_public' in payload:
+                loc.is_public = bool(payload.get('is_public'))
+            usage_tags = []
+            usage_raw = payload.get('usage_tags') or []
+            if isinstance(usage_raw, list):
+                for tag in usage_raw:
+                    tag = _ensure_string(tag)
+                    if tag in _LOCATION_USAGE_KEYS and tag not in usage_tags:
+                        usage_tags.append(tag)
+            loc.set_detail_refs(_merge_usage_tags_into_detail_refs(loc.detail_refs, usage_tags))
+            migrated_locations = True
+        if migrated_locations:
+            db.session.commit()
     if 'logs' in table_names:
         log_cols = {col['name'] for col in inspector.get_columns('logs')}
         if 'event_id' not in log_cols:
@@ -2745,15 +2893,36 @@ with app.app_context():
                 conn.execute(text('ALTER TABLE events ADD COLUMN allow_participant_edit BOOLEAN DEFAULT 0'))
     if 'items' in table_names:
         item_cols = {col['name'] for col in inspector.get_columns('items')}
+        item_alter_statements = []
+        has_item_primary_attachment = 'primary_attachment' in item_cols
+        has_legacy_item_image_column = 'image' in item_cols
+        if not has_item_primary_attachment:
+            if has_legacy_item_image_column:
+                try:
+                    with db.engine.begin() as conn:
+                        conn.execute(text('ALTER TABLE items RENAME COLUMN image TO primary_attachment'))
+                    item_cols.discard('image')
+                    item_cols.add('primary_attachment')
+                    has_legacy_item_image_column = False
+                except Exception:
+                    item_alter_statements.append('ALTER TABLE items ADD COLUMN primary_attachment VARCHAR(200)')
+            else:
+                item_alter_statements.append('ALTER TABLE items ADD COLUMN primary_attachment VARCHAR(200)')
+        elif has_legacy_item_image_column:
+            item_alter_statements.append('ALTER TABLE items DROP COLUMN image')
         if 'detail_refs' not in item_cols:
-            with db.engine.begin() as conn:
-                conn.execute(text('ALTER TABLE items ADD COLUMN detail_refs TEXT'))
+            item_alter_statements.append('ALTER TABLE items ADD COLUMN detail_refs TEXT')
+        if 'responsible_id' in item_cols:
+            item_alter_statements.append('ALTER TABLE items DROP COLUMN responsible_id')
         if 'detail_links' in item_cols:
+            item_alter_statements.append('ALTER TABLE items DROP COLUMN detail_links')
+        if item_alter_statements:
             with db.engine.begin() as conn:
-                conn.execute(text(
-                    'UPDATE items SET detail_refs = detail_links '
-                    'WHERE detail_refs IS NULL AND detail_links IS NOT NULL'
-                ))
+                for stmt in item_alter_statements:
+                    try:
+                        conn.execute(text(stmt))
+                    except Exception:
+                        pass
     if Member.query.count() == 0:
         default_user = Member(name="Admin User", username="admin", contact="admin@example.com", notes="Default admin user")
         default_user.set_password("admin")
@@ -3814,12 +3983,6 @@ def items():
         .order_by(func.lower(Item.name))
         .all()
     )
-    migrated = False
-    for item in items_list:
-        if _ensure_item_responsible_members(item):
-            migrated = True
-    if migrated:
-        db.session.commit()
     event_counts = dict(
         db.session.query(
             event_items.c.item_id,
@@ -3847,8 +4010,6 @@ def item_detail(item_id):
         ).get_or_404(item_id)
     )
     _sync_attachments_async(item.attachment_filenames)
-    if _ensure_item_responsible_members(item):
-        db.session.commit()
     events = (
         Event.query
         .join(event_items)
@@ -3914,11 +4075,14 @@ def add_item():
         # 获取表单数据
         name = request.form.get('name')
         category = request.form.get('category')
-        stock_status = request.form.get('stock_status')  # ✅ 单选字段
+        stock_status = _normalize_item_stock_status(request.form.get('stock_status'))
+        if not stock_status:
+            flash('请选择有效的物品状态。', 'danger')
+            return redirect(request.url)
         feature_raw = request.form.get('features')
         features_str = _normalize_item_feature(feature_raw)  # 统一为公共/私人
         if not features_str:
-            flash('请选择物品特性（公共或私人）。', 'danger')
+            flash('请选择物品归属（公共或私人）。', 'danger')
             return redirect(request.url)
 
         value = request.form.get('value')
@@ -3972,7 +4136,6 @@ def add_item():
             quantity=quantity,
             unit=unit,
             purchase_date=purchase_date,
-            responsible_id=None,
             notes=notes,
             purchase_link=purchase_link,
             primary_attachment=primary_attachment
@@ -4030,15 +4193,14 @@ def add_item():
         locations=locations,
         item=None,
         default_loc_id=default_loc_id,
-        categories=categories
+        categories=categories,
+        item_stock_status_choices=_ITEM_STOCK_STATUS_CHOICES
     )
 
 @app.route('/items/<int:item_id>/edit', methods=['GET', 'POST'])
 @login_required
 def edit_item(item_id):
     item = Item.query.get_or_404(item_id)
-    if _ensure_item_responsible_members(item):
-        db.session.commit()
     if item.features == '私人' and current_user not in item.responsible_members:
         abort(403)
     if request.method == 'POST':
@@ -4050,11 +4212,14 @@ def edit_item(item_id):
         if trimmed_refs:
             flash('部分参考信息过长，已保留前几条，请确认长度。', 'warning')
 
-        item.stock_status = request.form.get('stock_status')  # 单选库存状态
+        item.stock_status = _normalize_item_stock_status(request.form.get('stock_status'))
+        if not item.stock_status:
+            flash('请选择有效的物品状态。', 'danger')
+            return redirect(request.url)
         feature_raw = request.form.get('features')
-        features_str = _normalize_item_feature(feature_raw)          # 单选物品特性
+        features_str = _normalize_item_feature(feature_raw)          # 单选物品归属
         if not features_str:
-            flash('请选择物品特性（公共或私人）。', 'danger')
+            flash('请选择物品归属（公共或私人）。', 'danger')
             return redirect(request.url)
         item.features = features_str
         
@@ -4150,15 +4315,14 @@ def edit_item(item_id):
         members=members,
         locations=locations,
         item=item,
-        categories=categories
+        categories=categories,
+        item_stock_status_choices=_ITEM_STOCK_STATUS_CHOICES
     )
 
 @app.route('/items/<int:item_id>/delete', methods=['POST'])
 @login_required
 def delete_item(item_id):
     item = Item.query.get_or_404(item_id)
-    if _ensure_item_responsible_members(item):
-        db.session.commit()
     if item.features == '私人' and current_user not in item.responsible_members:
         abort(403)
     for fname in set(item.attachment_filenames):
@@ -4201,13 +4365,10 @@ def manage_item_category():
     added_items = []
     removed_items = []
     now = datetime.utcnow()
-    migration_needed = False
 
     if add_ids:
         candidates = Item.query.filter(Item.id.in_(add_ids)).all()
         for item in candidates:
-            if _ensure_item_responsible_members(item):
-                migration_needed = True
             if item.features == '私人' and current_user not in item.responsible_members:
                 continue
             if (item.category or '').strip():
@@ -4226,8 +4387,6 @@ def manage_item_category():
     if remove_ids:
         candidates = Item.query.filter(Item.id.in_(remove_ids)).all()
         for item in candidates:
-            if _ensure_item_responsible_members(item):
-                migration_needed = True
             if item.features == '私人' and current_user not in item.responsible_members:
                 continue
             if (item.category or '').strip() != category_name:
@@ -4244,8 +4403,6 @@ def manage_item_category():
             db.session.add(log)
 
     if not added_items and not removed_items:
-        if migration_needed:
-            db.session.commit()
         flash('没有物品符合调整条件', 'info')
         return redirect_target()
 
@@ -4271,11 +4428,9 @@ def locations_list():
             func.count(event_locations.c.event_id)
         ).group_by(event_locations.c.location_id).all()
     )
-    meta_map = {loc.id: _parse_location_notes(loc.notes)[0] for loc in locations}
     return render_template('locations.html',
                            locations=locations,
                            event_counts=event_counts,
-                           location_meta_map=meta_map,
                            location_usage_labels=_LOCATION_USAGE_LABELS)
 
 
@@ -4340,10 +4495,15 @@ def add_location():
     if request.method == 'POST':
         # 获取并保存新的位置记录
         name = request.form.get('name')
-        clean_status = request.form.get('clean_status') or None
+        status = _normalize_location_status(request.form.get('status'))
         parent_id = request.form.get('parent_id')
         responsible_ids = request.form.getlist('responsible_ids')
         detail_link = request.form.get('detail_link')
+        notes = request.form.get('notes') or ''
+        is_public = request.form.get('is_public') in {'1', 'on', 'true', 'yes'}
+        usage_tags = [tag for tag in request.form.getlist('usage_tags') if tag in _LOCATION_USAGE_KEYS]
+        detail_refs = _collect_detail_refs_from_form(request.form)
+        detail_refs = _merge_usage_tags_into_detail_refs(detail_refs, usage_tags)
         latitude = _parse_coordinate(request.form.get('latitude'))
         longitude = _parse_coordinate(request.form.get('longitude'))
         coordinate_source = request.form.get('coordinate_source') or None
@@ -4351,17 +4511,6 @@ def add_location():
             latitude = None
             longitude = None
             coordinate_source = None
-        is_public = request.form.get('is_public') in {'1', 'on', 'true', 'yes'}
-        usage_tags = [tag for tag in request.form.getlist('usage_tags') if tag in _LOCATION_USAGE_KEYS]
-        description = request.form.get('description') or ''
-        access_info = request.form.get('access_info') or ''
-        notes_meta = {
-            'description': description,
-            'usage_tags': usage_tags,
-            'access_info': access_info,
-            'is_public': is_public
-        }
-        serialized_notes = _serialize_location_notes(notes_meta)
 
         uploaded_files = request.files.getlist('attachments')
 
@@ -4377,14 +4526,16 @@ def add_location():
         new_loc = Location(
             name=name,
             parent_id=parent_id if parent_id else None,
-            notes=serialized_notes,
+            notes=notes,
+            is_public=is_public,
             primary_attachment=primary_attachment,
-            clean_status=clean_status,
+            status=status,
             detail_link=detail_link,
             latitude=latitude,
             longitude=longitude,
             coordinate_source=coordinate_source
         )
+        trimmed_refs = new_loc.set_detail_refs(detail_refs)
         db.session.add(new_loc)
         existing_refs = set()
         for fname in saved_refs:
@@ -4409,18 +4560,21 @@ def add_location():
         db.session.add(log)
         db.session.commit()
 
+        if trimmed_refs:
+            flash('部分参考信息过长，已保留前几条，请确认长度。', 'warning')
         flash('社区空间已添加', 'success')
         return redirect(url_for('locations_list'))
     
     members = Member.query.all()
     parents = Location.query.all()
-    default_meta, _ = _parse_location_notes(None)
     return render_template('location_form.html',
                            members=members,
                            location=None,
                            parents=parents,
-                           location_meta=default_meta,
-                           location_usage_choices=_LOCATION_USAGE_CHOICES)
+                           selected_usage_tags=[],
+                           editable_detail_refs=[],
+                           location_usage_choices=_LOCATION_USAGE_CHOICES,
+                           location_status_choices=_LOCATION_STATUS_CHOICES)
 
 @app.route('/locations/<int:loc_id>/edit', methods=['GET', 'POST'])
 @login_required
@@ -4428,7 +4582,6 @@ def edit_location(loc_id):
     location = Location.query.get_or_404(loc_id)
     if location.responsible_members and current_user not in location.responsible_members:
         abort(403)
-    current_meta, _ = _parse_location_notes(location.notes)
     if request.method == 'POST':
         # 更新位置信息
         location.name = request.form.get('name')
@@ -4444,7 +4597,12 @@ def edit_location(loc_id):
         location.parent_id = parent_id
         responsible_ids = request.form.getlist('responsible_ids')
         detail_link = request.form.get('detail_link')
-        location.clean_status = request.form.get('clean_status') or None
+        location.notes = request.form.get('notes') or ''
+        location.is_public = request.form.get('is_public') in {'1', 'on', 'true', 'yes'}
+        usage_tags = [tag for tag in request.form.getlist('usage_tags') if tag in _LOCATION_USAGE_KEYS]
+        detail_refs = _collect_detail_refs_from_form(request.form)
+        detail_refs = _merge_usage_tags_into_detail_refs(detail_refs, usage_tags)
+        location.status = _normalize_location_status(request.form.get('status'))
         latitude = _parse_coordinate(request.form.get('latitude'))
         longitude = _parse_coordinate(request.form.get('longitude'))
         coordinate_source = request.form.get('coordinate_source') or None
@@ -4494,22 +4652,12 @@ def edit_location(loc_id):
             location.primary_attachment = location.attachments[0].filename
         elif remove_primary:
             location.primary_attachment = None
-        is_public = request.form.get('is_public') in {'1', 'on', 'true', 'yes'}
-        usage_tags = [tag for tag in request.form.getlist('usage_tags') if tag in _LOCATION_USAGE_KEYS]
-        description = request.form.get('description') or ''
-        access_info = request.form.get('access_info') or ''
-        notes_meta = {
-            'description': description,
-            'usage_tags': usage_tags,
-            'access_info': access_info,
-            'is_public': is_public
-        }
-        location.notes = _serialize_location_notes(notes_meta)
+        trimmed_refs = location.set_detail_refs(detail_refs)
         # 多负责人
         member_objs = []
         if responsible_ids:
             member_objs = Member.query.filter(Member.id.in_([int(mid) for mid in responsible_ids])).all()
-        if not member_objs and not is_public:
+        if not member_objs and not location.is_public:
             member_objs = [current_user]
         location.responsible_members = member_objs
         location.detail_link = detail_link
@@ -4523,6 +4671,8 @@ def edit_location(loc_id):
         log = Log(user_id=current_user.id, location_id=location.id, action_type="修改位置", details=f"Edited location {location.name}")
         db.session.add(log)
         db.session.commit()
+        if trimmed_refs:
+            flash('部分参考信息过长，已保留前几条，请确认长度。', 'warning')
         flash('空间信息已更新', 'success')
         return redirect(url_for('locations_list'))
     members = Member.query.all()
@@ -4531,8 +4681,10 @@ def edit_location(loc_id):
                            members=members,
                            location=location,
                            parents=parents,
-                           location_meta=current_meta,
-                           location_usage_choices=_LOCATION_USAGE_CHOICES)
+                           selected_usage_tags=location.usage_tags,
+                           editable_detail_refs=location.detail_refs_without_usage_tags,
+                           location_usage_choices=_LOCATION_USAGE_CHOICES,
+                           location_status_choices=_LOCATION_STATUS_CHOICES)
 
 @app.route('/locations/<int:loc_id>/delete', methods=['POST'])
 @login_required
@@ -4558,25 +4710,16 @@ def view_location(loc_id):
     _sync_attachments_async(location.attachment_filenames)
     # 获取该位置包含的所有物品（多对多）
     items_at_location = sorted(location.items, key=lambda item: item.name.lower())
-    migrated = False
-    for item in items_at_location:
-        if _ensure_item_responsible_members(item):
-            migrated = True
-    if migrated:
-        db.session.commit()
-    # 分类统计状态标签（如：用完、少量、充足）
+    # 分类统计状态标签（如：用完、少量、借出）
     status_counter = Counter()
     category_counter = Counter()
     feature_counter = Counter()
     responsible_counter = Counter()
     responsible_map = {}
     for item in items_at_location:
-        if item.stock_status:
-            statuses = item.stock_status.split(',')  # 支持多个状态
-            for s in statuses:
-                label = s.strip()
-                if label:
-                    status_counter[label] += 1
+        item_status = _normalize_item_stock_status(item.stock_status)
+        if item_status:
+            status_counter[item_status] += 1
         if item.category:
             category_counter[item.category.strip()] += 1
         if item.features:
@@ -4615,10 +4758,9 @@ def view_location(loc_id):
     )
     event_bundle = _build_event_summary(events)
 
-    location_meta, _ = _parse_location_notes(location.notes)
     usage_badges = [
         {'key': tag, 'label': _LOCATION_USAGE_LABELS.get(tag, tag)}
-        for tag in location_meta['usage_tags']
+        for tag in location.usage_tags
     ]
     relation_members = {}
     seen_pairs = set()
@@ -4668,7 +4810,6 @@ def view_location(loc_id):
                            unscheduled_events=event_bundle['unscheduled'],
                            recent_past_events=event_bundle['recent_past'],
                            past_events_total=event_bundle['past_total'],
-                           location_meta=location_meta,
                            location_usage_badges=usage_badges,
                            affiliation_summary=affiliation_summary,
                            affiliation_total=affiliation_total)
@@ -4790,29 +4931,48 @@ def profile(member_id):
 
     # 负责的物品
     all_items = list(member.items)
-    legacy_candidates = Item.query.filter_by(responsible_id=member.id).all()
-    migrated_items = False
-    for legacy_item in legacy_candidates:
-        if legacy_item not in all_items:
-            if _ensure_item_responsible_members(legacy_item):
-                migrated_items = True
-    if migrated_items:
-        db.session.commit()
-        all_items = list(member.items)
     # 负责的位置（多对多）
     all_locations = list(member.responsible_locations)
 
     # 分开“告警”和“正常”
-    critical_items = [it for it in all_items if it.stock_status and '用完' in it.stock_status]
-    normal_items = [it for it in all_items if not (it.stock_status and '用完' in it.stock_status)]
-    items_resp = critical_items + normal_items  # 用完的置顶
+    critical_items = [it for it in all_items if _is_item_alert_status(it.stock_status)]
+    critical_items.sort(
+        key=lambda it: (
+            _ITEM_ALERT_STATUS_PRIORITY.get(_normalize_item_stock_status(it.stock_status), 99),
+            (it.name or '').lower()
+        )
+    )
+    normal_items = [it for it in all_items if not _is_item_alert_status(it.stock_status)]
+    normal_items.sort(key=lambda it: (it.name or '').lower())
+    items_resp = critical_items + normal_items  # 告警状态的置顶
 
-    critical_locs = [loc for loc in all_locations if loc.clean_status == '脏/报修']
-    normal_locs = [loc for loc in all_locations if loc.clean_status != '脏/报修']
-    locations_resp = critical_locs + normal_locs  # 脏/报修的置顶
+    critical_locs = [loc for loc in all_locations if _is_location_dirty_status(loc.status)]
+    normal_locs = [loc for loc in all_locations if not _is_location_dirty_status(loc.status)]
+    locations_resp = critical_locs + normal_locs  # 卫生差/需报修/危险的置顶
 
-    any_item_empty = any(it.stock_status and '用完' in it.stock_status for it in items_resp)
-    any_location_dirty = any(loc.clean_status == '脏/报修' for loc in locations_resp)
+    item_alert_counts = {status: 0 for status in _ITEM_ALERT_STOCK_STATUSES}
+    item_alert_samples = {status: [] for status in _ITEM_ALERT_STOCK_STATUSES}
+    for item in critical_items:
+        status = _normalize_item_stock_status(item.stock_status)
+        if not status:
+            continue
+        item_alert_counts[status] += 1
+        if len(item_alert_samples[status]) < 3:
+            item_alert_samples[status].append(item)
+    item_alerts = []
+    for status in _ITEM_ALERT_STOCK_STATUSES:
+        count = item_alert_counts.get(status, 0)
+        if count <= 0:
+            continue
+        item_alerts.append({
+            'status': status,
+            'count': count,
+            'level': _item_alert_level(status),
+            'action_label': _item_alert_action_label(status),
+            'message': _item_alert_message(status, count),
+            'sample_items': item_alert_samples.get(status, [])
+        })
+    any_location_dirty = any(_is_location_dirty_status(loc.status) for loc in locations_resp)
     items_preview = items_resp[:5]
     items_extra = items_resp[5:]
     locations_preview = locations_resp[:5]
@@ -4948,7 +5108,7 @@ def profile(member_id):
                            items_extra=items_extra,
                            locations_preview=locations_preview,
                            locations_extra=locations_extra,
-                           any_item_empty=any_item_empty,
+                           item_alerts=item_alerts,
                            any_location_dirty=any_location_dirty,
                            events_upcoming=events_upcoming,
                            events_past=events_past,
@@ -5228,7 +5388,14 @@ def inject_attachment_helpers():
         media_display_name=media_display_name,
         direct_upload_config=_build_direct_upload_config(),
         feature_intent=_feature_intent,
+        normalize_item_stock_status=_normalize_item_stock_status,
         stock_status_intent=_stock_status_intent,
+        is_item_alert_status=_is_item_alert_status,
+        item_alert_action_label=_item_alert_action_label,
+        item_alert_level=_item_alert_level,
+        normalize_location_status=_normalize_location_status,
+        location_status_intent=_location_status_intent,
+        is_location_dirty=_is_location_dirty_status,
     )
 
 if __name__ == "__main__":

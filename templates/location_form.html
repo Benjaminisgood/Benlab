@@ -1,33 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 {% set form_id = 'locationForm' %}
-<style>
-  .card-select {
-    border: 1px solid var(--bs-border-color);
-    transition: all .12s ease-in-out;
-  }
-  .btn-check:checked + .card-select {
-    border-color: rgba(var(--bs-primary-rgb, 13, 110, 253), 0.9);
-    background-color: var(--bs-primary-bg-subtle, rgba(var(--bs-primary-rgb, 13, 110, 253), 0.08));
-    box-shadow: 0 .35rem 1rem rgba(var(--bs-primary-rgb, 13, 110, 253), 0.25);
-  }
-  .btn-check:focus + .card-select {
-    outline: 2px solid rgba(var(--bs-primary-rgb, 13, 110, 253), 0.2);
-    outline-offset: 2px;
-  }
-  .card-select-mark { display: none; }
-  .btn-check:checked + .card-select .card-select-mark { display: inline-flex; align-items: center; gap: .25rem; }
-  .btn-check:checked + .card-select .card-select-hint { display: none; }
-  .card-select-surface {
-    background-color: var(--bs-body-bg);
-    color: var(--bs-body-color);
-  }
-  .selection-panel {
-    background-color: var(--bs-tertiary-bg, var(--bs-gray-100, #f8f9fa));
-    border: 1px solid var(--bs-border-color);
-    color: var(--bs-body-color);
-  }
-</style>
+{% set existing_detail_refs = editable_detail_refs if editable_detail_refs is defined else (location.detail_refs_without_usage_tags if location else []) %}
 <h4 class="mb-3">{{ location and '编辑空间' or '新增空间' }}</h4>
 <form method="post" id="{{ form_id }}" enctype="multipart/form-data" action="{% if location %}{{ url_for('edit_location', loc_id=location.id) }}{% else %}{{ url_for('add_location') }}{% endif %}">
   <div class="mb-3">
@@ -42,7 +16,7 @@
         管理负责人
       </button>
     </div>
-    <div class="form-text text-muted">公共空间可不指定负责人；若为空且未标记为公共空间，将默认由当前用户负责。</div>
+    <div class="form-text text-muted">私人空间若未指定负责人，将默认由当前编辑者负责。</div>
   </div>
   <div class="mb-3">
     <label for="detail_link" class="form-label">详情链接</label>
@@ -53,18 +27,18 @@
   <div class="mb-3">
     <div class="form-check form-switch mb-2">
       <input class="form-check-input" type="checkbox" role="switch" id="isPublicSwitch" name="is_public"
-             {% if location_meta.is_public %}checked{% endif %}>
-      <label class="form-check-label" for="isPublicSwitch">公共空间（无需明确负责人，可由社区共同维护）</label>
+             {% if location and location.is_public %}checked{% endif %}>
+      <label class="form-check-label" for="isPublicSwitch">公共空间（开启后将作为公共空间展示）</label>
     </div>
-    <label class="form-label d-block">空间属性</label>
+    <label class="form-label d-block">用途标签（会存入参考信息）</label>
     <div class="d-flex flex-wrap gap-2">
       {% for value, label in location_usage_choices %}
         <input class="btn-check" type="checkbox" id="usageTag{{ loop.index }}" name="usage_tags" value="{{ value }}"
-               autocomplete="off" {% if value in location_meta.usage_tags %}checked{% endif %}>
+               autocomplete="off" {% if value in selected_usage_tags %}checked{% endif %}>
         <label class="btn btn-outline-primary btn-sm rounded-pill px-3" for="usageTag{{ loop.index }}">{{ label }}</label>
       {% endfor %}
     </div>
-    <div class="form-text text-muted">用于描述空间的主要用途，可多选；示例：学习空间、休闲娱乐、活动场地、储物空间、旅游推荐等。</div>
+    <div class="form-text text-muted">可多选；保存后会作为“用途”条目写入参考信息。</div>
   </div>
   <div class="mb-3">
     <label class="form-label">上级空间（可选）</label>
@@ -197,34 +171,59 @@
     <img id="imgPreview" src="#" alt="预览" style="max-width: 120px; display: none; margin-top: 5px;">
   </div>
   <div class="mb-3">
-    <label for="description" class="form-label">空间简介</label>
-    <textarea class="form-control" id="description" name="description" rows="3"
-              placeholder="简要介绍空间的特色、可开展的活动等">{{ location_meta.description }}</textarea>
+    <label for="notes" class="form-label">备注</label>
+    <textarea class="form-control" id="notes" name="notes" rows="3"
+              placeholder="填写地点说明、注意事项等">{{ location.notes if location else '' }}</textarea>
   </div>
-  <div class="mb-3">
-    <label for="access_info" class="form-label">出入说明</label>
-    <input type="text" class="form-control" id="access_info" name="access_info"
-           value="{{ location_meta.access_info }}" placeholder="如：需提前预约 / 仅周末开放 / 联系前台办理通行证">
-  </div>
-  {% set loc_adv_open = location and location.clean_status %}
+  {% set loc_adv_open = location and ((existing_detail_refs and existing_detail_refs|length > 0) or location.status) %}
   <div class="accordion mb-3" id="locationAdvancedAccordion">
     <div class="accordion-item">
       <h2 class="accordion-header" id="locationAdvancedHeader">
         <button class="accordion-button {% if not loc_adv_open %}collapsed{% endif %}" type="button"
                 data-bs-toggle="collapse" data-bs-target="#locationAdvancedSection"
                 aria-expanded="{{ 'true' if loc_adv_open else 'false' }}" aria-controls="locationAdvancedSection">
-          更多属性
+          更多属性（参考信息 / 状态）
         </button>
       </h2>
       <div id="locationAdvancedSection" class="accordion-collapse collapse {% if loc_adv_open %}show{% endif %}"
            data-bs-parent="#locationAdvancedAccordion">
         <div class="accordion-body">
+          <div class="mb-3">
+            <div class="d-flex justify-content-between align-items-center">
+              <label class="form-label mb-0">参考信息</label>
+              <button type="button" class="btn btn-sm btn-outline-secondary" id="addLocationDetailRefBtn">新增条目</button>
+            </div>
+            <div id="locationDetailRefsContainer" class="d-flex flex-column gap-2 mt-2">
+              {% if existing_detail_refs %}
+                {% for ref in existing_detail_refs %}
+                <div class="input-group location-detail-ref-row">
+                  <span class="input-group-text">说明</span>
+                  <input type="text" class="form-control" name="detail_ref_label" value="{{ ref.label }}" placeholder="例如：路线 / 预约 / 编号">
+                  <span class="input-group-text">内容</span>
+                  <input type="text" class="form-control" name="detail_ref_value" value="{{ ref.value }}" placeholder="编号 / 链接 / 任意文本">
+                  <button class="btn btn-outline-danger location-detail-ref-remove" type="button">&times;</button>
+                </div>
+                {% endfor %}
+              {% else %}
+                <div class="input-group location-detail-ref-row">
+                  <span class="input-group-text">说明</span>
+                  <input type="text" class="form-control" name="detail_ref_label" placeholder="例如：路线 / 预约 / 编号">
+                  <span class="input-group-text">内容</span>
+                  <input type="text" class="form-control" name="detail_ref_value" placeholder="编号 / 链接 / 任意文本">
+                  <button class="btn btn-outline-danger location-detail-ref-remove" type="button">&times;</button>
+                </div>
+              {% endif %}
+            </div>
+            <div class="form-text">可录入链接、编号、规则或任何补充信息。</div>
+          </div>
           <div class="mb-0">
-            <label for="clean_status" class="form-label">状态</label>
-            <select name="clean_status" class="form-select">
+            <label for="status" class="form-label">状态</label>
+            {% set status_choices = location_status_choices if location_status_choices is defined else ['正常', '脏', '报修', '危险', '禁止'] %}
+            {% set selected_status = normalize_location_status(location.status) if location else '' %}
+            <select name="status" id="status" class="form-select">
               <option value="">-- 请选择 --</option>
-              {% for opt in ['干净', '一般', '脏/报修/危险'] %}
-                <option value="{{ opt }}" {% if location and location.clean_status == opt %}selected{% endif %}>{{ opt }}</option>
+              {% for opt in status_choices %}
+                <option value="{{ opt }}" {% if selected_status == opt %}selected{% endif %}>{{ opt }}</option>
               {% endfor %}
             </select>
           </div>
@@ -248,7 +247,7 @@
                      id="locationResp{{ m.id }}" data-label="{{ m.name or m.username }}"
                      {% if location and m in location.responsible_members %}
                        checked
-                     {% elif not location and not location_meta.is_public and m.id == current_user.id %}
+                     {% elif not location and m.id == current_user.id %}
                        checked
                      {% endif %}>
               <label class="card-select card-select-surface d-flex justify-content-between align-items-center w-100 p-3 border rounded-3 shadow-sm" for="locationResp{{ m.id }}">
@@ -357,6 +356,55 @@
       }
     });
   }
+
+  (function registerLocationDetailRefEditor() {
+    const container = document.getElementById('locationDetailRefsContainer');
+    const addBtn = document.getElementById('addLocationDetailRefBtn');
+    if (!container || !addBtn) {
+      return;
+    }
+    const createRow = function (labelValue, refValue) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'input-group location-detail-ref-row';
+      wrapper.innerHTML = `
+        <span class="input-group-text">说明</span>
+        <input type="text" class="form-control" name="detail_ref_label" placeholder="例如：路线 / 预约 / 编号">
+        <span class="input-group-text">内容</span>
+        <input type="text" class="form-control" name="detail_ref_value" placeholder="编号 / 链接 / 任意文本">
+        <button class="btn btn-outline-danger location-detail-ref-remove" type="button">&times;</button>
+      `;
+      const labelInput = wrapper.querySelector('input[name="detail_ref_label"]');
+      const valueInput = wrapper.querySelector('input[name="detail_ref_value"]');
+      if (labelValue) {
+        labelInput.value = labelValue;
+      }
+      if (refValue) {
+        valueInput.value = refValue;
+      }
+      wrapper.querySelector('.location-detail-ref-remove').addEventListener('click', function () {
+        if (container.children.length > 1) {
+          wrapper.remove();
+        } else {
+          labelInput.value = '';
+          valueInput.value = '';
+        }
+      });
+      return wrapper;
+    };
+    addBtn.addEventListener('click', function () {
+      container.appendChild(createRow('', ''));
+    });
+    Array.prototype.slice.call(container.querySelectorAll('.location-detail-ref-row')).forEach(function (row) {
+      row.querySelector('.location-detail-ref-remove').addEventListener('click', function () {
+        if (container.children.length > 1) {
+          row.remove();
+        } else {
+          row.querySelector('input[name="detail_ref_label"]').value = '';
+          row.querySelector('input[name="detail_ref_value"]').value = '';
+        }
+      });
+    });
+  })();
 
   (function initResponsibleSelection() {
     const summary = document.getElementById('locationResponsibleSummary');

@@ -2,14 +2,30 @@
 {% block content %}
 
 {% macro render_location(loc, level=0) %}
-{% set loc_meta = location_meta_map.get(loc.id) %}
-{% set usage_tags = loc_meta.usage_tags if loc_meta else [] %}
-{% set is_public = loc_meta.is_public if loc_meta else False %}
-<tr class="indent-{{ level }}{% if level == 0 %} location-row-root{% endif %}">
+{% set usage_tags = loc.usage_tags %}
+{% set status = normalize_location_status(loc.status) %}
+{% set status_intent = location_status_intent(status) %}
+{% set is_dirty = is_location_dirty(status) %}
+{% set ownership_tone = 'public' if loc.is_public else 'private' %}
+{% set ownership_label = '公共' if loc.is_public else '私人' %}
+{% set usage_labels = [] %}
+{% for tag in usage_tags %}
+  {% set _ = usage_labels.append(location_usage_labels.get(tag, tag)) %}
+{% endfor %}
+{% set responsible_labels = [] %}
+{% for member in loc.responsible_members %}
+  {% set _ = responsible_labels.append(member.name or member.username) %}
+{% endfor %}
+{% set search_blob = loc.name ~ ' ' ~ ownership_label ~ ' ' ~ (status or '-') ~ ' ' ~ (usage_labels|join(' ')) ~ ' ' ~ (responsible_labels|join(' ')) %}
+<tr class="indent-{{ level }}{% if level == 0 %} location-row-root{% endif %}{% if is_dirty %} location-row-critical{% endif %}" data-search="{{ search_blob|lower }}">
   <td class="col-location-name">
     <div class="d-flex align-items-center flex-wrap gap-2">
       {% if level > 0 %}<span class="text-muted">↳</span>{% endif %}
       <a href="{{ url_for('view_location', loc_id=loc.id) }}">{{ loc.name }}</a>
+      <span class="badge badge-item-feature badge-item-feature-{{ ownership_tone }}">{{ ownership_label }}</span>
+      {% if status %}
+        <span class="badge {% if status_intent == 'critical' %}bg-danger{% elif status_intent == 'warning' %}bg-warning text-dark{% elif status_intent == 'positive' %}bg-success{% else %}bg-secondary{% endif %}">{{ status }}</span>
+      {% endif %}
     </div>
   </td>
   <td class="col-location-usage">
@@ -25,19 +41,15 @@
   </td>
   <td class="col-location-responsible">
     <div class="d-flex flex-wrap align-items-center gap-2">
-      {% if is_public %}
-        <span class="badge bg-success-subtle text-success-emphasis border">公共</span>
-      {% else %}
-        <span class="badge bg-secondary-subtle text-secondary-emphasis border">私人</span>
-      {% endif %}
+      <span class="badge badge-item-feature badge-item-feature-{{ ownership_tone }}">{{ ownership_label }}</span>
       {% if loc.responsible_members and loc.responsible_members|length > 0 %}
         <div class="d-flex flex-wrap align-items-center gap-2">
           {%- for member in loc.responsible_members %}
-            <a href="{{ url_for('profile', member_id=member.id) }}">{{ member.name }}</a>{% if not loop.last %}，{% endif %}
+            <a href="{{ url_for('profile', member_id=member.id) }}">{{ member.name or member.username }}</a>{% if not loop.last %}，{% endif %}
           {%- endfor %}
         </div>
-      {% elif is_public %}
-        <span class="text-muted">公共空间</span>
+      {% elif loc.is_public %}
+        <span class="text-muted">公共（社区共同维护）</span>
       {% else %}
         <span class="text-muted">-</span>
       {% endif %}
@@ -64,7 +76,7 @@
   <a href="{{ url_for('add_location') }}" class="btn btn-primary">新增空间</a>
 </div>
 <div class="position-relative mb-3">
-  <input type="text" id="filterInput" class="form-control" placeholder="按空间名称筛选 / 导航">
+  <input type="text" id="filterInput" class="form-control" placeholder="输入名称 / 用途 / 负责人 立即筛选">
   <div id="locationsSuggestions" class="list-group position-absolute w-100 shadow-sm d-none" style="z-index: 20;"></div>
 </div>
 <div class="table-responsive">
@@ -73,7 +85,7 @@
       <tr>
         <th class="col-location-name">名称</th>
         <th class="col-location-usage">用途</th>
-        <th class="col-location-responsible">负责人 / 空间性质</th>
+        <th class="col-location-responsible">负责人</th>
         <th class="col-location-actions text-end">操作</th>
       </tr>
     </thead>
@@ -81,16 +93,20 @@
       {% for loc in locations if not loc.parent_id %}
         {{ render_location(loc) }}
       {% endfor %}
-      {% if locations|length == 0 %}
-      <tr>
-        <td colspan="4" class="text-center text-muted">暂无空间记录</td>
+      <tr id="locationsNoResultRow" class="text-center text-muted {% if locations|length > 0 %}d-none{% endif %}">
+        <td colspan="4">{{ '暂无空间记录' if locations|length == 0 else '没有找到空间' }}</td>
       </tr>
-      {% endif %}
     </tbody>
   </table>
 </div>
 
 <style>
+  .location-row-critical td {
+    background-color: rgba(var(--bs-danger-rgb), 0.08) !important;
+  }
+  .location-row-critical td:first-child {
+    box-shadow: inset 3px 0 0 rgba(var(--bs-danger-rgb), 0.7);
+  }
   .indent-1 td { padding-left: 2rem; background-color: var(--location-indent-bg-1); }
   .indent-2 td { padding-left: 3rem; background-color: var(--location-indent-bg-2); }
   .indent-3 td { padding-left: 4rem; background-color: var(--location-indent-bg-3); }
@@ -101,29 +117,44 @@
 
 <script>
   (function () {
-    const input = document.getElementById('filterInput');
-    const tableRows = document.querySelectorAll('#locationsTable tbody tr');
-    const suggestionBox = document.getElementById('locationsSuggestions');
-    let debounceTimer = null;
-    let currentAbort = null;
+    var input = document.getElementById('filterInput');
+    var suggestionBox = document.getElementById('locationsSuggestions');
+    var tableRows = Array.prototype.slice.call(document.querySelectorAll('#locationsTable tbody tr[data-search]'));
+    var emptyRow = document.getElementById('locationsNoResultRow');
+    var debounceTimer = null;
+    var currentAbort = null;
 
-    function filterTable(value) {
-      const filterValue = value.toLowerCase();
-      tableRows.forEach(row => {
-        const nameCell = row.querySelector('td:first-child a');
-        if (!nameCell) {
+    function applyFilter(value) {
+      var normalized = value.trim().toLowerCase();
+      var visibleCount = 0;
+      tableRows.forEach(function (row) {
+        if (!normalized) {
+          row.classList.remove('d-none');
+          visibleCount += 1;
           return;
         }
-        const text = nameCell.textContent.toLowerCase();
-        row.style.display = text.includes(filterValue) ? '' : 'none';
+        var haystack = row.getAttribute('data-search') || '';
+        if (haystack.indexOf(normalized) !== -1) {
+          row.classList.remove('d-none');
+          visibleCount += 1;
+        } else {
+          row.classList.add('d-none');
+        }
       });
+      if (emptyRow) {
+        if (tableRows.length === 0) {
+          emptyRow.classList.remove('d-none');
+        } else {
+          emptyRow.classList.toggle('d-none', visibleCount > 0);
+        }
+      }
     }
 
     async function updateSuggestions(value) {
       if (!suggestionBox) {
         return;
       }
-      const trimmed = value.trim();
+      var trimmed = value.trim();
       if (currentAbort) {
         currentAbort.abort();
         currentAbort = null;
@@ -133,37 +164,39 @@
         suggestionBox.innerHTML = '';
         return;
       }
-      const abortController = new AbortController();
+      var abortController = new AbortController();
       currentAbort = abortController;
       try {
-        const resp = await fetch(`{{ url_for('search_locations') }}?q=${encodeURIComponent(trimmed)}`, { signal: abortController.signal });
+        var resp = await fetch(`{{ url_for('search_locations') }}?q=${encodeURIComponent(trimmed)}`, { signal: abortController.signal });
         if (!resp.ok) {
           throw new Error('Search failed');
         }
-        const data = await resp.json();
+        var data = await resp.json();
         suggestionBox.innerHTML = '';
         if (!Array.isArray(data) || data.length === 0) {
           suggestionBox.classList.add('d-none');
           return;
         }
-        data.forEach(entry => {
-          const row = document.createElement('div');
+        data.forEach(function (entry) {
+          var row = document.createElement('div');
           row.className = 'list-group-item list-group-item-action d-flex justify-content-between align-items-center';
-          const nameWrap = document.createElement('div');
+          var nameWrap = document.createElement('div');
           nameWrap.className = 'flex-grow-1';
           nameWrap.textContent = entry.name;
           row.appendChild(nameWrap);
           if (entry.hasCoordinates && typeof entry.latitude === 'number' && typeof entry.longitude === 'number') {
-            const navLink = document.createElement('a');
+            var navLink = document.createElement('a');
             navLink.className = 'btn btn-sm btn-outline-primary ms-3';
-            const lat = Number(entry.latitude).toFixed(6);
-            const lng = Number(entry.longitude).toFixed(6);
+            var lat = Number(entry.latitude).toFixed(6);
+            var lng = Number(entry.longitude).toFixed(6);
             navLink.href = `geo:${lat},${lng}`;
             navLink.textContent = '导航';
-            navLink.addEventListener('click', ev => ev.stopPropagation());
+            navLink.addEventListener('click', function (ev) {
+              ev.stopPropagation();
+            });
             row.appendChild(navLink);
           }
-          row.addEventListener('click', () => {
+          row.addEventListener('click', function () {
             window.location.href = entry.detailUrl;
           });
           suggestionBox.appendChild(row);
@@ -178,10 +211,12 @@
 
     if (input) {
       input.addEventListener('input', function () {
-        const value = this.value;
-        filterTable(value);
+        var value = this.value;
+        applyFilter(value);
         clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => updateSuggestions(value), 200);
+        debounceTimer = setTimeout(function () {
+          updateSuggestions(value);
+        }, 200);
       });
       input.addEventListener('focus', function () {
         if (this.value.trim()) {
@@ -189,13 +224,14 @@
         }
       });
       input.addEventListener('blur', function () {
-        setTimeout(() => {
+        setTimeout(function () {
           if (suggestionBox) {
             suggestionBox.classList.add('d-none');
           }
         }, 150);
       });
     }
+    applyFilter('');
   })();
 </script>
 

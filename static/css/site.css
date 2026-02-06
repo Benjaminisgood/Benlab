@@ -800,6 +800,47 @@ html {
   border: 1px solid var(--badge-visibility-personal-border);
 }
 
+.card-select {
+  border: 1px solid var(--bs-border-color);
+  transition: all 0.12s ease-in-out;
+}
+
+.btn-check:checked + .card-select {
+  border-color: rgba(var(--bs-primary-rgb, 13, 110, 253), 0.9);
+  background-color: var(--bs-primary-bg-subtle, rgba(var(--bs-primary-rgb, 13, 110, 253), 0.08));
+  box-shadow: 0 0.35rem 1rem rgba(var(--bs-primary-rgb, 13, 110, 253), 0.25);
+}
+
+.btn-check:focus + .card-select {
+  outline: 2px solid rgba(var(--bs-primary-rgb, 13, 110, 253), 0.2);
+  outline-offset: 2px;
+}
+
+.card-select-mark {
+  display: none;
+}
+
+.btn-check:checked + .card-select .card-select-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.btn-check:checked + .card-select .card-select-hint {
+  display: none;
+}
+
+.card-select-surface {
+  background-color: var(--bs-body-bg);
+  color: var(--bs-body-color);
+}
+
+.selection-panel {
+  background-color: var(--bs-tertiary-bg, var(--bs-gray-100, #f8f9fa));
+  border: 1px solid var(--bs-border-color);
+  color: var(--bs-body-color);
+}
+
 .badge-item-feature,
 .badge-item-status {
   border-width: 1px;

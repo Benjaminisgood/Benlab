@@ -25,6 +25,25 @@
   - [典型使用流程](#典型使用流程)
   - [权限与角色建议](#权限与角色建议)
   - [数据模型概览](#数据模型概览)
+  - [数据库表与列定义（AI 转换专用）](#数据库表与列定义ai-转换专用)
+    - [目标与约束](#目标与约束)
+    - [全量表清单（当前版本）](#全量表清单当前版本)
+    - [逐表字段定义（表名、列名、类型、约束）](#逐表字段定义表名列名类型约束)
+      - [`members`（成员）](#members成员)
+      - [`items`（物品）](#items物品)
+      - [`locations`（空间位置）](#locations空间位置)
+      - [`events`（事项）](#events事项)
+      - [`event_participants`（事项参与关系）](#event_participants事项参与关系)
+      - [`logs`（操作日志）](#logs操作日志)
+      - [`messages`（留言）](#messages留言)
+      - [`item_images`（物品附件）](#item_images物品附件)
+      - [`location_images`（位置附件）](#location_images位置附件)
+      - [`event_images`（事项附件）](#event_images事项附件)
+      - [关联表（多对多）](#关联表多对多)
+    - [旧字段收敛规则（必须遵守）](#旧字段收敛规则必须遵守)
+    - [常见输入列名映射（原始列 -\> 目标列）](#常见输入列名映射原始列---目标列)
+    - [将任意“原始数据表”转换为 Benlab SQLite 的步骤](#将任意原始数据表转换为-benlab-sqlite-的步骤)
+    - [可直接执行的 SQLite DDL（当前版本）](#可直接执行的-sqlite-ddl当前版本)
   - [附件与存储策略](#附件与存储策略)
   - [日常运维与数据管理](#日常运维与数据管理)
   - [开发调试指南](#开发调试指南)
@@ -217,6 +236,375 @@ Benlab/
 - **Log / Message**：系统审计与成员互动记录。
 
 如需查看或扩展字段，请查阅 `app.py` 中模型定义区域。
+
+## 数据库表与列定义（AI 转换专用）
+本节是给“数据转换/迁移 AI”用的结构化规范：目标是把你给的一张或多张原始数据表，稳定转换成 Benlab 当前版本可直接使用的 SQLite 数据库。
+
+### 目标与约束
+- 目标数据库：SQLite 3。
+- 必须开启外键：`PRAGMA foreign_keys = ON;`。
+- 布尔值统一落库为 `0/1`（INTEGER）。
+- 日期时间统一使用 ISO 文本：`YYYY-MM-DD HH:MM:SS`；日期字段用 `YYYY-MM-DD`。
+- 允许空值的字段可写 `NULL`；非空字段必须补齐默认值或拒绝导入。
+- 本项目当前采用“多对多负责人”：
+  - 物品负责人用 `item_members`。
+  - 位置负责人用 `location_members`。
+
+### 全量表清单（当前版本）
+- 主表：`members`, `items`, `locations`, `events`, `logs`, `messages`, `event_participants`
+- 附件表：`item_images`, `location_images`, `event_images`
+- 关联表：`item_locations`, `item_members`, `location_members`, `event_items`, `event_locations`, `member_follows`
+
+### 逐表字段定义（表名、列名、类型、约束）
+
+#### `members`（成员）
+| 列名 | 类型 | 约束/默认 | 说明 |
+| --- | --- | --- | --- |
+| `id` | INTEGER | PK | 主键 |
+| `name` | TEXT | NOT NULL | 成员显示名 |
+| `username` | TEXT | NOT NULL, UNIQUE | 登录用户名（唯一） |
+| `password_hash` | TEXT | NOT NULL | 密码哈希 |
+| `contact` | TEXT | NULL | 联系方式 |
+| `photo` | TEXT | NULL | 头像引用 |
+| `notes` | TEXT | NULL | 个人备注/展示内容 |
+| `feedback_log` | TEXT | DEFAULT `''` | 留言流 |
+| `last_modified` | DATETIME | NULL | 最近修改时间 |
+
+#### `items`（物品）
+| 列名 | 类型 | 约束/默认 | 说明 |
+| --- | --- | --- | --- |
+| `id` | INTEGER | PK | 主键 |
+| `name` | TEXT | NOT NULL | 物品名 |
+| `detail_refs` | TEXT | NULL | 参考信息（建议每行 `label|||value`） |
+| `category` | TEXT | NULL | 类别 |
+| `stock_status` | TEXT | NULL | 状态：`正常/少量/用完/借出/舍弃` |
+| `features` | TEXT | NULL | 归属：`公共/私人` |
+| `value` | REAL | NULL | 价值 |
+| `quantity` | REAL | NULL | 数量 |
+| `unit` | TEXT | NULL | 单位 |
+| `purchase_date` | DATE | NULL | 购入日期 |
+| `primary_attachment` | TEXT | NULL | 主附件 |
+| `notes` | TEXT | NULL | 备注 |
+| `last_modified` | DATETIME | NULL | 最近修改时间 |
+| `purchase_link` | TEXT | NULL | 采购链接 |
+
+#### `locations`（空间位置）
+| 列名 | 类型 | 约束/默认 | 说明 |
+| --- | --- | --- | --- |
+| `id` | INTEGER | PK | 主键 |
+| `name` | TEXT | NOT NULL | 空间名称 |
+| `parent_id` | INTEGER | FK `locations.id`, NULL | 上级空间 |
+| `status` | TEXT | NULL | 状态：`正常/脏/报修/危险/禁止` |
+| `latitude` | REAL | NULL | 纬度（有索引） |
+| `longitude` | REAL | NULL | 经度（有索引） |
+| `coordinate_source` | TEXT | NULL | 坐标来源 |
+| `primary_attachment` | TEXT | NULL | 主附件 |
+| `notes` | TEXT | NULL | 备注 |
+| `is_public` | INTEGER | NOT NULL, DEFAULT `0` | 是否公共空间 |
+| `detail_refs` | TEXT | NULL | 参考信息（建议每行 `label|||value`） |
+| `last_modified` | DATETIME | NULL | 最近修改时间 |
+| `detail_link` | TEXT | NULL | 详情链接 |
+
+#### `events`（事项）
+| 列名 | 类型 | 约束/默认 | 说明 |
+| --- | --- | --- | --- |
+| `id` | INTEGER | PK | 主键 |
+| `title` | TEXT | NOT NULL | 事项标题 |
+| `description` | TEXT | NULL | 事项描述 |
+| `visibility` | TEXT | NOT NULL, DEFAULT `'personal'` | 可见性：`personal/internal/public` |
+| `owner_id` | INTEGER | NOT NULL, FK `members.id` | 创建者 |
+| `start_time` | DATETIME | NULL | 开始时间 |
+| `end_time` | DATETIME | NULL | 结束时间 |
+| `detail_link` | TEXT | NULL | 详情链接 |
+| `feedback_log` | TEXT | DEFAULT `''` | 反馈流 |
+| `allow_participant_edit` | INTEGER | NOT NULL, DEFAULT `0` | 是否允许参与者编辑 |
+| `created_at` | DATETIME | NULL | 创建时间 |
+| `updated_at` | DATETIME | NULL | 更新时间 |
+
+#### `event_participants`（事项参与关系）
+| 列名 | 类型 | 约束/默认 | 说明 |
+| --- | --- | --- | --- |
+| `event_id` | INTEGER | PK, FK `events.id` | 事项 ID |
+| `member_id` | INTEGER | PK, FK `members.id` | 成员 ID |
+| `role` | TEXT | NOT NULL, DEFAULT `'participant'` | 角色 |
+| `status` | TEXT | NOT NULL, DEFAULT `'confirmed'` | 参与状态 |
+| `joined_at` | DATETIME | NULL | 加入时间 |
+
+#### `logs`（操作日志）
+| 列名 | 类型 | 约束/默认 | 说明 |
+| --- | --- | --- | --- |
+| `id` | INTEGER | PK | 主键 |
+| `timestamp` | DATETIME | NULL | 操作时间 |
+| `user_id` | INTEGER | FK `members.id` | 操作人 |
+| `item_id` | INTEGER | NULL, FK `items.id` | 关联物品 |
+| `location_id` | INTEGER | NULL, FK `locations.id` | 关联位置 |
+| `event_id` | INTEGER | NULL, FK `events.id` | 关联事项 |
+| `action_type` | TEXT | NULL | 操作类型 |
+| `details` | TEXT | NULL | 操作明细 |
+
+#### `messages`（留言）
+| 列名 | 类型 | 约束/默认 | 说明 |
+| --- | --- | --- | --- |
+| `id` | INTEGER | PK | 主键 |
+| `sender_id` | INTEGER | FK `members.id` | 发送者 |
+| `receiver_id` | INTEGER | FK `members.id` | 接收者 |
+| `content` | TEXT | NOT NULL | 消息正文 |
+| `timestamp` | DATETIME | NULL | 发送时间 |
+
+#### `item_images`（物品附件）
+| 列名 | 类型 | 约束/默认 | 说明 |
+| --- | --- | --- | --- |
+| `id` | INTEGER | PK | 主键 |
+| `item_id` | INTEGER | NOT NULL, FK `items.id` | 物品 ID（有索引） |
+| `filename` | TEXT | NOT NULL | 附件引用 |
+| `created_at` | DATETIME | NULL | 创建时间 |
+
+#### `location_images`（位置附件）
+| 列名 | 类型 | 约束/默认 | 说明 |
+| --- | --- | --- | --- |
+| `id` | INTEGER | PK | 主键 |
+| `location_id` | INTEGER | NOT NULL, FK `locations.id` | 位置 ID（有索引） |
+| `filename` | TEXT | NOT NULL | 附件引用 |
+| `created_at` | DATETIME | NULL | 创建时间 |
+
+#### `event_images`（事项附件）
+| 列名 | 类型 | 约束/默认 | 说明 |
+| --- | --- | --- | --- |
+| `id` | INTEGER | PK | 主键 |
+| `event_id` | INTEGER | NOT NULL, FK `events.id` | 事项 ID（有索引） |
+| `filename` | TEXT | NOT NULL | 附件引用 |
+| `created_at` | DATETIME | NULL | 创建时间 |
+
+#### 关联表（多对多）
+`item_locations`
+- `item_id` INTEGER, PK, FK `items.id`
+- `location_id` INTEGER, PK, FK `locations.id`
+
+`item_members`
+- `item_id` INTEGER, PK, FK `items.id`
+- `member_id` INTEGER, PK, FK `members.id`
+
+`location_members`
+- `location_id` INTEGER, PK, FK `locations.id`
+- `member_id` INTEGER, PK, FK `members.id`
+
+`event_items`
+- `event_id` INTEGER, PK, FK `events.id`
+- `item_id` INTEGER, PK, FK `items.id`
+
+`event_locations`
+- `event_id` INTEGER, PK, FK `events.id`
+- `location_id` INTEGER, PK, FK `locations.id`
+
+`member_follows`
+- `follower_id` INTEGER, PK, FK `members.id`
+- `followed_id` INTEGER, PK, FK `members.id`
+- 约束：`CHECK(follower_id != followed_id)`
+
+### 旧字段收敛规则（必须遵守）
+如果原始数据中包含下列旧字段，必须在导入前映射到新结构：
+- `locations.clean_status` -> `locations.status`
+- `items.image` / `locations.image` -> `primary_attachment`
+- `items.responsible_id` -> 拆分写入 `item_members(item_id, member_id)`
+- `items.detail_links` -> 合并写入 `items.detail_refs`
+
+### 常见输入列名映射（原始列 -> 目标列）
+| 原始列（常见别名） | 目标表.列 | 说明 |
+| --- | --- | --- |
+| `用户名` / `账号` / `user_name` | `members.username` | 必须唯一 |
+| `姓名` / `成员名` | `members.name` | 必填 |
+| `联系电话` / `手机号` / `contact` | `members.contact` | 可空 |
+| `物品名` / `名称` / `item_name` | `items.name` | 物品主名称 |
+| `库存状态` / `状态` / `stock_status` | `items.stock_status` | 仅允许 `正常/少量/用完/借出/舍弃` |
+| `归属` / `可见性` / `features` | `items.features` | 仅允许 `公共/私人` |
+| `采购链接` / `购买链接` | `items.purchase_link` | URL 或文本 |
+| `详情链接` / `detail_link`（物品） | `items.detail_refs` | 推荐转为 `来源|||链接` 格式写入 |
+| `位置名` / `空间名` / `location_name` | `locations.name` | 空间主名称 |
+| `上级位置` / `parent` | `locations.parent_id` | 需先解析为上级 `locations.id` |
+| `清洁状态` / `clean_status` / `位置状态` | `locations.status` | 仅允许 `正常/脏/报修/危险/禁止` |
+| `经度` / `lng` | `locations.longitude` | REAL |
+| `纬度` / `lat` | `locations.latitude` | REAL |
+| `是否公共` / `public` / `is_public` | `locations.is_public` | 转为 `0/1` |
+| `负责人` / `owner` / `responsible` | `item_members` / `location_members` | 解析成员后写关系表，不写旧列 |
+| `事项标题` / `event_title` | `events.title` | 必填 |
+| `可见性` / `visibility`（事项） | `events.visibility` | 仅允许 `personal/internal/public` |
+| `参与成员` / `participants` | `event_participants` | 按成员拆分为多行关系 |
+
+### 将任意“原始数据表”转换为 Benlab SQLite 的步骤
+1. 识别实体类型：成员、物品、位置、事项、日志、留言、附件、关系表。
+2. 先导入主表：`members` -> `items/locations/events` -> `messages/logs`。
+3. 再导入关系表：`item_members`, `item_locations`, `location_members`, `event_participants`, `event_items`, `event_locations`, `member_follows`。
+4. 最后导入附件表：`item_images`, `location_images`, `event_images`，并可回填各主表 `primary_attachment`。
+5. 枚举值清洗：
+   - `items.stock_status` 仅允许：`正常/少量/用完/借出/舍弃`
+   - `items.features` 仅允许：`公共/私人`
+   - `locations.status` 仅允许：`正常/脏/报修/危险/禁止`
+   - `events.visibility` 仅允许：`personal/internal/public`
+6. 负责人字段处理：
+   - 输入若是用户名/姓名列表，先映射到 `members.id`，再写入 `item_members` 或 `location_members`。
+7. 参考信息字段处理：
+   - 推荐统一写入 `detail_refs`，格式为多行文本，每行 `label|||value`（例如 `采购链接|||https://...`）。
+8. 导入完成后校验：
+   - 检查外键孤儿数据（关系表中引用不到主表 ID）。
+   - 检查 `username` 唯一性。
+   - 检查枚举字段是否存在非法值。
+
+### 可直接执行的 SQLite DDL（当前版本）
+```sql
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS members (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  username TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  contact TEXT,
+  photo TEXT,
+  notes TEXT,
+  feedback_log TEXT DEFAULT '',
+  last_modified DATETIME
+);
+
+CREATE TABLE IF NOT EXISTS items (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  detail_refs TEXT,
+  category TEXT,
+  stock_status TEXT,
+  features TEXT,
+  value REAL,
+  quantity REAL,
+  unit TEXT,
+  purchase_date DATE,
+  primary_attachment TEXT,
+  notes TEXT,
+  last_modified DATETIME,
+  purchase_link TEXT
+);
+
+CREATE TABLE IF NOT EXISTS locations (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  parent_id INTEGER REFERENCES locations(id),
+  status TEXT,
+  latitude REAL,
+  longitude REAL,
+  coordinate_source TEXT,
+  primary_attachment TEXT,
+  notes TEXT,
+  is_public INTEGER NOT NULL DEFAULT 0,
+  detail_refs TEXT,
+  last_modified DATETIME,
+  detail_link TEXT
+);
+
+CREATE TABLE IF NOT EXISTS events (
+  id INTEGER PRIMARY KEY,
+  title TEXT NOT NULL,
+  description TEXT,
+  visibility TEXT NOT NULL DEFAULT 'personal',
+  owner_id INTEGER NOT NULL REFERENCES members(id),
+  start_time DATETIME,
+  end_time DATETIME,
+  detail_link TEXT,
+  feedback_log TEXT DEFAULT '',
+  allow_participant_edit INTEGER NOT NULL DEFAULT 0,
+  created_at DATETIME,
+  updated_at DATETIME
+);
+
+CREATE TABLE IF NOT EXISTS event_participants (
+  event_id INTEGER NOT NULL REFERENCES events(id),
+  member_id INTEGER NOT NULL REFERENCES members(id),
+  role TEXT NOT NULL DEFAULT 'participant',
+  status TEXT NOT NULL DEFAULT 'confirmed',
+  joined_at DATETIME,
+  PRIMARY KEY (event_id, member_id)
+);
+
+CREATE TABLE IF NOT EXISTS logs (
+  id INTEGER PRIMARY KEY,
+  timestamp DATETIME,
+  user_id INTEGER REFERENCES members(id),
+  item_id INTEGER REFERENCES items(id),
+  location_id INTEGER REFERENCES locations(id),
+  event_id INTEGER REFERENCES events(id),
+  action_type TEXT,
+  details TEXT
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+  id INTEGER PRIMARY KEY,
+  sender_id INTEGER REFERENCES members(id),
+  receiver_id INTEGER REFERENCES members(id),
+  content TEXT NOT NULL,
+  timestamp DATETIME
+);
+
+CREATE TABLE IF NOT EXISTS item_images (
+  id INTEGER PRIMARY KEY,
+  item_id INTEGER NOT NULL REFERENCES items(id),
+  filename TEXT NOT NULL,
+  created_at DATETIME
+);
+
+CREATE TABLE IF NOT EXISTS location_images (
+  id INTEGER PRIMARY KEY,
+  location_id INTEGER NOT NULL REFERENCES locations(id),
+  filename TEXT NOT NULL,
+  created_at DATETIME
+);
+
+CREATE TABLE IF NOT EXISTS event_images (
+  id INTEGER PRIMARY KEY,
+  event_id INTEGER NOT NULL REFERENCES events(id),
+  filename TEXT NOT NULL,
+  created_at DATETIME
+);
+
+CREATE TABLE IF NOT EXISTS item_locations (
+  item_id INTEGER NOT NULL REFERENCES items(id),
+  location_id INTEGER NOT NULL REFERENCES locations(id),
+  PRIMARY KEY (item_id, location_id)
+);
+
+CREATE TABLE IF NOT EXISTS item_members (
+  item_id INTEGER NOT NULL REFERENCES items(id),
+  member_id INTEGER NOT NULL REFERENCES members(id),
+  PRIMARY KEY (item_id, member_id)
+);
+
+CREATE TABLE IF NOT EXISTS location_members (
+  location_id INTEGER NOT NULL REFERENCES locations(id),
+  member_id INTEGER NOT NULL REFERENCES members(id),
+  PRIMARY KEY (location_id, member_id)
+);
+
+CREATE TABLE IF NOT EXISTS event_items (
+  event_id INTEGER NOT NULL REFERENCES events(id),
+  item_id INTEGER NOT NULL REFERENCES items(id),
+  PRIMARY KEY (event_id, item_id)
+);
+
+CREATE TABLE IF NOT EXISTS event_locations (
+  event_id INTEGER NOT NULL REFERENCES events(id),
+  location_id INTEGER NOT NULL REFERENCES locations(id),
+  PRIMARY KEY (event_id, location_id)
+);
+
+CREATE TABLE IF NOT EXISTS member_follows (
+  follower_id INTEGER NOT NULL REFERENCES members(id),
+  followed_id INTEGER NOT NULL REFERENCES members(id),
+  PRIMARY KEY (follower_id, followed_id),
+  CHECK (follower_id != followed_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_locations_latitude ON locations(latitude);
+CREATE INDEX IF NOT EXISTS idx_locations_longitude ON locations(longitude);
+CREATE INDEX IF NOT EXISTS idx_item_images_item_id ON item_images(item_id);
+CREATE INDEX IF NOT EXISTS idx_location_images_location_id ON location_images(location_id);
+CREATE INDEX IF NOT EXISTS idx_event_images_event_id ON event_images(event_id);
+```
 
 ## 附件与存储策略
 - 默认使用 OSS 存储；`attachments/` 用于本地落盘或同步缓存。

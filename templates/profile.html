@@ -237,6 +237,11 @@
         </button>
       {% endif %}
     </div>
+    <div class="d-flex justify-content-center mb-2">
+      <span class="detail-updated-hint">
+        资料上次更新：{{ profile_user.last_modified|china_time if profile_user.last_modified else '未知' }}
+      </span>
+    </div>
     {% if profile_user.contact %}
     <div class="profile-contact mt-2">
       <span>📞 <a href="tel:{{ profile_user.contact|replace(' ', '') }}">{{ profile_user.contact }}</a></span>

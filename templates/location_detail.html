@@ -2,7 +2,12 @@
 {% from "_media_gallery.html" import render_media_gallery %}
 {% block content %}
 {% set detail_refs = location.detail_refs_without_usage_tags %}
-<h4 class="mb-3">{{ location.name }}</h4>
+<div class="detail-page-header mb-3">
+  <h4 class="mb-0">{{ location.name }}</h4>
+  <div class="detail-updated-hint">
+    上次更新时间：{{ location.last_modified|china_time if location.last_modified else '未知' }}
+  </div>
+</div>
 
 <div class="d-flex flex-wrap align-items-center gap-2 mb-3 page-action-toolbar">
   {% if location.latitude is not none and location.longitude is not none %}
@@ -139,7 +144,6 @@
         </div>
       </li>
       {% endif %}
-      <li class="list-group-item"><strong>最近修改：</strong>{{ location.last_modified.strftime('%Y-%m-%d %H:%M') if location.last_modified else '未知' }}</li>
     </ul>
   </div>
   <div class="col-md-6">

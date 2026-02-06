@@ -1,7 +1,12 @@
 {% extends "base.html" %}
 {% from "_media_gallery.html" import render_media_gallery %}
 {% block content %}
-<h4 class="mb-3">{{ item.name }}</h4>
+<div class="detail-page-header mb-3">
+  <h4 class="mb-0">{{ item.name }}</h4>
+  <div class="detail-updated-hint">
+    上次更新时间：{{ item.last_modified|china_time if item.last_modified else '未知' }}
+  </div>
+</div>
 
 <div class="d-flex flex-wrap align-items-center gap-2 mb-3 page-action-toolbar">
   <button type="button" class="btn btn-outline-secondary" id="shareItemLinkBtn" data-url="{{ request.url }}">分享链接</button>
@@ -106,7 +111,6 @@
           未指定
         {% endif %}
       </li>
-      <li class="list-group-item"><strong>最近更新时间：</strong>{{ item.last_modified.strftime("%Y-%m-%d %H:%M:%S") if item.last_modified else '未设置' }}</li>
       {% if item.purchase_link %}
       <li class="list-group-item"><strong>购买链接：</strong><a href="{{ item.purchase_link }}" target="_blank">点击打开</a></li>
       {% endif %}

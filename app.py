@@ -104,7 +104,7 @@ TEMP_PAGE_DIR = app.instance_path
 # 确保运行所需的实例目录存在
 os.makedirs(TEMP_PAGE_DIR, exist_ok=True)
 app.config['MAX_CONTENT_LENGTH'] = 2500 * 1024 * 1024  # 限制上传2500MB以内的文件
-OSS_ENDPOINT = os.getenv('ALIYUN_OSS_ENDPOINT')
+OSS_ENDPOINT = _normalize_base_url(os.getenv('ALIYUN_OSS_ENDPOINT'))
 OSS_ACCESS_KEY_ID = os.getenv('ALIYUN_OSS_ACCESS_KEY_ID')
 OSS_ACCESS_KEY_SECRET = os.getenv('ALIYUN_OSS_ACCESS_KEY_SECRET')
 OSS_BUCKET_NAME = os.getenv('ALIYUN_OSS_BUCKET')
@@ -1525,15 +1525,51 @@ def _oss_direct_upload_ready():
     bucket = _get_oss_bucket()
     if bucket is None:
         return False
-    try:
-        cors_info = bucket.get_bucket_cors()
-    except Exception as exc:
-        app.logger.warning('读取 OSS CORS 配置失败，已关闭浏览器直传并回退为服务端上传: %s', exc)
+
+    cors_info = None
+    last_exc = None
+    for attempt in range(3):
+        try:
+            cors_info = bucket.get_bucket_cors()
+            last_exc = None
+            break
+        except Exception as exc:
+            last_exc = exc
+            time.sleep(0.4 * (attempt + 1))
+    if last_exc is not None or cors_info is None:
+        app.logger.warning('读取 OSS CORS 配置失败，已关闭浏览器直传并回退为服务端上传: %s', last_exc)
         return False
-    rules = getattr(cors_info, 'cors_rule_list', None) or []
+
+    rules = getattr(cors_info, 'cors_rule_list', None)
+    if rules is None:
+        rules = getattr(cors_info, 'rules', None)
+    rules = rules or []
+
+    def normalize_seq(value):
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value]
+        if isinstance(value, (list, tuple, set)):
+            return list(value)
+        try:
+            return list(value)
+        except TypeError:
+            return [value]
+
     for rule in rules:
-        allowed_methods = [str(method).upper() for method in (getattr(rule, 'allowed_methods', None) or [])]
-        allowed_origins = [str(origin).strip() for origin in (getattr(rule, 'allowed_origins', None) or [])]
+        raw_methods = getattr(rule, 'allowed_methods', None)
+        if isinstance(raw_methods, str):
+            allowed_methods = [part.strip().upper() for part in raw_methods.split(',') if part.strip()]
+        else:
+            allowed_methods = [str(method).strip().upper() for method in normalize_seq(raw_methods) if str(method).strip()]
+
+        raw_origins = getattr(rule, 'allowed_origins', None)
+        if isinstance(raw_origins, str):
+            allowed_origins = [part.strip() for part in raw_origins.split(',') if part.strip()]
+        else:
+            allowed_origins = [str(origin).strip() for origin in normalize_seq(raw_origins) if str(origin).strip()]
+
         if 'PUT' in allowed_methods and any(allowed_origins):
             return True
     app.logger.warning('OSS CORS 未配置 PUT 规则，已自动关闭浏览器直传并回退为服务端上传。')

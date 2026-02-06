@@ -41,7 +41,6 @@
       - [`location_images`（位置附件）](#location_images位置附件)
       - [`event_images`（事项附件）](#event_images事项附件)
       - [关联表（多对多）](#关联表多对多)
-    - [旧字段收敛规则（必须遵守）](#旧字段收敛规则必须遵守)
     - [常见输入列名映射（原始列 -\> 目标列）](#常见输入列名映射原始列---目标列)
     - [将任意“原始数据表”转换为 Benlab SQLite 的步骤](#将任意原始数据表转换为-benlab-sqlite-的步骤)
     - [可直接执行的 SQLite DDL（当前版本）](#可直接执行的-sqlite-ddl当前版本)
@@ -442,13 +441,6 @@ Benlab/
 - `follower_id` INTEGER, PK, FK `members.id`
 - `followed_id` INTEGER, PK, FK `members.id`
 - 约束：`CHECK(follower_id != followed_id)`
-
-### 旧字段收敛规则（必须遵守）
-如果原始数据中包含下列旧字段，必须在导入前映射到新结构：
-- `locations.clean_status` -> `locations.status`
-- `items.image` / `locations.image` -> `primary_attachment`
-- `items.responsible_id` -> 拆分写入 `item_members(item_id, member_id)`
-- `items.detail_links` -> 合并写入 `items.detail_refs`
 
 ### 常见输入列名映射（原始列 -> 目标列）
 | 原始列（常见别名） | 目标表.列 | 说明 |

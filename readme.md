@@ -37,9 +37,7 @@
       - [`event_participants`（事项参与关系）](#event_participants事项参与关系)
       - [`logs`（操作日志）](#logs操作日志)
       - [`messages`（留言）](#messages留言)
-      - [`item_images`（物品附件）](#item_images物品附件)
-      - [`location_images`（位置附件）](#location_images位置附件)
-      - [`event_images`（事项附件）](#event_images事项附件)
+      - [`attachments`（统一附件）](#attachments统一附件)
       - [关联表（多对多）](#关联表多对多)
     - [常见输入列名映射（原始列 -\> 目标列）](#常见输入列名映射原始列---目标列)
     - [将任意“原始数据表”转换为 Benlab SQLite 的步骤](#将任意原始数据表转换为-benlab-sqlite-的步骤)
@@ -293,7 +291,7 @@ Benlab/
 
 ### 全量表清单（当前版本）
 - 主表：`members`, `items`, `locations`, `events`, `logs`, `messages`, `event_participants`
-- 附件表：`item_images`, `location_images`, `event_images`
+- 附件表：`attachments`
 - 关联表：`item_locations`, `item_members`, `location_members`, `event_items`, `event_locations`, `member_follows`
 
 ### 逐表字段定义（表名、列名、类型、约束）
@@ -324,7 +322,6 @@ Benlab/
 | `quantity` | REAL | NULL | 数量 |
 | `unit` | TEXT | NULL | 单位 |
 | `purchase_date` | DATE | NULL | 购入日期 |
-| `primary_attachment` | TEXT | NULL | 主附件 |
 | `notes` | TEXT | NULL | 备注 |
 | `last_modified` | DATETIME | NULL | 最近修改时间 |
 | `purchase_link` | TEXT | NULL | 采购链接 |
@@ -339,7 +336,6 @@ Benlab/
 | `latitude` | REAL | NULL | 纬度（有索引） |
 | `longitude` | REAL | NULL | 经度（有索引） |
 | `coordinate_source` | TEXT | NULL | 坐标来源 |
-| `primary_attachment` | TEXT | NULL | 主附件 |
 | `notes` | TEXT | NULL | 备注 |
 | `is_public` | INTEGER | NOT NULL, DEFAULT `0` | 是否公共空间 |
 | `detail_refs` | TEXT | NULL | 参考信息（建议每行 `label|||value`） |
@@ -392,27 +388,13 @@ Benlab/
 | `content` | TEXT | NOT NULL | 消息正文 |
 | `timestamp` | DATETIME | NULL | 发送时间 |
 
-#### `item_images`（物品附件）
+#### `attachments`（统一附件）
 | 列名 | 类型 | 约束/默认 | 说明 |
 | --- | --- | --- | --- |
 | `id` | INTEGER | PK | 主键 |
-| `item_id` | INTEGER | NOT NULL, FK `items.id` | 物品 ID（有索引） |
-| `filename` | TEXT | NOT NULL | 附件引用 |
-| `created_at` | DATETIME | NULL | 创建时间 |
-
-#### `location_images`（位置附件）
-| 列名 | 类型 | 约束/默认 | 说明 |
-| --- | --- | --- | --- |
-| `id` | INTEGER | PK | 主键 |
-| `location_id` | INTEGER | NOT NULL, FK `locations.id` | 位置 ID（有索引） |
-| `filename` | TEXT | NOT NULL | 附件引用 |
-| `created_at` | DATETIME | NULL | 创建时间 |
-
-#### `event_images`（事项附件）
-| 列名 | 类型 | 约束/默认 | 说明 |
-| --- | --- | --- | --- |
-| `id` | INTEGER | PK | 主键 |
-| `event_id` | INTEGER | NOT NULL, FK `events.id` | 事项 ID（有索引） |
+| `item_id` | INTEGER | NULL, FK `items.id` | 归属物品（与 `location_id`/`event_id` 三选一） |
+| `location_id` | INTEGER | NULL, FK `locations.id` | 归属位置（与 `item_id`/`event_id` 三选一） |
+| `event_id` | INTEGER | NULL, FK `events.id` | 归属事项（与 `item_id`/`location_id` 三选一） |
 | `filename` | TEXT | NOT NULL | 附件引用 |
 | `created_at` | DATETIME | NULL | 创建时间 |
 
@@ -442,6 +424,14 @@ Benlab/
 - `followed_id` INTEGER, PK, FK `members.id`
 - 约束：`CHECK(follower_id != followed_id)`
 
+### 旧字段收敛规则（必须遵守）
+如果原始数据中包含下列旧字段，必须在导入前映射到新结构：
+- `locations.clean_status` -> `locations.status`
+- `items.image` / `items.primary_attachment` -> 写入 `attachments(item_id, filename, created_at)`（单图旧字段收敛为统一附件表）
+- `locations.image` / `locations.primary_attachment` -> 写入 `attachments(location_id, filename, created_at)`（单图旧字段收敛为统一附件表）
+- `items.responsible_id` -> 拆分写入 `item_members(item_id, member_id)`
+- `items.detail_links` -> 合并写入 `items.detail_refs`
+
 ### 常见输入列名映射（原始列 -> 目标列）
 | 原始列（常见别名） | 目标表.列 | 说明 |
 | --- | --- | --- |
@@ -468,7 +458,7 @@ Benlab/
 1. 识别实体类型：成员、物品、位置、事项、日志、留言、附件、关系表。
 2. 先导入主表：`members` -> `items/locations/events` -> `messages/logs`。
 3. 再导入关系表：`item_members`, `item_locations`, `location_members`, `event_participants`, `event_items`, `event_locations`, `member_follows`。
-4. 最后导入附件表：`item_images`, `location_images`, `event_images`，并可回填各主表 `primary_attachment`。
+4. 最后导入附件表：`attachments`（统一附件）。
 5. 枚举值清洗：
    - `items.stock_status` 仅允许：`正常/少量/用完/借出/舍弃`
    - `items.features` 仅允许：`公共/私人`
@@ -510,7 +500,6 @@ CREATE TABLE IF NOT EXISTS items (
   quantity REAL,
   unit TEXT,
   purchase_date DATE,
-  primary_attachment TEXT,
   notes TEXT,
   last_modified DATETIME,
   purchase_link TEXT
@@ -524,7 +513,6 @@ CREATE TABLE IF NOT EXISTS locations (
   latitude REAL,
   longitude REAL,
   coordinate_source TEXT,
-  primary_attachment TEXT,
   notes TEXT,
   is_public INTEGER NOT NULL DEFAULT 0,
   detail_refs TEXT,
@@ -575,25 +563,14 @@ CREATE TABLE IF NOT EXISTS messages (
   timestamp DATETIME
 );
 
-CREATE TABLE IF NOT EXISTS item_images (
+CREATE TABLE IF NOT EXISTS attachments (
   id INTEGER PRIMARY KEY,
-  item_id INTEGER NOT NULL REFERENCES items(id),
+  item_id INTEGER REFERENCES items(id),
+  location_id INTEGER REFERENCES locations(id),
+  event_id INTEGER REFERENCES events(id),
   filename TEXT NOT NULL,
-  created_at DATETIME
-);
-
-CREATE TABLE IF NOT EXISTS location_images (
-  id INTEGER PRIMARY KEY,
-  location_id INTEGER NOT NULL REFERENCES locations(id),
-  filename TEXT NOT NULL,
-  created_at DATETIME
-);
-
-CREATE TABLE IF NOT EXISTS event_images (
-  id INTEGER PRIMARY KEY,
-  event_id INTEGER NOT NULL REFERENCES events(id),
-  filename TEXT NOT NULL,
-  created_at DATETIME
+  created_at DATETIME,
+  CHECK ((item_id IS NOT NULL) + (location_id IS NOT NULL) + (event_id IS NOT NULL) = 1)
 );
 
 CREATE TABLE IF NOT EXISTS item_locations (
@@ -635,9 +612,9 @@ CREATE TABLE IF NOT EXISTS member_follows (
 
 CREATE INDEX IF NOT EXISTS idx_locations_latitude ON locations(latitude);
 CREATE INDEX IF NOT EXISTS idx_locations_longitude ON locations(longitude);
-CREATE INDEX IF NOT EXISTS idx_item_images_item_id ON item_images(item_id);
-CREATE INDEX IF NOT EXISTS idx_location_images_location_id ON location_images(location_id);
-CREATE INDEX IF NOT EXISTS idx_event_images_event_id ON event_images(event_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_item_id ON attachments(item_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_location_id ON attachments(location_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_event_id ON attachments(event_id);
 ```
 
 ## 附件与存储策略

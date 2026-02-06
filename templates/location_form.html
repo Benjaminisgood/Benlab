@@ -71,42 +71,6 @@
     <label for="attachmentInput" class="form-label">空间媒体（图片 / 视频 / 音频，可多选）</label>
     {% if location %}
     <div class="d-flex flex-wrap gap-3 mb-2">
-      {% set legacy_only = location.primary_attachment and (location.attachments | selectattr('filename', 'equalto', location.primary_attachment) | list | length == 0) %}
-      {% if legacy_only %}
-        {% set legacy_kind = media_kind(location.primary_attachment) %}
-        {% set legacy_url = uploaded_media_url(location.primary_attachment) %}
-        {% set legacy_name = media_display_name(location.primary_attachment) %}
-        <div class="media-card flex-column align-items-stretch" data-kind="{{ legacy_kind }}" data-ai-media-ref="{{ location.primary_attachment }}">
-          {% if legacy_kind == 'image' %}
-          <img src="{{ legacy_url }}" alt="空间媒资" class="media-card-img">
-          {% elif legacy_kind == 'video' %}
-          <div class="media-placeholder" data-kind="video">
-            <div class="media-placeholder-header">
-              <span class="media-tag">{{ media_kind_labels.get('video', '视频') }}</span>
-              {% if legacy_name %}<span class="media-name" title="{{ legacy_name }}">{{ legacy_name }}</span>{% endif %}
-            </div>
-            <button type="button" class="btn btn-sm btn-primary media-play-btn" data-kind="video" data-src="{{ legacy_url }}">预览视频</button>
-          </div>
-          {% elif legacy_kind == 'audio' %}
-          <div class="media-placeholder" data-kind="audio">
-            <div class="media-placeholder-header">
-              <span class="media-tag">{{ media_kind_labels.get('audio', '音频') }}</span>
-              {% if legacy_name %}<span class="media-name" title="{{ legacy_name }}">{{ legacy_name }}</span>{% endif %}
-            </div>
-            <button type="button" class="btn btn-sm btn-outline-primary media-play-btn" data-kind="audio" data-src="{{ legacy_url }}">预览音频</button>
-          </div>
-          {% else %}
-          <a href="{{ legacy_url }}" target="_blank" rel="noopener" class="media-file-link">
-            <span class="media-tag">{{ media_kind_labels.get(legacy_kind, '文件') }}</span>
-            <span class="media-name">{{ legacy_name or legacy_url }}</span>
-          </a>
-          {% endif %}
-          <div class="form-check mt-2">
-            <input class="form-check-input" type="checkbox" name="remove_primary_attachment" value="1" id="removePrimaryLocationAttachment">
-            <label class="form-check-label" for="removePrimaryLocationAttachment">删除此媒资</label>
-          </div>
-        </div>
-      {% endif %}
       {% for attachment in location.attachments %}
         {% set media_kind_value = media_kind(attachment.filename) %}
         {% set media_url = uploaded_media_url(attachment.filename) %}
@@ -142,7 +106,7 @@
           </div>
         </div>
       {% endfor %}
-      {% if not (legacy_only or location.attachments) %}
+      {% if not location.attachments %}
       <p class="text-muted mb-0">暂无已上传媒体</p>
       {% endif %}
     </div>

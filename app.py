@@ -1923,15 +1923,7 @@ def _collect_referenced_attachment_keys():
 
     for (value,) in db.session.query(Member.photo).filter(Member.photo.isnot(None)):
         add_ref(value)
-    for (value,) in db.session.query(Item.primary_attachment).filter(Item.primary_attachment.isnot(None)):
-        add_ref(value)
-    for (value,) in db.session.query(Location.primary_attachment).filter(Location.primary_attachment.isnot(None)):
-        add_ref(value)
-    for (value,) in db.session.query(ItemAttachment.filename):
-        add_ref(value)
-    for (value,) in db.session.query(LocationAttachment.filename):
-        add_ref(value)
-    for (value,) in db.session.query(EventAttachment.filename):
+    for (value,) in db.session.query(Attachment.filename):
         add_ref(value)
     return refs
 
@@ -2852,7 +2844,6 @@ class Item(db.Model):
     quantity = db.Column(db.Float)                 # ✅ 数量
     unit = db.Column(db.String(20))                # ✅ 单位（例如：瓶、包）
     purchase_date = db.Column(db.Date)             # ✅ 购入时间
-    primary_attachment = db.Column(db.String(200))          # 附件主文件名
     notes = db.Column(db.Text)                          # 备注说明
     last_modified = db.Column(db.DateTime, default=datetime.utcnow)  # 最后修改时间
     purchase_link = db.Column(db.String(200))           # 购买链接
@@ -2866,11 +2857,13 @@ class Item(db.Model):
     logs = db.relationship('Log', backref='item', lazy=True)  # 操作日志
 
     attachments = db.relationship(
-        'ItemAttachment',
-        backref='item',
+        'Attachment',
+        back_populates='item',
         lazy='select',
         cascade='all, delete-orphan',
-        order_by='ItemAttachment.created_at'
+        single_parent=True,
+        order_by='Attachment.id',
+        foreign_keys='Attachment.item_id'
     )
 
     @property
@@ -2890,8 +2883,6 @@ class Item(db.Model):
             if att.filename and att.filename not in seen:
                 filenames.append(att.filename)
                 seen.add(att.filename)
-        if self.primary_attachment and self.primary_attachment not in seen:
-            filenames.insert(0, self.primary_attachment)
         return filenames
 
     def assign_responsible_members(self, members):
@@ -2934,7 +2925,6 @@ class Location(db.Model):
                             cascade='all, delete-orphan')
     # 多对多负责人
     # responsible_members 关系由 Member.responsible_locations 的 backref 提供
-    primary_attachment = db.Column(db.String(200))          # 位置附件主文件名
     notes = db.Column(db.Text)                          # 备注（纯文本）
     is_public = db.Column(db.Boolean, nullable=False, default=False, server_default='0')
     detail_refs_raw = db.Column('detail_refs', db.Text)  # 参考信息集合（字符串）
@@ -2943,11 +2933,13 @@ class Location(db.Model):
     detail_link = db.Column(db.String(200))
 
     attachments = db.relationship(
-        'LocationAttachment',
-        backref='location',
+        'Attachment',
+        back_populates='location',
         lazy='select',
         cascade='all, delete-orphan',
-        order_by='LocationAttachment.created_at'
+        single_parent=True,
+        order_by='Attachment.id',
+        foreign_keys='Attachment.location_id'
     )
 
     @property
@@ -2958,8 +2950,6 @@ class Location(db.Model):
             if att.filename and att.filename not in seen:
                 filenames.append(att.filename)
                 seen.add(att.filename)
-        if self.primary_attachment and self.primary_attachment not in seen:
-            filenames.insert(0, self.primary_attachment)
         return filenames
 
     @property
@@ -3069,11 +3059,13 @@ class Event(db.Model):
         backref=db.backref('events', lazy='select')
     )
     attachments = db.relationship(
-        'EventAttachment',
-        backref='event',
+        'Attachment',
+        back_populates='event',
         lazy='select',
         cascade='all, delete-orphan',
-        order_by='EventAttachment.created_at'
+        single_parent=True,
+        order_by='Attachment.id',
+        foreign_keys='Attachment.event_id'
     )
     logs = db.relationship('Log', backref='event', lazy=True)
 
@@ -3239,40 +3231,273 @@ def add_event_attachments(event, file_storages):
     for attachment_file in file_storages:
         stored_name = save_uploaded_media(attachment_file)
         if stored_name:
-            event.attachments.append(EventAttachment(filename=stored_name))
+            event.attachments.append(Attachment(filename=stored_name))
 
 
-class ItemAttachment(db.Model):
-    __tablename__ = 'item_images'
+class Attachment(db.Model):
+    __tablename__ = 'attachments'
     id = db.Column(db.Integer, primary_key=True)
-    item_id = db.Column(db.Integer, db.ForeignKey('items.id'), nullable=False, index=True)
+    item_id = db.Column(db.Integer, db.ForeignKey('items.id'), index=True)
+    location_id = db.Column(db.Integer, db.ForeignKey('locations.id'), index=True)
+    event_id = db.Column(db.Integer, db.ForeignKey('events.id'), index=True)
     filename = db.Column(db.String(255), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    def __repr__(self):
-        return f'<ItemAttachment {self.filename}>'
+    __table_args__ = (
+        db.CheckConstraint(
+            "(item_id IS NOT NULL) + (location_id IS NOT NULL) + (event_id IS NOT NULL) = 1",
+            name='ck_attachments_single_owner'
+        ),
+    )
 
-
-class LocationAttachment(db.Model):
-    __tablename__ = 'location_images'
-    id = db.Column(db.Integer, primary_key=True)
-    location_id = db.Column(db.Integer, db.ForeignKey('locations.id'), nullable=False, index=True)
-    filename = db.Column(db.String(255), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-    def __repr__(self):
-        return f'<LocationAttachment {self.filename}>'
-
-
-class EventAttachment(db.Model):
-    __tablename__ = 'event_images'
-    id = db.Column(db.Integer, primary_key=True)
-    event_id = db.Column(db.Integer, db.ForeignKey('events.id'), nullable=False, index=True)
-    filename = db.Column(db.String(255), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    item = db.relationship('Item', back_populates='attachments', foreign_keys=[item_id])
+    location = db.relationship('Location', back_populates='attachments', foreign_keys=[location_id])
+    event = db.relationship('Event', back_populates='attachments', foreign_keys=[event_id])
 
     def __repr__(self):
-        return f'<EventAttachment {self.filename}>'
+        return f'<Attachment {self.filename}>'
+
+
+def _inspector_column_names(inspector, table_name):
+    try:
+        return {col['name'] for col in inspector.get_columns(table_name)}
+    except Exception:
+        return set()
+
+
+def _migrate_legacy_attachments(inspector, table_names):
+    """Migrate legacy media columns/tables into the unified attachments table.
+
+    Target ordering is "first uploaded first shown", so we preserve legacy table `id` ordering when migrating.
+    """
+    if 'attachments' not in (table_names or []):
+        return
+
+    try:
+        existing_items = set()
+        existing_locations = set()
+        existing_events = set()
+        for item_id, filename in (
+            db.session.query(Attachment.item_id, Attachment.filename)
+            .filter(Attachment.item_id.isnot(None), Attachment.filename.isnot(None), Attachment.filename != '')
+            .all()
+        ):
+            existing_items.add((int(item_id), filename))
+        for location_id, filename in (
+            db.session.query(Attachment.location_id, Attachment.filename)
+            .filter(Attachment.location_id.isnot(None), Attachment.filename.isnot(None), Attachment.filename != '')
+            .all()
+        ):
+            existing_locations.add((int(location_id), filename))
+        for event_id, filename in (
+            db.session.query(Attachment.event_id, Attachment.filename)
+            .filter(Attachment.event_id.isnot(None), Attachment.filename.isnot(None), Attachment.filename != '')
+            .all()
+        ):
+            existing_events.add((int(event_id), filename))
+
+        sources = {}
+        inserted = 0
+
+        def get_source(name, owner_field):
+            entry = sources.get(name)
+            if entry is None:
+                entry = {'ok': False, 'owner_field': owner_field, 'keys': set()}
+                sources[name] = entry
+            entry['owner_field'] = owner_field
+            return entry
+
+        def normalize_key(owner_id, filename):
+            if owner_id is None or filename is None:
+                return None
+            try:
+                owner_id_int = int(owner_id)
+            except (TypeError, ValueError):
+                return None
+            fname = _ensure_string(filename).strip()
+            if not fname:
+                return None
+            return owner_id_int, fname
+
+        def normalize_created_at(value):
+            if not value:
+                return None
+            if isinstance(value, datetime):
+                return value
+            token = _ensure_string(value).strip()
+            if not token:
+                return None
+            token = token.replace('T', ' ')
+            if token.endswith('Z'):
+                token = token[:-1]
+            try:
+                return datetime.fromisoformat(token)
+            except ValueError:
+                return None
+
+        def insert(owner_field, key, created_at=None):
+            nonlocal inserted
+            if not key:
+                return
+            owner_id_int, fname = key
+            if owner_field == 'item_id':
+                if key in existing_items:
+                    return
+                att = Attachment(item_id=owner_id_int, filename=fname)
+                existing_items.add(key)
+            elif owner_field == 'location_id':
+                if key in existing_locations:
+                    return
+                att = Attachment(location_id=owner_id_int, filename=fname)
+                existing_locations.add(key)
+            elif owner_field == 'event_id':
+                if key in existing_events:
+                    return
+                att = Attachment(event_id=owner_id_int, filename=fname)
+                existing_events.add(key)
+            else:
+                return
+
+            normalized = normalize_created_at(created_at)
+            if normalized:
+                att.created_at = normalized
+            db.session.add(att)
+            inserted += 1
+
+        def migrate_table(table_name, owner_field):
+            if table_name not in table_names:
+                return
+            cols = _inspector_column_names(inspector, table_name)
+            if 'filename' not in cols or owner_field not in cols:
+                return
+            source = get_source(table_name, owner_field)
+            has_created_at = 'created_at' in cols
+            select_cols = f"{owner_field}, filename" + (", created_at" if has_created_at else "")
+            try:
+                rows = db.session.execute(
+                    text(
+                        f"SELECT {select_cols} FROM {table_name} "
+                        "WHERE filename IS NOT NULL AND filename != '' "
+                        "ORDER BY id"
+                    )
+                ).fetchall()
+            except Exception:
+                return
+            source['ok'] = True
+            for row in rows:
+                if not row:
+                    continue
+                key = normalize_key(row[0], row[1])
+                if not key:
+                    continue
+                source['keys'].add(key)
+                created_at = row[2] if has_created_at and len(row) > 2 else None
+                insert(owner_field, key, created_at=created_at)
+
+        def migrate_column(table_name, column_name, owner_field):
+            if table_name not in table_names:
+                return
+            cols = _inspector_column_names(inspector, table_name)
+            if column_name not in cols:
+                return
+            source = get_source(f"{table_name}.{column_name}", owner_field)
+            try:
+                rows = db.session.execute(
+                    text(
+                        f"SELECT id, {column_name} FROM {table_name} "
+                        f"WHERE {column_name} IS NOT NULL AND {column_name} != '' "
+                        "ORDER BY id"
+                    )
+                ).fetchall()
+            except Exception:
+                return
+            source['ok'] = True
+            for row in rows:
+                if not row:
+                    continue
+                key = normalize_key(row[0], row[1])
+                if not key:
+                    continue
+                source['keys'].add(key)
+                insert(owner_field, key)
+
+        # Legacy attachment tables.
+        migrate_table('item_images', 'item_id')
+        migrate_table('location_images', 'location_id')
+        migrate_table('event_images', 'event_id')
+
+        # Legacy single-media columns.
+        migrate_column('items', 'image', 'item_id')
+        migrate_column('items', 'primary_attachment', 'item_id')
+        migrate_column('locations', 'image', 'location_id')
+        migrate_column('locations', 'primary_attachment', 'location_id')
+
+        if inserted:
+            try:
+                db.session.commit()
+            except Exception as exc:
+                app.logger.warning('附件迁移提交失败，将跳过清理以避免误删: %s', exc)
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+                app.config['ATTACHMENTS_CLEANUP_ON_START'] = False
+                return
+
+        def keys_present(entry):
+            if not entry or not entry.get('ok'):
+                return False
+            owner_field = entry.get('owner_field')
+            keys = entry.get('keys') or set()
+            if owner_field == 'item_id':
+                return keys.issubset(existing_items)
+            if owner_field == 'location_id':
+                return keys.issubset(existing_locations)
+            if owner_field == 'event_id':
+                return keys.issubset(existing_events)
+            return False
+
+        # If we saw legacy attachments but some are still missing, do NOT cleanup, and disable
+        # cleanup-on-start to avoid deleting blobs that are not yet referenced by the new table.
+        legacy_incomplete = False
+        for entry in sources.values():
+            if entry.get('ok') and not keys_present(entry):
+                legacy_incomplete = True
+                break
+        if legacy_incomplete:
+            app.logger.warning('检测到历史附件尚未完全迁移，已自动关闭启动时附件清理以防误删。')
+            app.config['ATTACHMENTS_CLEANUP_ON_START'] = False
+            return
+
+        cleanup_statements = []
+        for legacy_table in ('item_images', 'location_images', 'event_images'):
+            entry = sources.get(legacy_table)
+            if keys_present(entry):
+                cleanup_statements.append(f"DROP TABLE {legacy_table}")
+        for table_name, column_name in (
+            ('items', 'image'),
+            ('items', 'primary_attachment'),
+            ('locations', 'image'),
+            ('locations', 'primary_attachment'),
+        ):
+            entry = sources.get(f"{table_name}.{column_name}")
+            if keys_present(entry):
+                cleanup_statements.append(f"ALTER TABLE {table_name} DROP COLUMN {column_name}")
+
+        if cleanup_statements:
+            with db.engine.begin() as conn:
+                for stmt in cleanup_statements:
+                    try:
+                        conn.execute(text(stmt))
+                    except Exception:
+                        pass
+    except Exception as exc:
+        app.logger.warning('附件迁移失败，将跳过清理以避免误删: %s', exc)
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        app.config['ATTACHMENTS_CLEANUP_ON_START'] = False
 
 # 初始化数据库并创建默认用户
 with app.app_context():
@@ -3289,9 +3514,6 @@ with app.app_context():
         alter_statements = []
         has_location_status = 'status' in existing_cols
         has_legacy_status_column = 'clean_status' in existing_cols
-        has_location_primary_attachment = 'primary_attachment' in existing_cols
-        has_legacy_location_image_column = 'image' in existing_cols
-        drop_legacy_location_image_column = has_location_primary_attachment and has_legacy_location_image_column
         if not has_location_status:
             if has_legacy_status_column:
                 try:
@@ -3307,21 +3529,6 @@ with app.app_context():
             else:
                 alter_statements.append('ALTER TABLE locations ADD COLUMN status VARCHAR(20)')
                 has_location_status = True
-        if not has_location_primary_attachment:
-            if has_legacy_location_image_column:
-                try:
-                    with db.engine.begin() as conn:
-                        conn.execute(text('ALTER TABLE locations RENAME COLUMN image TO primary_attachment'))
-                    existing_cols.discard('image')
-                    existing_cols.add('primary_attachment')
-                    has_location_primary_attachment = True
-                    has_legacy_location_image_column = False
-                except Exception:
-                    alter_statements.append('ALTER TABLE locations ADD COLUMN primary_attachment VARCHAR(200)')
-                    has_location_primary_attachment = True
-            else:
-                alter_statements.append('ALTER TABLE locations ADD COLUMN primary_attachment VARCHAR(200)')
-                has_location_primary_attachment = True
         if 'latitude' not in existing_cols:
             alter_statements.append('ALTER TABLE locations ADD COLUMN latitude REAL')
         if 'longitude' not in existing_cols:
@@ -3340,12 +3547,6 @@ with app.app_context():
             with db.engine.begin() as conn:
                 try:
                     conn.execute(text('ALTER TABLE locations DROP COLUMN clean_status'))
-                except Exception:
-                    pass
-        if drop_legacy_location_image_column:
-            with db.engine.begin() as conn:
-                try:
-                    conn.execute(text('ALTER TABLE locations DROP COLUMN image'))
                 except Exception:
                     pass
         migrated_locations = False
@@ -3398,22 +3599,6 @@ with app.app_context():
     if 'items' in table_names:
         item_cols = {col['name'] for col in inspector.get_columns('items')}
         item_alter_statements = []
-        has_item_primary_attachment = 'primary_attachment' in item_cols
-        has_legacy_item_image_column = 'image' in item_cols
-        if not has_item_primary_attachment:
-            if has_legacy_item_image_column:
-                try:
-                    with db.engine.begin() as conn:
-                        conn.execute(text('ALTER TABLE items RENAME COLUMN image TO primary_attachment'))
-                    item_cols.discard('image')
-                    item_cols.add('primary_attachment')
-                    has_legacy_item_image_column = False
-                except Exception:
-                    item_alter_statements.append('ALTER TABLE items ADD COLUMN primary_attachment VARCHAR(200)')
-            else:
-                item_alter_statements.append('ALTER TABLE items ADD COLUMN primary_attachment VARCHAR(200)')
-        elif has_legacy_item_image_column:
-            item_alter_statements.append('ALTER TABLE items DROP COLUMN image')
         if 'detail_refs' not in item_cols:
             item_alter_statements.append('ALTER TABLE items ADD COLUMN detail_refs TEXT')
         if 'responsible_id' in item_cols:
@@ -3427,6 +3612,8 @@ with app.app_context():
                         conn.execute(text(stmt))
                     except Exception:
                         pass
+
+    _migrate_legacy_attachments(inspector, table_names)
     if Member.query.count() == 0:
         default_user = Member(name="Admin User", username="admin", contact="admin@example.com", notes="Default admin user")
         default_user.set_password("admin")
@@ -3952,13 +4139,13 @@ def add_event():
             add_event_attachments(event, cleaned_files)
         remote_event_refs = _collect_remote_object_keys('event_attachments')
         if remote_event_refs:
-            _append_media_records(event.attachments, EventAttachment, remote_event_refs)
+            _append_media_records(event.attachments, Attachment, remote_event_refs)
         external_urls = _extract_external_urls(request.form.get('external_event_attachment_urls'))
         if external_urls:
             existing_refs = {att.filename for att in event.attachments}
             for url in external_urls:
                 if url not in existing_refs:
-                    event.attachments.append(EventAttachment(filename=url))
+                    event.attachments.append(Attachment(filename=url))
                     existing_refs.add(url)
         event.touch()
         db.session.commit()
@@ -4325,13 +4512,13 @@ def edit_event(event_id):
             add_event_attachments(event, cleaned_files)
         remote_event_refs = _collect_remote_object_keys('event_attachments')
         if remote_event_refs:
-            _append_media_records(event.attachments, EventAttachment, remote_event_refs)
+            _append_media_records(event.attachments, Attachment, remote_event_refs)
         external_urls = _extract_external_urls(request.form.get('external_event_attachment_urls'))
         if external_urls:
             existing_refs = {att.filename for att in event.attachments}
             for url in external_urls:
                 if url not in existing_refs:
-                    event.attachments.append(EventAttachment(filename=url))
+                    event.attachments.append(Attachment(filename=url))
                     existing_refs.add(url)
 
         event.touch()
@@ -4628,7 +4815,6 @@ def add_item():
                 saved_ref_seen.add(remote_ref)
 
         external_urls = _extract_external_urls(request.form.get('external_attachment_urls'))
-        primary_attachment = saved_refs[0] if saved_refs else (external_urls[0] if external_urls else None)
 
         # ✅ 创建新的 Item 实例（已更新字段）
         new_item = Item(
@@ -4641,8 +4827,7 @@ def add_item():
             unit=unit,
             purchase_date=purchase_date,
             notes=notes,
-            purchase_link=purchase_link,
-            primary_attachment=primary_attachment
+            purchase_link=purchase_link
         )
         assigned_members = new_item.assign_responsible_members(responsible_members)
         if features_str == '私人' and not assigned_members:
@@ -4660,11 +4845,11 @@ def add_item():
         existing_refs = set()
         for fname in saved_refs:
             if fname not in existing_refs:
-                new_item.attachments.append(ItemAttachment(filename=fname))
+                new_item.attachments.append(Attachment(filename=fname))
                 existing_refs.add(fname)
         for url in external_urls:
             if url not in existing_refs:
-                new_item.attachments.append(ItemAttachment(filename=url))
+                new_item.attachments.append(Attachment(filename=url))
                 existing_refs.add(url)
         db.session.commit()
         _sync_attachments_async(new_item.attachment_filenames)
@@ -4750,9 +4935,6 @@ def edit_item(item_id):
         item.notes = request.form.get('notes')
         item.purchase_link = request.form.get('purchase_link')
 
-        if item.primary_attachment and not any(att.filename == item.primary_attachment for att in item.attachments):
-            item.attachments.append(ItemAttachment(filename=item.primary_attachment))
-
         # 删除勾选的旧附件
         remove_attachment_ids_raw = request.form.getlist('remove_attachment_ids')
         remove_attachment_ids = {int(x) for x in remove_attachment_ids_raw if x.isdigit()}
@@ -4763,36 +4945,23 @@ def edit_item(item_id):
                     item.attachments.remove(att)
                     db.session.delete(att)
 
-        remove_primary = request.form.get('remove_primary_attachment') in {'1', 'on', 'true'}
-        if remove_primary and item.primary_attachment:
-            if not any(att.filename == item.primary_attachment for att in item.attachments):
-                remove_uploaded_file(item.primary_attachment)
-            item.primary_attachment = None
-
         # 处理新增上传（支持多选）
         uploaded_files = request.files.getlist('attachments')
         for attachment_file in uploaded_files:
             stored_name = save_uploaded_media(attachment_file)
             if stored_name:
-                item.attachments.append(ItemAttachment(filename=stored_name))
+                item.attachments.append(Attachment(filename=stored_name))
         remote_refs = _collect_remote_object_keys('attachments')
         if remote_refs:
-            _append_media_records(item.attachments, ItemAttachment, remote_refs)
+            _append_media_records(item.attachments, Attachment, remote_refs)
 
         external_urls = _extract_external_urls(request.form.get('external_attachment_urls'))
         if external_urls:
             existing_refs = {att.filename for att in item.attachments}
-            if item.primary_attachment:
-                existing_refs.add(item.primary_attachment)
             for url in external_urls:
                 if url not in existing_refs:
-                    item.attachments.append(ItemAttachment(filename=url))
+                    item.attachments.append(Attachment(filename=url))
                     existing_refs.add(url)
-
-        if item.attachments:
-            item.primary_attachment = item.attachments[0].filename
-        elif remove_primary:
-            item.primary_attachment = None
 
         item.last_modified = datetime.utcnow()
         db.session.commit()
@@ -5077,14 +5246,12 @@ def add_location():
                 saved_refs.append(stored_name)
         saved_refs.extend(_collect_remote_object_keys('attachments'))
         external_urls = _extract_external_urls(request.form.get('external_attachment_urls'))
-        primary_attachment = saved_refs[0] if saved_refs else (external_urls[0] if external_urls else None)
         # 先创建 Location
         new_loc = Location(
             name=name,
             parent_id=parent_id if parent_id else None,
             notes=notes,
             is_public=is_public,
-            primary_attachment=primary_attachment,
             status=status,
             detail_link=detail_link,
             latitude=latitude,
@@ -5096,11 +5263,11 @@ def add_location():
         existing_refs = set()
         for fname in saved_refs:
             if fname not in existing_refs:
-                new_loc.attachments.append(LocationAttachment(filename=fname))
+                new_loc.attachments.append(Attachment(filename=fname))
                 existing_refs.add(fname)
         for url in external_urls:
             if url not in existing_refs:
-                new_loc.attachments.append(LocationAttachment(filename=url))
+                new_loc.attachments.append(Attachment(filename=url))
                 existing_refs.add(url)
         # 多负责人
         member_objs = []
@@ -5167,9 +5334,6 @@ def edit_location(loc_id):
             longitude = None
             coordinate_source = None
 
-        if location.primary_attachment and not any(att.filename == location.primary_attachment for att in location.attachments):
-            location.attachments.append(LocationAttachment(filename=location.primary_attachment))
-
         remove_attachment_ids_raw = request.form.getlist('remove_attachment_ids')
         remove_attachment_ids = {int(x) for x in remove_attachment_ids_raw if x.isdigit()}
         if remove_attachment_ids:
@@ -5179,35 +5343,22 @@ def edit_location(loc_id):
                     location.attachments.remove(att)
                     db.session.delete(att)
 
-        remove_primary = request.form.get('remove_primary_attachment') in {'1', 'on', 'true'}
-        if remove_primary and location.primary_attachment:
-            if not any(att.filename == location.primary_attachment for att in location.attachments):
-                remove_uploaded_file(location.primary_attachment)
-            location.primary_attachment = None
-
         uploaded_files = request.files.getlist('attachments')
         for attachment_file in uploaded_files:
             stored_name = save_uploaded_media(attachment_file)
             if stored_name:
-                location.attachments.append(LocationAttachment(filename=stored_name))
+                location.attachments.append(Attachment(filename=stored_name))
         remote_refs = _collect_remote_object_keys('attachments')
         if remote_refs:
-            _append_media_records(location.attachments, LocationAttachment, remote_refs)
+            _append_media_records(location.attachments, Attachment, remote_refs)
 
         external_urls = _extract_external_urls(request.form.get('external_attachment_urls'))
         if external_urls:
             existing_refs = {att.filename for att in location.attachments}
-            if location.primary_attachment:
-                existing_refs.add(location.primary_attachment)
             for url in external_urls:
                 if url not in existing_refs:
-                    location.attachments.append(LocationAttachment(filename=url))
+                    location.attachments.append(Attachment(filename=url))
                     existing_refs.add(url)
-
-        if location.attachments:
-            location.primary_attachment = location.attachments[0].filename
-        elif remove_primary:
-            location.primary_attachment = None
         trimmed_refs = location.set_detail_refs(detail_refs)
         # 多负责人
         member_objs = []

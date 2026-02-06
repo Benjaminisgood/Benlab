@@ -14,6 +14,7 @@
         return;
       }
       this.uploading = false;
+      this.directDisabled = false;
       this.entries = [];
       this.hiddenContainer = document.createElement('div');
       this.hiddenContainer.className = 'direct-upload-hidden-inputs';
@@ -33,8 +34,11 @@
         if (!this.input.files || !this.input.files.length || this.uploading) {
           return;
         }
+        if (this.directDisabled) {
+          this.setStatus('已切换为表单直传模式，提交后将由服务器上传。', 'warning');
+          return;
+        }
         const files = Array.from(this.input.files);
-        this.input.value = '';
         this.queueUploads(files);
       });
       this.form.addEventListener('submit', (event) => {
@@ -50,17 +54,24 @@
         return;
       }
       this.uploading = true;
+      const batchKeys = [];
       for (const file of files) {
         try {
-          await this.uploadSingle(file);
+          const objectKey = await this.uploadSingle(file);
+          if (objectKey) {
+            batchKeys.push(objectKey);
+          }
         } catch (error) {
           console.error(error);
-          this.setStatus(error.message || '上传失败，请重试。', 'danger');
+          this.rollbackEntries(batchKeys);
+          this.directDisabled = true;
+          this.setStatus((error && error.message) || '上传失败，已切换为表单直传。', 'warning');
           this.uploading = false;
           return;
         }
       }
       this.uploading = false;
+      this.input.value = '';
       this.setStatus('文件已上传至 OSS，提交表单即可保存。', 'success');
     }
 
@@ -74,7 +85,7 @@
       this.setStatus(`正在上传 ${file.name} ...`, 'info');
       const ticket = await this.requestTicket(file);
       await this.performUpload(file, ticket);
-      this.recordUpload(ticket, file);
+      return this.recordUpload(ticket, file);
     }
 
     async requestTicket(file) {
@@ -109,6 +120,8 @@
       return new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.open('PUT', ticket.upload_url);
+        const timeoutMs = Number(config.upload_timeout_ms) > 0 ? Number(config.upload_timeout_ms) : 180000;
+        xhr.timeout = timeoutMs;
         const headers = ticket.headers || {};
         Object.keys(headers).forEach((key) => {
           if (headers[key]) {
@@ -124,18 +137,21 @@
         xhr.onload = () => {
           if (xhr.status >= 200 && xhr.status < 300) {
             resolve();
+          } else if (xhr.status === 0) {
+            reject(new Error(`上传 ${file.name} 失败，未能连通对象存储（请检查 OSS CORS 配置）。`));
           } else {
             reject(new Error(`上传 ${file.name} 时 OSS 返回错误 ${xhr.status}`));
           }
         };
-        xhr.onerror = () => reject(new Error(`上传 ${file.name} 时发生网络错误。`));
+        xhr.onerror = () => reject(new Error(`上传 ${file.name} 时发生网络错误（可能是 OSS CORS 未放行）。`));
+        xhr.ontimeout = () => reject(new Error(`上传 ${file.name} 超时，请检查网络后重试。`));
         xhr.send(file);
       });
     }
 
     recordUpload(ticket, file) {
       if (!ticket || !ticket.object_key) {
-        return;
+        return null;
       }
       const entry = {
         key: ticket.object_key,
@@ -149,6 +165,22 @@
       hidden.value = entry.key;
       hidden.dataset.key = entry.key;
       this.hiddenContainer.appendChild(hidden);
+      this.renderList();
+      return entry.key;
+    }
+
+    rollbackEntries(keys) {
+      if (!Array.isArray(keys) || !keys.length) {
+        return;
+      }
+      const rollbackSet = new Set(keys);
+      this.entries = this.entries.filter((entry) => !rollbackSet.has(entry.key));
+      const hiddenInputs = Array.from(this.hiddenContainer.querySelectorAll('input'));
+      hiddenInputs.forEach((node) => {
+        if (rollbackSet.has(node.dataset.key)) {
+          node.remove();
+        }
+      });
       this.renderList();
     }
 

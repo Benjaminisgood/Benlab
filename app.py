@@ -126,7 +126,12 @@ try:
     direct_upload_expiration = int(os.getenv('DIRECT_UPLOAD_URL_EXPIRATION', '900'))
 except (TypeError, ValueError):
     direct_upload_expiration = 900
-app.config['DIRECT_OSS_UPLOAD_ENABLED'] = bool(USE_OSS)
+direct_upload_enabled = _parse_env_flag(os.getenv('DIRECT_OSS_UPLOAD_ENABLED'), default=True)
+app.config['DIRECT_OSS_UPLOAD_ENABLED'] = bool(USE_OSS and direct_upload_enabled)
+app.config['DIRECT_OSS_UPLOAD_VALIDATE_CORS'] = _parse_env_flag(
+    os.getenv('DIRECT_OSS_UPLOAD_VALIDATE_CORS'),
+    default=True
+)
 app.config['DIRECT_UPLOAD_URL_EXPIRATION'] = max(60, direct_upload_expiration)
 app.config['ATTACHMENTS_SYNC_ON_START'] = _parse_env_flag(
     os.getenv('ATTACHMENTS_SYNC_ON_START'),
@@ -1403,6 +1408,32 @@ def _get_oss_bucket():
     return _oss_bucket
 
 
+def _oss_direct_upload_ready():
+    """Return whether browser direct-upload should stay enabled."""
+    if not app.config.get('DIRECT_OSS_UPLOAD_ENABLED'):
+        return False
+    if not app.config.get('USE_OSS'):
+        return False
+    if not app.config.get('DIRECT_OSS_UPLOAD_VALIDATE_CORS', True):
+        return True
+    bucket = _get_oss_bucket()
+    if bucket is None:
+        return False
+    try:
+        cors_info = bucket.get_bucket_cors()
+    except Exception as exc:
+        app.logger.warning('读取 OSS CORS 配置失败，已关闭浏览器直传并回退为服务端上传: %s', exc)
+        return False
+    rules = getattr(cors_info, 'cors_rule_list', None) or []
+    for rule in rules:
+        allowed_methods = [str(method).upper() for method in (getattr(rule, 'allowed_methods', None) or [])]
+        allowed_origins = [str(origin).strip() for origin in (getattr(rule, 'allowed_origins', None) or [])]
+        if 'PUT' in allowed_methods and any(allowed_origins):
+            return True
+    app.logger.warning('OSS CORS 未配置 PUT 规则，已自动关闭浏览器直传并回退为服务端上传。')
+    return False
+
+
 def _attachment_storage_roots():
     attachments_root = app.config.get('ATTACHMENTS_FOLDER')
     return [attachments_root] if attachments_root else []
@@ -1513,11 +1544,20 @@ def save_uploaded_media(file_storage):
     stored_name = _generate_stored_filename(file_storage.filename)
     if app.config.get('USE_OSS'):
         bucket = _get_oss_bucket()
-        prefix = app.config.get('OSS_PREFIX')
-        object_key = f"{prefix}/{stored_name}" if prefix else stored_name
-        file_storage.stream.seek(0)
-        bucket.put_object(object_key, file_storage.stream.read())
-        return object_key
+        if bucket:
+            prefix = app.config.get('OSS_PREFIX')
+            object_key = f"{prefix}/{stored_name}" if prefix else stored_name
+            file_storage.stream.seek(0)
+            try:
+                bucket.put_object(object_key, file_storage.stream.read())
+                return object_key
+            except Exception as exc:
+                # Keep write path available when OSS has transient failures.
+                app.logger.warning('OSS 上传失败，回退本地存储: %s', exc)
+                try:
+                    file_storage.stream.seek(0)
+                except Exception:
+                    pass
     attachments_root = app.config.get('ATTACHMENTS_FOLDER')
     if not attachments_root:
         return None
@@ -1550,6 +1590,8 @@ def remove_uploaded_file(filename):
     try:
         bucket.delete_object(key)
     except oss2.exceptions.NoSuchKey:  # type: ignore[attr-defined]
+        pass
+    except Exception:
         pass
 
 
@@ -1630,7 +1672,11 @@ def _iter_oss_objects(prefix=None):
         return
     marker = ''
     while True:
-        result = bucket.list_objects(prefix=prefix or None, marker=marker, max_keys=1000)
+        try:
+            result = bucket.list_objects(prefix=prefix or None, marker=marker, max_keys=1000)
+        except Exception as exc:
+            app.logger.warning('列举 OSS 对象失败，跳过本轮任务: %s', exc)
+            break
         for obj in result.object_list or []:
             yield obj
         if getattr(result, 'is_truncated', False):
@@ -1841,9 +1887,15 @@ def _start_attachment_housekeeping():
     def runner():
         with app.app_context():
             if sync_enabled and _local_attachment_root():
-                _sync_oss_attachments_to_local()
+                try:
+                    _sync_oss_attachments_to_local()
+                except Exception as exc:
+                    app.logger.warning('附件同步任务失败: %s', exc)
             if cleanup_enabled:
-                _cleanup_orphaned_attachments()
+                try:
+                    _cleanup_orphaned_attachments()
+                except Exception as exc:
+                    app.logger.warning('附件清理任务失败: %s', exc)
 
     thread = threading.Thread(target=runner, name='attachment-housekeeping', daemon=True)
     thread.start()
@@ -2646,6 +2698,8 @@ class EventAttachment(db.Model):
 
 # 初始化数据库并创建默认用户
 with app.app_context():
+    if app.config.get('DIRECT_OSS_UPLOAD_ENABLED') and not _oss_direct_upload_ready():
+        app.config['DIRECT_OSS_UPLOAD_ENABLED'] = False
     db.create_all()
     try:
         inspector = inspect(db.engine)
@@ -3876,10 +3930,17 @@ def add_item():
         uploaded_files = request.files.getlist('attachments')
 
         saved_refs = []
+        saved_ref_seen = set()
         for attachment_file in uploaded_files:
             stored_name = save_uploaded_media(attachment_file)
-            if stored_name:
+            if stored_name and stored_name not in saved_ref_seen:
                 saved_refs.append(stored_name)
+                saved_ref_seen.add(stored_name)
+        remote_refs = _collect_remote_object_keys('attachments')
+        for remote_ref in remote_refs:
+            if remote_ref and remote_ref not in saved_ref_seen:
+                saved_refs.append(remote_ref)
+                saved_ref_seen.add(remote_ref)
 
         external_urls = _extract_external_urls(request.form.get('external_attachment_urls'))
         primary_attachment = saved_refs[0] if saved_refs else (external_urls[0] if external_urls else None)

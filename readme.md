@@ -118,6 +118,8 @@ chmod +x benlab.sh
 | `PUBLIC_BASE_URL` | `''` | 事项分享/二维码使用的外部访问域名（不影响 OSS） |
 | `ALIYUN_OSS_PUBLIC_BASE_URL` | `''` | OSS 绑定域名/CNAME（可选） |
 | `ALIYUN_OSS_ASSUME_PUBLIC` | `false` | 是否假定 OSS Bucket 公共可读；为 `false` 时生成签名 URL 并使用默认域名 |
+| `DIRECT_OSS_UPLOAD_ENABLED` | `true` | 是否启用浏览器直传 OSS；关闭后回退为服务端接收 multipart 上传 |
+| `DIRECT_OSS_UPLOAD_VALIDATE_CORS` | `true` | 启动时检查 Bucket CORS（建议保持开启）；关闭后即使无法校验 CORS 也继续启用浏览器直传 |
 | `MAX_CONTENT_LENGTH` | `2500 * 1024 * 1024` | 上传文件体积上限（2500MB） |
 
 > 若使用 `.env` / `.flaskenv` 管理变量，可借助 `python-dotenv` 自动加载。
@@ -211,6 +213,8 @@ Benlab/
 - **OSS 直传**：启用 OSS 时默认使用前端直传，无需额外开关。
   - `ALIYUN_OSS_PUBLIC_BASE_URL` 可配置绑定域名/CNAME；当 `ALIYUN_OSS_ASSUME_PUBLIC=1` 时会用作对外访问域名。
   - `ALIYUN_OSS_ASSUME_PUBLIC=0`（默认）会使用默认 bucket 域名并生成签名 URL，不依赖公共域名。
+  - 需在 OSS Bucket CORS 中放行业务域名并允许 `PUT`，否则浏览器会被跨域策略拦截。
+  - 系统启动时会检查 Bucket CORS；若未发现可用的 `PUT` 规则，会自动关闭浏览器直传并回退到服务端上传，避免前端长时间卡在上传中。
   - 若需要 HTTP，可显式写成 `http://...`。
 
 **OSS 配置示例**
@@ -258,12 +262,14 @@ export ALIYUN_OSS_ASSUME_PUBLIC=0
 - [ ] 配置反向代理与 HTTPS。
 - [ ] 开启数据库备份与日志留存策略。
 - [ ] 如使用 OSS，确保 Bucket 权限与签名配置正确（私有桶需签名访问）。
+- [ ] 如启用 OSS 直传，确认 Bucket CORS 已放行站点域名并允许 `PUT`。
 
 ## 常见问题
 - **附件无法显示？** 确认 `attachments/` 目录写权限，以及反向代理是否放行 `/attachments/<filename>` 路由。
 - **SQLite 锁冲突？** 已默认启用 WAL、busy_timeout；若并发写入仍频繁，可切换到 PostgreSQL。
 - **默认账号安全性？** 部署后务必修改管理员密码，并视情况关闭注册入口。
 - **大文件上传失败？** 检查 `MAX_CONTENT_LENGTH` 与反向代理的上传限制（如 Nginx 的 `client_max_body_size`）。
+- **直传提示“网络错误 / 超时”？** 优先检查 OSS Bucket CORS（需允许站点源 + `PUT`）；也可先将 `DIRECT_OSS_UPLOAD_ENABLED=0` 回退为服务端上传。
 - **二维码无法访问？** 确认服务域名/端口正确，反向代理未拦截静态与 `/attachments/` 路由。
 
 ## 路线图（Roadmap）

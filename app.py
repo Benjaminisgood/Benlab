@@ -777,22 +777,25 @@ _ITEM_STOCK_STATUS_INTENTS = {
     '借出': 'info',
     '舍弃': 'muted'
 }
-_ITEM_ALERT_STOCK_STATUSES = ('用完', '少量', '借出')
+_ITEM_ALERT_STOCK_STATUSES = ('用完', '舍弃', '少量', '借出')
 _ITEM_ALERT_STATUS_PRIORITY = {
     status: idx for idx, status in enumerate(_ITEM_ALERT_STOCK_STATUSES)
 }
 _ITEM_ALERT_LEVELS = {
     '用完': 'danger',
+    '舍弃': 'warning',
     '少量': 'warning',
     '借出': 'warning'
 }
 _ITEM_ALERT_ACTION_LABELS = {
     '用完': '补货处理',
+    '舍弃': '弃置处理',
     '少量': '补货处理',
     '借出': '借出跟进'
 }
 _ITEM_ALERT_MESSAGE_TEMPLATES = {
     '用完': '你有 {count} 个库存用完的物品，请立即补货！',
+    '舍弃': '你有 {count} 个标记为舍弃的物品，请尽快完成弃置处理。',
     '少量': '你有 {count} 个库存少量的物品，建议尽快补货。',
     '借出': '你有 {count} 个借出中的物品，请及时跟进归还。'
 }
@@ -839,6 +842,25 @@ _LOCATION_STATUS_INTENTS = {
     '禁止': 'neutral'
 }
 _LOCATION_DIRTY_STATUS_VALUES = {'脏', '报修', '危险'}
+_LOCATION_ALERT_STATUSES = ('危险', '报修', '脏')
+_LOCATION_ALERT_STATUS_PRIORITY = {
+    status: idx for idx, status in enumerate(_LOCATION_ALERT_STATUSES)
+}
+_LOCATION_ALERT_LEVELS = {
+    '危险': 'danger',
+    '报修': 'warning',
+    '脏': 'warning'
+}
+_LOCATION_ALERT_ACTION_LABELS = {
+    '危险': '立即隔离',
+    '报修': '安排报修',
+    '脏': '清洁处理'
+}
+_LOCATION_ALERT_MESSAGE_TEMPLATES = {
+    '危险': '你有 {count} 个危险状态的位置，请立即处理并限制使用。',
+    '报修': '你有 {count} 个报修状态的位置，请尽快安排维修。',
+    '脏': '你有 {count} 个脏状态的位置，请及时清洁。'
+}
 
 
 def _ensure_string(value):
@@ -998,6 +1020,30 @@ def _is_location_dirty_status(value):
     """Return whether location status should be treated as critical."""
     normalized = _normalize_location_status(value)
     return normalized in _LOCATION_DIRTY_STATUS_VALUES
+
+
+def _is_location_alert_status(value):
+    """Return whether location status should trigger reminder."""
+    status = _normalize_location_status(value)
+    return status in _LOCATION_ALERT_STATUSES
+
+
+def _location_alert_level(value):
+    status = _normalize_location_status(value)
+    return _LOCATION_ALERT_LEVELS.get(status, 'warning')
+
+
+def _location_alert_action_label(value):
+    status = _normalize_location_status(value)
+    return _LOCATION_ALERT_ACTION_LABELS.get(status, '处理')
+
+
+def _location_alert_message(value, count):
+    status = _normalize_location_status(value)
+    template = _LOCATION_ALERT_MESSAGE_TEMPLATES.get(status)
+    if not template:
+        return ''
+    return template.format(count=count)
 
 
 def _location_status_intent(value):
@@ -4946,9 +4992,16 @@ def profile(member_id):
     normal_items.sort(key=lambda it: (it.name or '').lower())
     items_resp = critical_items + normal_items  # 告警状态的置顶
 
-    critical_locs = [loc for loc in all_locations if _is_location_dirty_status(loc.status)]
-    normal_locs = [loc for loc in all_locations if not _is_location_dirty_status(loc.status)]
-    locations_resp = critical_locs + normal_locs  # 卫生差/需报修/危险的置顶
+    critical_locs = [loc for loc in all_locations if _is_location_alert_status(loc.status)]
+    critical_locs.sort(
+        key=lambda loc: (
+            _LOCATION_ALERT_STATUS_PRIORITY.get(_normalize_location_status(loc.status), 99),
+            (loc.name or '').lower()
+        )
+    )
+    normal_locs = [loc for loc in all_locations if not _is_location_alert_status(loc.status)]
+    normal_locs.sort(key=lambda loc: (loc.name or '').lower())
+    locations_resp = critical_locs + normal_locs  # 告警状态的置顶
 
     item_alert_counts = {status: 0 for status in _ITEM_ALERT_STOCK_STATUSES}
     item_alert_samples = {status: [] for status in _ITEM_ALERT_STOCK_STATUSES}
@@ -4972,7 +5025,28 @@ def profile(member_id):
             'message': _item_alert_message(status, count),
             'sample_items': item_alert_samples.get(status, [])
         })
-    any_location_dirty = any(_is_location_dirty_status(loc.status) for loc in locations_resp)
+    location_alert_counts = {status: 0 for status in _LOCATION_ALERT_STATUSES}
+    location_alert_samples = {status: [] for status in _LOCATION_ALERT_STATUSES}
+    for location in critical_locs:
+        status = _normalize_location_status(location.status)
+        if not status:
+            continue
+        location_alert_counts[status] += 1
+        if len(location_alert_samples[status]) < 3:
+            location_alert_samples[status].append(location)
+    location_alerts = []
+    for status in _LOCATION_ALERT_STATUSES:
+        count = location_alert_counts.get(status, 0)
+        if count <= 0:
+            continue
+        location_alerts.append({
+            'status': status,
+            'count': count,
+            'level': _location_alert_level(status),
+            'action_label': _location_alert_action_label(status),
+            'message': _location_alert_message(status, count),
+            'sample_locations': location_alert_samples.get(status, [])
+        })
     items_preview = items_resp[:5]
     items_extra = items_resp[5:]
     locations_preview = locations_resp[:5]
@@ -5109,7 +5183,7 @@ def profile(member_id):
                            locations_preview=locations_preview,
                            locations_extra=locations_extra,
                            item_alerts=item_alerts,
-                           any_location_dirty=any_location_dirty,
+                           location_alerts=location_alerts,
                            events_upcoming=events_upcoming,
                            events_past=events_past,
                            is_following=is_following,

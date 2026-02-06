@@ -272,8 +272,27 @@
   </div>
   {% endfor %}
 {% endif %}
-{% if is_self and any_location_dirty %}
-  <div class="alert alert-danger">你有脏/报修/危险状态的位置，请尽快处理！</div>
+{% if is_self and location_alerts %}
+  {% for alert in location_alerts %}
+  <div class="alert alert-{{ alert.level }}">
+    <div class="fw-semibold">{{ alert.message }}</div>
+    <div class="small mt-1 text-muted">建议动作：{{ alert.action_label }}</div>
+    {% if alert.sample_locations %}
+      <div class="small mt-1">
+        涉及：
+        {% for location in alert.sample_locations %}
+          <a href="{{ url_for('view_location', loc_id=location.id) }}" class="text-decoration-none">{{ location.name }}</a>{% if not loop.last %}、{% endif %}
+        {% endfor %}
+        {% if alert.count > alert.sample_locations|length %}
+          等 {{ alert.count }} 个
+        {% endif %}
+      </div>
+      <div class="mt-2">
+        <a href="{{ url_for('edit_location', loc_id=alert.sample_locations[0].id) }}" class="btn btn-outline-{{ alert.level }} btn-sm">{{ alert.action_label }}</a>
+      </div>
+    {% endif %}
+  </div>
+  {% endfor %}
 {% endif %}
 <div class="card mb-4">
   <div class="card-header fw-semibold">个人展示 / 备注</div>

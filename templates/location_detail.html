@@ -4,7 +4,7 @@
 {% set detail_refs = location.detail_refs_without_usage_tags %}
 <h4 class="mb-3">{{ location.name }}</h4>
 
-<div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+<div class="d-flex flex-wrap align-items-center gap-2 mb-3 page-action-toolbar">
   {% if location.latitude is not none and location.longitude is not none %}
   <button type="button" class="btn btn-outline-secondary" id="copyLocationCoordBtn">复制坐标</button>
   {% endif %}
@@ -19,7 +19,7 @@
     移除物品
   </button>
   <a href="{{ url_for('edit_location', loc_id=location.id) }}" class="btn btn-primary">编辑</a>
-  <form action="{{ url_for('delete_location', loc_id=location.id) }}" method="post" class="d-inline" onsubmit="return confirm('确定删除该空间吗？此操作无法恢复。');">
+  <form action="{{ url_for('delete_location', loc_id=location.id) }}" method="post" onsubmit="return confirm('确定删除该空间吗？此操作无法恢复。');">
     <button type="submit" class="btn btn-danger">删除</button>
   </form>
   <a href="{{ url_for('locations_list') }}" class="btn btn-secondary">返回列表</a>
@@ -132,10 +132,10 @@
             {% endif %}
           </div>
         </div>
-        <div class="btn-group btn-group-sm mt-3" role="group">
-          <a class="btn btn-outline-primary" href="geo:{{ '%.6f'|format(location.latitude) }},{{ '%.6f'|format(location.longitude) }}">系统地图</a>
-          <a class="btn btn-outline-primary" href="https://www.google.com/maps/dir/?api=1&destination={{ '%.6f'|format(location.latitude) }},{{ '%.6f'|format(location.longitude) }}" target="_blank" rel="noopener">Google</a>
-          <a class="btn btn-outline-primary" href="http://maps.apple.com/?ll={{ '%.6f'|format(location.latitude) }},{{ '%.6f'|format(location.longitude) }}" target="_blank" rel="noopener">Apple</a>
+        <div class="d-flex flex-wrap gap-2 mt-3 location-coordinate-actions">
+          <a class="btn btn-sm btn-outline-primary" href="geo:{{ '%.6f'|format(location.latitude) }},{{ '%.6f'|format(location.longitude) }}">系统地图</a>
+          <a class="btn btn-sm btn-outline-primary" href="https://www.google.com/maps/dir/?api=1&destination={{ '%.6f'|format(location.latitude) }},{{ '%.6f'|format(location.longitude) }}" target="_blank" rel="noopener">Google</a>
+          <a class="btn btn-sm btn-outline-primary" href="http://maps.apple.com/?ll={{ '%.6f'|format(location.latitude) }},{{ '%.6f'|format(location.longitude) }}" target="_blank" rel="noopener">Apple</a>
         </div>
       </li>
       {% endif %}

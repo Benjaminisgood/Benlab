@@ -69,7 +69,7 @@
                value="{{ '%.6f'|format(location.longitude) if location and location.longitude is not none else '' }}">
       </div>
     </div>
-    <div class="d-flex gap-2 mt-2">
+    <div class="d-flex flex-wrap gap-2 mt-2 location-coordinate-actions">
       <button type="button" class="btn btn-outline-primary btn-sm" id="detectLocationBtn">自动获取当前位置</button>
       <button type="button" class="btn btn-outline-success btn-sm" id="openMapPickerBtn" data-bs-toggle="modal" data-bs-target="#mapPickerModal">在地图上选取</button>
       <button type="button" class="btn btn-outline-secondary btn-sm" id="clearLocationBtn">清除坐标</button>

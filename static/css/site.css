@@ -1265,4 +1265,140 @@ html {
   .theme-controls {
     justify-content: flex-start;
   }
+
+  .page-header-actions {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .page-header-actions > h2,
+  .page-header-actions > h3,
+  .page-header-actions > h4 {
+    flex: 1 0 100%;
+    margin-bottom: 0;
+  }
+
+  .page-header-actions > .btn,
+  .page-header-actions > a.btn {
+    width: 100%;
+  }
+
+  .page-action-toolbar {
+    gap: 0.5rem;
+  }
+
+  .page-action-toolbar > .btn,
+  .page-action-toolbar > a.btn,
+  .page-action-toolbar > form {
+    flex: 1 1 calc(50% - 0.5rem);
+    min-width: 0;
+  }
+
+  .page-action-toolbar > form {
+    margin: 0;
+    display: block !important;
+  }
+
+  .page-action-toolbar > form .btn {
+    width: 100%;
+  }
+
+  #itemsTable .col-item-actions form,
+  #locationsTable .col-location-actions form {
+    display: block !important;
+    margin: 0;
+  }
+
+  #itemsTable .col-item-actions .btn,
+  #locationsTable .col-location-actions .btn {
+    width: 100%;
+    margin-bottom: 0.35rem;
+  }
+
+  #itemsTable .col-item-actions form .btn,
+  #locationsTable .col-location-actions form .btn {
+    margin-bottom: 0;
+  }
+
+  .location-coordinate-actions > .btn,
+  .location-coordinate-actions > a.btn {
+    flex: 1 1 calc(50% - 0.5rem);
+  }
+
+  #itemsSuggestions,
+  #locationsSuggestions {
+    max-height: 45vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@media (max-width: 575.98px) {
+  .table th,
+  .table td {
+    padding: 0.55rem 0.5rem;
+  }
+
+  .table thead {
+    letter-spacing: 0.04em;
+    font-size: 0.72rem;
+  }
+
+  .table-inventory .col-item-name {
+    min-width: 150px;
+  }
+
+  .table-inventory .col-item-location {
+    min-width: 130px;
+  }
+
+  .table-inventory .col-item-responsible {
+    min-width: 145px;
+  }
+
+  .table-inventory .col-item-actions {
+    min-width: 112px;
+  }
+
+  #locationsTable .col-location-name {
+    min-width: 165px;
+  }
+
+  #locationsTable .col-location-usage {
+    min-width: 140px;
+  }
+
+  #locationsTable .col-location-responsible {
+    min-width: 170px;
+  }
+
+  #locationsTable .col-location-actions {
+    min-width: 112px;
+  }
+
+  .page-action-toolbar > .btn,
+  .page-action-toolbar > a.btn,
+  .page-action-toolbar > form,
+  .location-coordinate-actions > .btn,
+  .location-coordinate-actions > a.btn {
+    flex-basis: 100%;
+  }
+
+  #itemResponsibleSummary,
+  #itemLocationsSummary,
+  #locationResponsibleSummary,
+  #parentLocationSummary {
+    width: 100%;
+  }
+
+  #itemResponsibleSummary + button,
+  #itemLocationsSummary + button,
+  #locationResponsibleSummary + button,
+  #parentLocationSummary + button {
+    width: 100%;
+  }
+
+  .form-check.form-switch .form-check-label {
+    line-height: 1.35;
+  }
 }

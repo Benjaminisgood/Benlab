@@ -104,6 +104,26 @@ TEMP_PAGE_DIR = app.instance_path
 # 确保运行所需的实例目录存在
 os.makedirs(TEMP_PAGE_DIR, exist_ok=True)
 app.config['MAX_CONTENT_LENGTH'] = 2500 * 1024 * 1024  # 限制上传2500MB以内的文件
+
+# 存储模式：
+# - oss (默认)：上传至 OSS，并可同步/清理 OSS 上的对象
+# - local：仅使用服务器本地 attachments/，不访问 OSS
+# - auto：OSS 配置齐全且依赖可用时使用 OSS，否则退回本地
+storage_mode = (os.getenv('BENLAB_STORAGE_MODE') or os.getenv('STORAGE_MODE') or '').strip().lower()
+local_only_mode = _parse_env_flag(os.getenv('LOCAL_ONLY_MODE') or os.getenv('BENLAB_LOCAL_ONLY'), default=False)
+want_use_oss = True
+if storage_mode:
+    if storage_mode in {'local', 'local-only', 'local_only', 'localonly'}:
+        want_use_oss = False
+    elif storage_mode in {'oss', 'remote'}:
+        want_use_oss = True
+    elif storage_mode in {'auto'}:
+        want_use_oss = None
+    else:
+        raise RuntimeError(f"未知存储模式 BENLAB_STORAGE_MODE={storage_mode!r}，仅支持 oss/local/auto")
+elif local_only_mode:
+    want_use_oss = False
+
 OSS_ENDPOINT = _normalize_base_url(os.getenv('ALIYUN_OSS_ENDPOINT'))
 OSS_ACCESS_KEY_ID = os.getenv('ALIYUN_OSS_ACCESS_KEY_ID')
 OSS_ACCESS_KEY_SECRET = os.getenv('ALIYUN_OSS_ACCESS_KEY_SECRET')
@@ -112,11 +132,15 @@ OSS_PREFIX = (os.getenv('ALIYUN_OSS_PREFIX') or '').strip('/ ')
 OSS_PUBLIC_BASE_URL = _normalize_base_url(os.getenv('ALIYUN_OSS_PUBLIC_BASE_URL'))
 OSS_ASSUME_PUBLIC = _parse_env_flag(os.getenv('ALIYUN_OSS_ASSUME_PUBLIC'), default=False)
 _oss_env_ready = bool(OSS_ENDPOINT and OSS_ACCESS_KEY_ID and OSS_ACCESS_KEY_SECRET and OSS_BUCKET_NAME)
-if not _oss_env_ready:
-    raise RuntimeError('OSS 配置缺失，请检查环境变量。')
-if not oss2:
-    raise RuntimeError('oss2 library not available but OSS is enabled.')
-USE_OSS = True
+if want_use_oss is None:
+    USE_OSS = bool(_oss_env_ready and oss2)
+else:
+    USE_OSS = bool(want_use_oss)
+if USE_OSS:
+    if not _oss_env_ready:
+        raise RuntimeError('OSS 配置缺失，请检查环境变量。')
+    if not oss2:
+        raise RuntimeError('oss2 library not available but OSS is enabled.')
 app.config['USE_OSS'] = USE_OSS
 app.config['OSS_ENDPOINT'] = OSS_ENDPOINT
 app.config['OSS_ACCESS_KEY_ID'] = OSS_ACCESS_KEY_ID

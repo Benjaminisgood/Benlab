@@ -185,6 +185,7 @@ setx PORT "5001"
 | `PORT` / `FLASK_RUN_PORT` / `BENSCI_PORT` | `5001` | 多级端口回退，优先级 `PORT` → `FLASK_RUN_PORT` → `BENSCI_PORT` |
 | `SQLALCHEMY_DATABASE_URI` | `sqlite:///lab.db?timeout=30` | 支持改为 PostgreSQL/MySQL 等，例如 `postgresql+psycopg://user:pass@host/db` |
 | `ATTACHMENTS_FOLDER` | `./attachments` | 上传文件保存目录，默认位于项目根目录 |
+| `BENLAB_STORAGE_MODE` | `oss` | 存储模式：`oss` 使用 OSS；`local` 仅本地存储（不上传/不同步 OSS）；`auto` 自动选择（OSS 配置齐全且依赖可用时启用 OSS） |
 | `PUBLIC_BASE_URL` | `''` | 事项分享/二维码使用的外部访问域名（不影响 OSS） |
 | `ALIYUN_OSS_PUBLIC_BASE_URL` | `''` | OSS 绑定域名/CNAME（可选） |
 | `ALIYUN_OSS_ASSUME_PUBLIC` | `false` | 是否假定 OSS Bucket 公共可读；为 `false` 时生成签名 URL 并使用默认域名 |

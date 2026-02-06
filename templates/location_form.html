@@ -76,7 +76,7 @@
         {% set legacy_kind = media_kind(location.primary_attachment) %}
         {% set legacy_url = uploaded_media_url(location.primary_attachment) %}
         {% set legacy_name = media_display_name(location.primary_attachment) %}
-        <div class="media-card flex-column align-items-stretch" data-kind="{{ legacy_kind }}">
+        <div class="media-card flex-column align-items-stretch" data-kind="{{ legacy_kind }}" data-ai-media-ref="{{ location.primary_attachment }}">
           {% if legacy_kind == 'image' %}
           <img src="{{ legacy_url }}" alt="空间媒资" class="media-card-img">
           {% elif legacy_kind == 'video' %}
@@ -111,7 +111,7 @@
         {% set media_kind_value = media_kind(attachment.filename) %}
         {% set media_url = uploaded_media_url(attachment.filename) %}
         {% set media_name = media_display_name(attachment.filename) %}
-        <div class="media-card flex-column align-items-stretch" data-kind="{{ media_kind_value }}">
+        <div class="media-card flex-column align-items-stretch" data-kind="{{ media_kind_value }}" data-ai-media-ref="{{ attachment.filename }}">
           {% if media_kind_value == 'image' %}
           <img src="{{ media_url }}" alt="空间媒资" class="media-card-img">
           {% elif media_kind_value == 'video' %}
@@ -156,6 +156,10 @@
       <label for="locationExternalAttachmentUrls" class="form-label">外部媒体链接</label>
       <textarea class="form-control" id="locationExternalAttachmentUrls" name="external_attachment_urls" rows="2" placeholder="每行一个 http(s):// 链接"></textarea>
       <div class="form-text">可粘贴图床 / OSS / 视频或音频外链，与上传文件一同展示；已有媒资可在上方勾选删除。</div>
+    </div>
+    <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
+      <button type="button" class="btn btn-outline-primary btn-sm" id="locationAiAutofillBtn">AI自动填写</button>
+      <span class="form-text m-0" id="locationAiAutofillHint">上传或拍照后，自动识别并补充空间信息。</span>
     </div>
     <img id="imgPreview" src="#" alt="预览" style="max-width: 120px; display: none; margin-top: 5px;">
   </div>
@@ -355,6 +359,218 @@
       }
     });
   }
+  (function initLocationAiAutofill() {
+    const form = document.getElementById('locationForm');
+    const triggerBtn = document.getElementById('locationAiAutofillBtn');
+    const hint = document.getElementById('locationAiAutofillHint');
+    const attachmentInput = document.getElementById('attachmentInput');
+    const externalUrlsInput = document.getElementById('locationExternalAttachmentUrls');
+    const nameInput = document.getElementById('name');
+    const statusInput = document.getElementById('status');
+    const detailLinkInput = document.getElementById('detail_link');
+    const notesInput = document.getElementById('notes');
+    const detailRefsContainer = document.getElementById('locationDetailRefsContainer');
+    const apiUrl = '{{ url_for("ai_form_autofill") }}';
+    if (!form || !triggerBtn || !attachmentInput || !apiUrl) {
+      return;
+    }
+    const setHint = function (message, tone) {
+      if (!hint) {
+        return;
+      }
+      hint.className = 'form-text m-0';
+      const classNameMap = {
+        success: 'text-success',
+        warning: 'text-warning',
+        danger: 'text-danger',
+        info: 'text-info'
+      };
+      hint.classList.add(classNameMap[tone] || 'text-muted');
+      hint.textContent = message;
+    };
+    const readRefs = function () {
+      const refs = [];
+      const seen = new Set();
+      Array.prototype.slice.call(form.querySelectorAll('input[name="attachments_remote_keys"]')).forEach(function (input) {
+        const val = (input.value || '').trim();
+        if (val && !seen.has(val)) {
+          refs.push(val);
+          seen.add(val);
+        }
+      });
+      Array.prototype.slice.call(form.querySelectorAll('[data-ai-media-ref]')).forEach(function (node) {
+        const val = (node.getAttribute('data-ai-media-ref') || '').trim();
+        if (val && !seen.has(val)) {
+          refs.push(val);
+          seen.add(val);
+        }
+      });
+      return refs;
+    };
+    const appendDetailRef = function (labelValue, refValue) {
+      if (!detailRefsContainer || !refValue) {
+        return false;
+      }
+      const existingValues = new Set(Array.prototype.slice.call(detailRefsContainer.querySelectorAll('input[name="detail_ref_value"]')).map(function (node) {
+        return (node.value || '').trim();
+      }).filter(Boolean));
+      if (existingValues.has(refValue)) {
+        return false;
+      }
+      const row = document.createElement('div');
+      row.className = 'input-group location-detail-ref-row';
+      row.innerHTML = `
+        <span class="input-group-text">说明</span>
+        <input type="text" class="form-control" name="detail_ref_label" placeholder="例如：路线 / 预约 / 编号">
+        <span class="input-group-text">内容</span>
+        <input type="text" class="form-control" name="detail_ref_value" placeholder="编号 / 链接 / 任意文本">
+        <button class="btn btn-outline-danger location-detail-ref-remove" type="button">&times;</button>
+      `;
+      const labelInput = row.querySelector('input[name="detail_ref_label"]');
+      const valueInput = row.querySelector('input[name="detail_ref_value"]');
+      if (labelValue) {
+        labelInput.value = labelValue;
+      }
+      valueInput.value = refValue;
+      const removeBtn = row.querySelector('.location-detail-ref-remove');
+      removeBtn.addEventListener('click', function () {
+        if (detailRefsContainer.children.length > 1) {
+          row.remove();
+        } else {
+          labelInput.value = '';
+          valueInput.value = '';
+        }
+      });
+      detailRefsContainer.appendChild(row);
+      return true;
+    };
+    const applyUsageTags = function (usageTags) {
+      if (!Array.isArray(usageTags) || !usageTags.length) {
+        return 0;
+      }
+      const checkboxes = Array.prototype.slice.call(form.querySelectorAll('input[name="usage_tags"]'));
+      if (!checkboxes.length) {
+        return 0;
+      }
+      let changed = 0;
+      const currentChecked = checkboxes.filter(function (cb) { return cb.checked; }).length;
+      checkboxes.forEach(function (cb) {
+        if (usageTags.indexOf(cb.value) !== -1) {
+          if (!cb.checked) {
+            cb.checked = true;
+            changed += 1;
+          }
+        } else if (!currentChecked && cb.checked) {
+          cb.checked = false;
+          changed += 1;
+        }
+      });
+      return changed;
+    };
+    const applySuggestion = function (suggestion) {
+      if (!suggestion || typeof suggestion !== 'object') {
+        return 0;
+      }
+      let updatedCount = 0;
+      if (nameInput && suggestion.name && !nameInput.value.trim()) {
+        nameInput.value = suggestion.name;
+        updatedCount += 1;
+      }
+      if (statusInput && suggestion.status && statusInput.value !== suggestion.status) {
+        statusInput.value = suggestion.status;
+        updatedCount += 1;
+      }
+      if (detailLinkInput && suggestion.detail_link && !detailLinkInput.value.trim()) {
+        detailLinkInput.value = suggestion.detail_link;
+        updatedCount += 1;
+      }
+      if (notesInput && suggestion.notes) {
+        const existing = notesInput.value.trim();
+        if (!existing) {
+          notesInput.value = suggestion.notes;
+          updatedCount += 1;
+        } else if (existing.indexOf(suggestion.notes) === -1) {
+          notesInput.value = existing + '\n\n' + suggestion.notes;
+          updatedCount += 1;
+        }
+      }
+      const refs = Array.isArray(suggestion.detail_refs) ? suggestion.detail_refs : [];
+      refs.forEach(function (ref) {
+        if (!ref || typeof ref !== 'object') {
+          return;
+        }
+        const label = (ref.label || '').trim();
+        const value = (ref.value || '').trim();
+        if (!value) {
+          return;
+        }
+        if (appendDetailRef(label, value)) {
+          updatedCount += 1;
+        }
+      });
+      updatedCount += applyUsageTags(suggestion.usage_tags);
+      return updatedCount;
+    };
+    triggerBtn.addEventListener('click', async function () {
+      if (attachmentInput.__directUploader && attachmentInput.__directUploader.uploading) {
+        setHint('文件仍在上传，请稍候再执行 AI 自动填写。', 'warning');
+        return;
+      }
+      const refs = readRefs();
+      const files = attachmentInput.files ? Array.from(attachmentInput.files) : [];
+      if (!files.length && !refs.length) {
+        setHint('请先拍照或上传至少一张图片。', 'warning');
+        return;
+      }
+      triggerBtn.disabled = true;
+      setHint('AI 识别中，请稍候…', 'info');
+      const formData = new FormData();
+      formData.append('form_type', 'location');
+      files.forEach(function (file) {
+        formData.append('attachments', file, file.name || 'upload.jpg');
+      });
+      refs.forEach(function (ref) {
+        formData.append('uploaded_refs', ref);
+      });
+      if (externalUrlsInput && externalUrlsInput.value.trim()) {
+        formData.append('external_attachment_urls', externalUrlsInput.value);
+      }
+      formData.append('context_json', JSON.stringify({
+        name: nameInput ? nameInput.value : '',
+        status: statusInput ? statusInput.value : '',
+        detail_link: detailLinkInput ? detailLinkInput.value : '',
+        notes: notesInput ? notesInput.value : ''
+      }));
+      try {
+        const resp = await fetch(apiUrl, {
+          method: 'POST',
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+          },
+          body: formData
+        });
+        let payload = {};
+        try {
+          payload = await resp.json();
+        } catch (e) {
+          payload = {};
+        }
+        if (!resp.ok) {
+          throw new Error(payload.message || 'AI 自动填写失败，请稍后再试。');
+        }
+        const changed = applySuggestion(payload.suggestion || {});
+        if (changed > 0) {
+          setHint('AI 已完成自动填写，请检查后保存。', 'success');
+        } else {
+          setHint('AI 已识别完成，但没有可更新的字段。', 'warning');
+        }
+      } catch (err) {
+        setHint((err && err.message) || 'AI 自动填写失败，请稍后再试。', 'danger');
+      } finally {
+        triggerBtn.disabled = false;
+      }
+    });
+  })();
 
   (function registerLocationDetailRefEditor() {
     const container = document.getElementById('locationDetailRefsContainer');

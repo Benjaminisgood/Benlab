@@ -1,9 +1,69 @@
 (function () {
   const config = (window.BenlabUploadConfig || {});
-  if (!config.enabled || !config.presign_url) {
-    return;
-  }
+  const directEnabled = Boolean(config.enabled && config.presign_url);
   const fieldSuffix = config.field_suffix || '_remote_keys';
+  const canMergeFiles = typeof DataTransfer !== 'undefined';
+
+  function fileIdentity(file) {
+    if (!file) {
+      return '';
+    }
+    return [file.name || '', file.size || 0, file.lastModified || 0, file.type || ''].join('::');
+  }
+
+  function mergeFiles(existingFiles, incomingFiles) {
+    const merged = [];
+    const seen = new Set();
+    const source = []
+      .concat(Array.isArray(existingFiles) ? existingFiles : [])
+      .concat(Array.isArray(incomingFiles) ? incomingFiles : []);
+    source.forEach((file) => {
+      if (!file) {
+        return;
+      }
+      const key = fileIdentity(file);
+      if (seen.has(key)) {
+        return;
+      }
+      merged.push(file);
+      seen.add(key);
+    });
+    return merged;
+  }
+
+  function assignFilesToInput(input, files) {
+    if (!canMergeFiles || !input) {
+      return false;
+    }
+    const transfer = new DataTransfer();
+    (files || []).forEach((file) => {
+      if (file) {
+        transfer.items.add(file);
+      }
+    });
+    input.files = transfer.files;
+    return true;
+  }
+
+  function enhanceMultipleFileInput(input) {
+    if (!canMergeFiles || !input || !input.multiple || input.__multiCaptureEnhanced) {
+      return;
+    }
+    input.__multiCaptureEnhanced = true;
+    input.__preservedFiles = Array.from(input.files || []);
+    input.addEventListener('change', () => {
+      if (input.__skipPreserveSelection) {
+        input.__skipPreserveSelection = false;
+        return;
+      }
+      const latestSelection = Array.from(input.files || []);
+      if (!latestSelection.length) {
+        return;
+      }
+      input.__preservedFiles = mergeFiles(input.__preservedFiles, latestSelection);
+      assignFilesToInput(input, input.__preservedFiles);
+    });
+  }
 
   class DirectOssUploader {
     constructor(input) {
@@ -16,6 +76,7 @@
       this.uploading = false;
       this.directDisabled = false;
       this.entries = [];
+      this.localFallbackFiles = [];
       this.hiddenContainer = document.createElement('div');
       this.hiddenContainer.className = 'direct-upload-hidden-inputs';
       this.hiddenContainer.hidden = true;
@@ -34,11 +95,12 @@
         if (!this.input.files || !this.input.files.length || this.uploading) {
           return;
         }
+        const files = Array.from(this.input.files);
         if (this.directDisabled) {
-          this.setStatus('已切换为表单直传模式，提交后将由服务器上传。', 'warning');
+          this.appendFallbackFiles(files);
+          this.setStatus('已切换为表单直传模式，可继续拍照追加多张后提交。', 'warning');
           return;
         }
-        const files = Array.from(this.input.files);
         this.queueUploads(files);
       });
       this.form.addEventListener('submit', (event) => {
@@ -65,14 +127,27 @@
           console.error(error);
           this.rollbackEntries(batchKeys);
           this.directDisabled = true;
+          this.appendFallbackFiles(files);
           this.setStatus((error && error.message) || '上传失败，已切换为表单直传。', 'warning');
           this.uploading = false;
           return;
         }
       }
       this.uploading = false;
+      this.localFallbackFiles = [];
+      this.input.__preservedFiles = [];
       this.input.value = '';
       this.setStatus('文件已上传至 OSS，提交表单即可保存。', 'success');
+    }
+
+    appendFallbackFiles(files) {
+      if (!canMergeFiles || !this.input.multiple || !Array.isArray(files) || !files.length) {
+        return;
+      }
+      this.localFallbackFiles = mergeFiles(this.localFallbackFiles, files);
+      this.input.__skipPreserveSelection = true;
+      assignFilesToInput(this.input, this.localFallbackFiles);
+      this.input.__preservedFiles = this.localFallbackFiles.slice();
     }
 
     async uploadSingle(file) {
@@ -230,7 +305,22 @@
     }
   }
 
+  function hydrateMultipleInputs() {
+    const allFileInputs = document.querySelectorAll('input[type="file"][multiple]');
+    allFileInputs.forEach((input) => {
+      const isDirectUploadInput = input.dataset.directUpload === 'oss';
+      if (isDirectUploadInput && directEnabled) {
+        return;
+      }
+      enhanceMultipleFileInput(input);
+    });
+  }
+
   function hydrateInputs() {
+    hydrateMultipleInputs();
+    if (!directEnabled) {
+      return;
+    }
     const inputs = document.querySelectorAll('input[type="file"][data-direct-upload="oss"]');
     inputs.forEach((input) => {
       if (!input.__directUploader) {

@@ -4,6 +4,9 @@ import tempfile
 import zipfile
 import threading
 import time
+import base64
+import mimetypes
+import hashlib
 from datetime import datetime, timedelta, timezone
 import re
 import json
@@ -2312,6 +2315,425 @@ def _append_media_records(collection, model_cls, filenames):
         existing.add(name)
 
 
+_AI_AUTOFILL_FORM_TYPES = {'item', 'location'}
+_AI_AUTOFILL_IMAGE_LIMIT = 6
+_AI_AUTOFILL_REF_LIMIT = 16
+_AI_AUTOFILL_TIMEOUT_SECONDS = 45
+_AI_AUTOFILL_NOTES_LIMIT = 1200
+_AI_AUTOFILL_DETAIL_REF_LIMIT = 8
+_AI_AUTOFILL_DETAIL_LABEL_LIMIT = 32
+_AI_AUTOFILL_DETAIL_VALUE_LIMIT = 240
+_AI_AUTOFILL_IMAGE_MAX_BYTES = 1_700_000
+_AI_AUTOFILL_IMAGE_MAX_SIDE = 1600
+
+
+def _limit_text(value, max_length):
+    text_value = _ensure_string(value).strip()
+    if not text_value or not max_length or max_length <= 0:
+        return text_value
+    return text_value[:max_length]
+
+
+def _chatanywhere_runtime_config():
+    api_key = (
+        os.getenv('CHAT_ANYWHERE_API_KEY')
+        or os.getenv('OPENAI_API_KEY')
+        or ''
+    ).strip()
+    base_url = (os.getenv('CHAT_ANYWHERE_API_BASE_URL') or 'https://api.chatanywhere.com/v1').strip().rstrip('/')
+    model = (
+        os.getenv('CHAT_ANYWHERE_MODEL')
+        or os.getenv('CHAT_ANYWHERE_VISION_MODEL')
+        or os.getenv('CHAT_ANYWHERE_CHAT_MODEL')
+        or os.getenv('OPENAI_MODEL')
+        or 'gpt-4o-mini'
+    ).strip()
+    endpoint = f"{base_url}/chat/completions" if base_url else ''
+    return {
+        'api_key': api_key,
+        'base_url': base_url,
+        'endpoint': endpoint,
+        'model': model
+    }
+
+
+def _normalize_ai_uploaded_refs(raw_refs):
+    normalized = []
+    seen = set()
+    for raw_ref in raw_refs or []:
+        token = _ensure_string(raw_ref).strip()
+        if not token or token in seen:
+            continue
+        normalized.append(token)
+        seen.add(token)
+        if len(normalized) >= _AI_AUTOFILL_REF_LIMIT:
+            break
+    return normalized
+
+
+def _image_mime_from_ref(ref, fallback='image/jpeg'):
+    guessed, _ = mimetypes.guess_type(_ensure_string(ref).strip())
+    if guessed and guessed.startswith('image/'):
+        return guessed
+    ext = _extract_file_extension(ref)
+    if ext in {'jpg', 'jpeg'}:
+        return 'image/jpeg'
+    if ext == 'png':
+        return 'image/png'
+    if ext == 'gif':
+        return 'image/gif'
+    if ext == 'webp':
+        return 'image/webp'
+    if ext == 'bmp':
+        return 'image/bmp'
+    return fallback
+
+
+def _prepare_ai_image_bytes(raw_bytes, mime_hint=None):
+    if not raw_bytes:
+        return None, None
+    payload = raw_bytes
+    mime_value = (mime_hint or 'image/jpeg').strip().lower()
+    if not mime_value.startswith('image/'):
+        mime_value = 'image/jpeg'
+    if Image and (len(payload) > _AI_AUTOFILL_IMAGE_MAX_BYTES or mime_value in {'image/heic', 'image/heif'}):
+        try:
+            with Image.open(BytesIO(raw_bytes)) as img:
+                img = ImageOps.exif_transpose(img)
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+                width, height = img.size
+                longest = max(width, height)
+                if longest > _AI_AUTOFILL_IMAGE_MAX_SIDE:
+                    ratio = _AI_AUTOFILL_IMAGE_MAX_SIDE / float(longest)
+                    target_size = (max(1, int(width * ratio)), max(1, int(height * ratio)))
+                    img = img.resize(target_size, _poster_resample_filter() or Image.BICUBIC)
+                output = BytesIO()
+                img.save(output, format='JPEG', quality=84, optimize=True)
+                payload = output.getvalue()
+                mime_value = 'image/jpeg'
+        except Exception:
+            payload = raw_bytes
+    if len(payload) > _AI_AUTOFILL_IMAGE_MAX_BYTES:
+        return None, None
+    return payload, mime_value
+
+
+def _build_ai_image_data_url(raw_bytes, mime_hint=None):
+    payload, mime_value = _prepare_ai_image_bytes(raw_bytes, mime_hint=mime_hint)
+    if not payload or not mime_value:
+        return None
+    encoded = base64.b64encode(payload).decode('ascii')
+    return f"data:{mime_value};base64,{encoded}"
+
+
+def _looks_like_image_bytes(raw_bytes):
+    if not raw_bytes:
+        return False
+    if not Image:
+        return True
+    try:
+        with Image.open(BytesIO(raw_bytes)) as img:
+            img.verify()
+        return True
+    except Exception:
+        return False
+
+
+def _collect_ai_image_inputs(uploaded_files, uploaded_refs):
+    inputs = []
+    digest_seen = set()
+    for file_storage in uploaded_files or []:
+        if len(inputs) >= _AI_AUTOFILL_IMAGE_LIMIT:
+            break
+        filename = _ensure_string(getattr(file_storage, 'filename', '')).strip()
+        mime_type = _ensure_string(getattr(file_storage, 'mimetype', '')).strip()
+        if not filename and not mime_type.startswith('image/'):
+            continue
+        if filename and determine_media_kind(filename) != 'image' and not mime_type.startswith('image/'):
+            continue
+        try:
+            file_storage.stream.seek(0)
+            raw_bytes = file_storage.stream.read()
+            file_storage.stream.seek(0)
+        except Exception:
+            continue
+        if not raw_bytes:
+            continue
+        if not _looks_like_image_bytes(raw_bytes):
+            continue
+        digest = hashlib.sha256(raw_bytes).hexdigest()
+        if digest in digest_seen:
+            continue
+        data_url = _build_ai_image_data_url(raw_bytes, mime_hint=(mime_type or _image_mime_from_ref(filename)))
+        if not data_url:
+            continue
+        inputs.append({'type': 'image_url', 'image_url': {'url': data_url}})
+        digest_seen.add(digest)
+    for ref in uploaded_refs or []:
+        if len(inputs) >= _AI_AUTOFILL_IMAGE_LIMIT:
+            break
+        if determine_media_kind(ref) != 'image':
+            continue
+        raw_bytes = _read_media_bytes(ref, timeout=8)
+        if not raw_bytes:
+            continue
+        if not _looks_like_image_bytes(raw_bytes):
+            continue
+        digest = hashlib.sha256(raw_bytes).hexdigest()
+        if digest in digest_seen:
+            continue
+        data_url = _build_ai_image_data_url(raw_bytes, mime_hint=_image_mime_from_ref(ref))
+        if not data_url:
+            continue
+        inputs.append({'type': 'image_url', 'image_url': {'url': data_url}})
+        digest_seen.add(digest)
+    return inputs
+
+
+def _extract_json_object_from_text(raw_text):
+    content = _ensure_string(raw_text).strip()
+    if not content:
+        return None
+    fenced = re.match(r'^```(?:json)?\s*([\s\S]*?)\s*```$', content, flags=re.IGNORECASE)
+    if fenced:
+        content = fenced.group(1).strip()
+    try:
+        parsed = json.loads(content)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+    start = content.find('{')
+    end = content.rfind('}')
+    if start == -1 or end <= start:
+        return None
+    candidate = content[start:end + 1]
+    try:
+        parsed = json.loads(candidate)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        return None
+    return None
+
+
+def _normalize_ai_detail_refs(entries):
+    normalized = []
+    seen_values = set()
+    if isinstance(entries, dict):
+        entries = [entries]
+    if not isinstance(entries, list):
+        return normalized
+    for entry in entries:
+        if len(normalized) >= _AI_AUTOFILL_DETAIL_REF_LIMIT:
+            break
+        if isinstance(entry, dict):
+            label = _limit_text(entry.get('label') or entry.get('name') or '', _AI_AUTOFILL_DETAIL_LABEL_LIMIT)
+            value = _limit_text(entry.get('value') or entry.get('content') or entry.get('url') or '', _AI_AUTOFILL_DETAIL_VALUE_LIMIT)
+        elif isinstance(entry, str):
+            label = ''
+            value = _limit_text(entry, _AI_AUTOFILL_DETAIL_VALUE_LIMIT)
+        else:
+            continue
+        if not value or value in seen_values:
+            continue
+        normalized.append({'label': label, 'value': value})
+        seen_values.add(value)
+    return normalized
+
+
+def _normalize_ai_suggestion(form_type, payload):
+    if not isinstance(payload, dict):
+        return {}
+    suggestion = {}
+    if form_type == 'item':
+        name = _limit_text(payload.get('name'), 100)
+        category = _limit_text(payload.get('category'), 80)
+        stock_status = _normalize_item_stock_status(payload.get('stock_status'))
+        features = _normalize_item_feature(payload.get('features'))
+        notes = _limit_text(payload.get('notes'), _AI_AUTOFILL_NOTES_LIMIT)
+        detail_refs = _normalize_ai_detail_refs(payload.get('detail_refs'))
+        unit = _limit_text(payload.get('unit'), 20)
+        purchase_link = _limit_text(payload.get('purchase_link'), 280)
+        if name:
+            suggestion['name'] = name
+        if category:
+            suggestion['category'] = category
+        if stock_status:
+            suggestion['stock_status'] = stock_status
+        if features:
+            suggestion['features'] = features
+        if notes:
+            suggestion['notes'] = notes
+        if detail_refs:
+            suggestion['detail_refs'] = detail_refs
+        quantity = payload.get('quantity')
+        if isinstance(quantity, (int, float)):
+            suggestion['quantity'] = quantity
+        elif isinstance(quantity, str):
+            quantity_text = quantity.strip()
+            if re.match(r'^-?\d+(\.\d+)?$', quantity_text):
+                try:
+                    suggestion['quantity'] = float(quantity_text)
+                except ValueError:
+                    pass
+        if unit:
+            suggestion['unit'] = unit
+        if purchase_link and re.match(r'^https?://', purchase_link, flags=re.IGNORECASE):
+            suggestion['purchase_link'] = purchase_link
+        return suggestion
+    if form_type == 'location':
+        name = _limit_text(payload.get('name'), 100)
+        status = _normalize_location_status(payload.get('status'))
+        notes = _limit_text(payload.get('notes'), _AI_AUTOFILL_NOTES_LIMIT)
+        detail_link = _limit_text(payload.get('detail_link'), 280)
+        detail_refs = _normalize_ai_detail_refs(payload.get('detail_refs'))
+        usage_tags_raw = payload.get('usage_tags')
+        usage_tags = []
+        if isinstance(usage_tags_raw, list):
+            for token in usage_tags_raw:
+                key = _ensure_string(token).strip()
+                if key in _LOCATION_USAGE_KEYS and key not in usage_tags:
+                    usage_tags.append(key)
+        if name:
+            suggestion['name'] = name
+        if status:
+            suggestion['status'] = status
+        if notes:
+            suggestion['notes'] = notes
+        if detail_link and re.match(r'^https?://', detail_link, flags=re.IGNORECASE):
+            suggestion['detail_link'] = detail_link
+        if detail_refs:
+            suggestion['detail_refs'] = detail_refs
+        if usage_tags:
+            suggestion['usage_tags'] = usage_tags
+        return suggestion
+    return {}
+
+
+def _build_ai_autofill_messages(form_type, context, image_inputs):
+    context_payload = {}
+    if isinstance(context, dict):
+        for key in ('name', 'notes', 'category', 'stock_status', 'status', 'detail_link', 'purchase_link'):
+            value = _limit_text(context.get(key), 200)
+            if value:
+                context_payload[key] = value
+    if form_type == 'item':
+        schema_text = (
+            '{"name":"", "category":"", "stock_status":"正常|少量|用完|借出|舍弃", '
+            '"notes":"", "detail_refs":[{"label":"","value":""}], "quantity":"", "unit":"", "purchase_link":""}'
+        )
+        task_text = (
+            "你是盘点助手。请根据图片推断物品信息，优先提取名称、规格、品牌、用途、注意事项。"
+            "若不确定字段就返回空字符串，不要编造。detail_refs 最多 8 条。"
+        )
+    else:
+        schema_text = (
+            '{"name":"", "status":"正常|脏|报修|危险|禁止", "notes":"", '
+            '"detail_link":"", "detail_refs":[{"label":"","value":""}], '
+            '"usage_tags":["study|leisure|event|public|rental|storage|travel|residence|other"]}'
+        )
+        task_text = (
+            "你是空间盘点助手。请根据图片推断空间名称、风险/维护状态、空间说明、规则和注意事项。"
+            "若不确定字段就返回空字符串，不要编造。detail_refs 最多 8 条。"
+        )
+    context_text = json.dumps(context_payload, ensure_ascii=False)
+    system_message = (
+        "你必须只返回 JSON 对象，不能输出任何额外文本。"
+        "字段不存在时返回空字符串或空数组。"
+    )
+    user_content = [{
+        'type': 'text',
+        'text': (
+            f"{task_text}\n"
+            f"已有表单上下文：{context_text or '{}'}\n"
+            f"输出 JSON 模板：{schema_text}"
+        )
+    }]
+    user_content.extend(image_inputs or [])
+    return [
+        {'role': 'system', 'content': system_message},
+        {'role': 'user', 'content': user_content}
+    ]
+
+
+def _extract_chat_message_text(content):
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for entry in content:
+            if isinstance(entry, dict):
+                text_part = entry.get('text')
+                if isinstance(text_part, str):
+                    parts.append(text_part)
+        return ''.join(parts)
+    return ''
+
+
+def _chatanywhere_chat_completion(messages, max_tokens=900):
+    runtime = _chatanywhere_runtime_config()
+    if not runtime.get('api_key'):
+        raise ValueError('CHAT_ANYWHERE_API_KEY 未配置，无法使用 AI 自动填写。')
+    if not runtime.get('endpoint'):
+        raise ValueError('CHAT_ANYWHERE_API_BASE_URL 未配置，无法使用 AI 自动填写。')
+    request_payload = {
+        'model': runtime.get('model') or 'gpt-4o-mini',
+        'messages': messages,
+        'temperature': 0.2,
+        'max_tokens': max_tokens
+    }
+    req = urllib.request.Request(
+        runtime['endpoint'],
+        data=json.dumps(request_payload, ensure_ascii=False).encode('utf-8'),
+        method='POST'
+    )
+    req.add_header('Authorization', f"Bearer {runtime['api_key']}")
+    req.add_header('Content-Type', 'application/json')
+    req.add_header('Accept', 'application/json')
+    try:
+        with urllib.request.urlopen(req, timeout=_AI_AUTOFILL_TIMEOUT_SECONDS) as resp:
+            raw_body = resp.read()
+    except HTTPError as exc:
+        body = b''
+        try:
+            body = exc.read() or b''
+        except Exception:
+            body = b''
+        detail = ''
+        if body:
+            try:
+                payload = json.loads(body.decode('utf-8', errors='ignore'))
+                if isinstance(payload, dict):
+                    err = payload.get('error')
+                    if isinstance(err, dict):
+                        detail = _ensure_string(err.get('message')).strip()
+                    elif isinstance(err, str):
+                        detail = err.strip()
+            except json.JSONDecodeError:
+                detail = ''
+        raise RuntimeError(detail or f'AI 服务返回错误（HTTP {exc.code}）。')
+    except (URLError, OSError) as exc:
+        raise RuntimeError(f'AI 服务连接失败：{exc}')
+    try:
+        parsed = json.loads(raw_body.decode('utf-8', errors='ignore'))
+    except json.JSONDecodeError:
+        raise RuntimeError('AI 服务返回了无法解析的响应。')
+    if not isinstance(parsed, dict):
+        raise RuntimeError('AI 服务响应格式不正确。')
+    choices = parsed.get('choices')
+    if not isinstance(choices, list) or not choices:
+        raise RuntimeError('AI 服务未返回有效结果。')
+    first_choice = choices[0] if isinstance(choices[0], dict) else {}
+    message = first_choice.get('message') if isinstance(first_choice, dict) else {}
+    content = message.get('content') if isinstance(message, dict) else ''
+    text_content = _extract_chat_message_text(content).strip()
+    if not text_content:
+        raise RuntimeError('AI 服务未返回可用文本。')
+    return text_content, request_payload['model']
+
+
 def _build_direct_upload_config():
     enabled = bool(app.config.get('DIRECT_OSS_UPLOAD_ENABLED'))
     config = {
@@ -4534,6 +4956,58 @@ def search_items():
             'detailUrl': url_for('item_detail', item_id=item.id)
         })
     return jsonify(payload)
+
+
+@app.route('/api/forms/ai-autofill', methods=['POST'])
+@login_required
+def ai_form_autofill():
+    form_type = (request.form.get('form_type') or '').strip().lower()
+    if form_type not in _AI_AUTOFILL_FORM_TYPES:
+        return jsonify({'error': 'unsupported_form_type', 'message': '仅支持物品和空间表单自动填写。'}), 400
+
+    context = {}
+    context_raw = request.form.get('context_json') or request.form.get('context')
+    if context_raw:
+        try:
+            parsed_context = json.loads(context_raw)
+            if isinstance(parsed_context, dict):
+                context = parsed_context
+        except json.JSONDecodeError:
+            context = {}
+
+    raw_refs = []
+    raw_refs.extend(request.form.getlist('uploaded_refs'))
+    raw_refs.extend(request.form.getlist('attachments_remote_keys'))
+    raw_refs.extend(_extract_external_urls(request.form.get('external_attachment_urls')))
+    uploaded_refs = _normalize_ai_uploaded_refs(raw_refs)
+    uploaded_files = request.files.getlist('attachments')
+    image_inputs = _collect_ai_image_inputs(uploaded_files, uploaded_refs)
+    if not image_inputs:
+        return jsonify({'error': 'no_images', 'message': '请先拍照或上传至少一张图片后再试。'}), 400
+
+    messages = _build_ai_autofill_messages(form_type, context, image_inputs)
+    try:
+        content, model_name = _chatanywhere_chat_completion(messages, max_tokens=900)
+    except ValueError as exc:
+        return jsonify({'error': 'config_missing', 'message': str(exc)}), 503
+    except RuntimeError as exc:
+        app.logger.warning('AI 自动填写调用失败 form=%s user=%s error=%s', form_type, current_user.id, exc)
+        return jsonify({'error': 'upstream_failure', 'message': str(exc)}), 502
+
+    raw_payload = _extract_json_object_from_text(content)
+    if not isinstance(raw_payload, dict):
+        app.logger.warning('AI 自动填写响应无法解析为 JSON form=%s user=%s content=%s', form_type, current_user.id, content[:300])
+        return jsonify({'error': 'invalid_response', 'message': 'AI 返回格式异常，请稍后重试。'}), 502
+
+    suggestion = _normalize_ai_suggestion(form_type, raw_payload)
+    return jsonify({
+        'ok': True,
+        'form_type': form_type,
+        'model': model_name,
+        'image_count': len(image_inputs),
+        'suggestion': suggestion
+    })
+
 
 @app.route('/locations/add', methods=['GET', 'POST'])
 @login_required

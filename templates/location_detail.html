@@ -93,11 +93,11 @@
       {% endif %}
       {% if location.clean_status %}
       <li class="list-group-item">
-        <strong>卫生状态：</strong>
+        <strong>属性状态：</strong>
         <span class="badge
           {% if location.clean_status == '干净' %} bg-success
           {% elif location.clean_status == '一般' %} bg-warning text-dark
-          {% elif location.clean_status == '脏/报修' %} bg-danger
+          {% elif location.clean_status == '脏/报修/危险' %} bg-danger
           {% else %} bg-secondary
           {% endif %}
         ">{{ location.clean_status }}</span>

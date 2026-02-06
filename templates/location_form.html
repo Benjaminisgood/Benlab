@@ -213,7 +213,7 @@
         <button class="accordion-button {% if not loc_adv_open %}collapsed{% endif %}" type="button"
                 data-bs-toggle="collapse" data-bs-target="#locationAdvancedSection"
                 aria-expanded="{{ 'true' if loc_adv_open else 'false' }}" aria-controls="locationAdvancedSection">
-          更多属性（卫生状态）
+          更多属性
         </button>
       </h2>
       <div id="locationAdvancedSection" class="accordion-collapse collapse {% if loc_adv_open %}show{% endif %}"
@@ -223,7 +223,7 @@
             <label for="clean_status" class="form-label">卫生状态</label>
             <select name="clean_status" class="form-select">
               <option value="">-- 请选择 --</option>
-              {% for opt in ['干净', '一般', '脏/报修'] %}
+              {% for opt in ['干净', '一般', '脏/报修/危险'] %}
                 <option value="{{ opt }}" {% if location and location.clean_status == opt %}selected{% endif %}>{{ opt }}</option>
               {% endfor %}
             </select>

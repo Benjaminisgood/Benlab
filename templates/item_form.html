@@ -251,14 +251,14 @@
             <div class="input-group">
               <input type="number" step="0.01" class="form-control" name="quantity" value="{{ item.quantity if item else '' }}">
               <select class="form-select" name="unit">
-                {% for u in ['瓶','个','包','支','盒','ml','g'] %}
+                {% for u in ['瓶','个','包','支','盒','mL','L','vL','g','kg','t'] %}
                   <option value="{{ u }}" {% if item and item.unit == u %}selected{% endif %}>{{ u }}</option>
                 {% endfor %}
               </select>
             </div>
           </div>
           <div class="mb-0">
-            <label for="purchase_date" class="form-label">购入时间</label>
+            <label for="purchase_date" class="form-label">购入/生产时间</label>
             <input type="date" name="purchase_date" class="form-control"
                    value="{{ item.purchase_date.strftime('%Y-%m-%d') if item and item.purchase_date else '' }}">
           </div>

@@ -13,6 +13,7 @@
     - [2. 配置基础环境变量（首次建议写入 `.env` 或 shell）](#2-配置基础环境变量首次建议写入-env-或-shell)
     - [3. 启动服务](#3-启动服务)
   - [一键启动（benlab.sh 脚本）](#一键启动benlabsh-脚本)
+  - [Windows 部署（PowerShell）](#windows-部署powershell)
   - [配置项](#配置项)
   - [目录结构](#目录结构)
   - [核心模块详解](#核心模块详解)
@@ -136,6 +137,47 @@ chmod +x benlab.sh
 ./benlab.sh status  # 查看运行状态
 ./benlab.sh logs    # 持续输出访问/错误日志
 ./benlab.sh ip      # 快速查看访问入口
+```
+
+## Windows 部署（PowerShell）
+`benlab.sh` 仅适用于 macOS/Linux。在 Windows 下可使用 PowerShell 按下列方式部署。
+
+1) 准备环境（建议 Python 3.10+）：
+```powershell
+git clone <your-repo-url>
+cd Benlab
+py -3 -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+2) 配置环境变量（当前会话）：
+```powershell
+$env:FLASK_APP = "app.py"
+$env:FLASK_SECRET_KEY = "请替换为随机字符串"
+$env:HOST = "0.0.0.0"
+$env:PORT = "5001"
+```
+
+3) 启动服务（开发/测试）：
+```powershell
+python .\app.py
+# 或
+flask run --host=$env:HOST --port=$env:PORT
+```
+
+4) 生产运行（Windows 推荐 Waitress）：
+```powershell
+pip install waitress
+waitress-serve --listen=0.0.0.0:5001 app:app
+```
+
+5) 可选：将变量写入系统（新开终端生效）：
+```powershell
+setx FLASK_APP "app.py"
+setx FLASK_SECRET_KEY "请替换为随机字符串"
+setx HOST "0.0.0.0"
+setx PORT "5001"
 ```
 
 ## 配置项
@@ -650,6 +692,10 @@ export ALIYUN_OSS_ASSUME_PUBLIC=0
 - 使用 Gunicorn + gevent 或 uwsgi 等 WSGI 服务器：
   ```bash
   gunicorn -k gevent -w 4 "app:app"
+  ```
+- Windows 环境可使用 Waitress：
+  ```powershell
+  waitress-serve --listen=0.0.0.0:5001 app:app
   ```
 - 置于 Nginx/Caddy 反向代理之后，并启用 HTTPS；Flask 已通过 ProxyFix 支持 `X-Forwarded-*` 头。
 - 将 `FLASK_SECRET_KEY`、数据库凭据写入安全的环境变量或密钥管理服务。

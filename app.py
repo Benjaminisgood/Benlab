@@ -4541,7 +4541,7 @@ def add_location():
     if request.method == 'POST':
         # 获取并保存新的位置记录
         name = request.form.get('name')
-        status = _normalize_location_status(request.form.get('status'))
+        status = _normalize_location_status(request.form.get('status')) or '正常'
         parent_id = request.form.get('parent_id')
         responsible_ids = request.form.getlist('responsible_ids')
         detail_link = request.form.get('detail_link')
@@ -4648,7 +4648,7 @@ def edit_location(loc_id):
         usage_tags = [tag for tag in request.form.getlist('usage_tags') if tag in _LOCATION_USAGE_KEYS]
         detail_refs = _collect_detail_refs_from_form(request.form)
         detail_refs = _merge_usage_tags_into_detail_refs(detail_refs, usage_tags)
-        location.status = _normalize_location_status(request.form.get('status'))
+        location.status = _normalize_location_status(request.form.get('status')) or '正常'
         latitude = _parse_coordinate(request.form.get('latitude'))
         longitude = _parse_coordinate(request.form.get('longitude'))
         coordinate_source = request.form.get('coordinate_source') or None

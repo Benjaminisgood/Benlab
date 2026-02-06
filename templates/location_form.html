@@ -2,6 +2,8 @@
 {% block content %}
 {% set form_id = 'locationForm' %}
 {% set existing_detail_refs = editable_detail_refs if editable_detail_refs is defined else (location.detail_refs_without_usage_tags if location else []) %}
+{% set status_choices = location_status_choices if location_status_choices is defined else ['正常', '脏', '报修', '危险', '禁止'] %}
+{% set selected_status = (normalize_location_status(location.status) if location else '正常') or '正常' %}
 <h4 class="mb-3">{{ location and '编辑空间' or '新增空间' }}</h4>
 <form method="post" id="{{ form_id }}" enctype="multipart/form-data" action="{% if location %}{{ url_for('edit_location', loc_id=location.id) }}{% else %}{{ url_for('add_location') }}{% endif %}">
   <div class="mb-3">
@@ -9,20 +11,12 @@
     <input type="text" class="form-control" id="name" name="name" value="{{ location.name if location else '' }}" required>
   </div>
   <div class="mb-3">
-    <label class="form-label">负责人</label>
-    <div class="d-flex flex-wrap align-items-center gap-2">
-      <div id="locationResponsibleSummary" class="d-flex flex-wrap gap-2 border rounded-3 px-3 py-2 bg-body-secondary text-body"></div>
-      <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#locationResponsibleModal">
-        管理负责人
-      </button>
-    </div>
-    <div class="form-text text-muted">私人空间若未指定负责人，将默认由当前编辑者负责。</div>
-  </div>
-  <div class="mb-3">
-    <label for="detail_link" class="form-label">详情链接</label>
-    <input type="url" class="form-control" id="detail_link" name="detail_link"
-          value="{{ location.detail_link if location else '' }}" placeholder="https://example.com">
-    <div class="form-text">可填写空间的相关详情链接（可选）</div>
+    <label for="status" class="form-label">空间状态</label>
+    <select name="status" id="status" class="form-select" required>
+      {% for opt in status_choices %}
+        <option value="{{ opt }}" {% if selected_status == opt %}selected{% endif %}>{{ opt }}</option>
+      {% endfor %}
+    </select>
   </div>
   <div class="mb-3">
     <div class="form-check form-switch mb-2">
@@ -39,6 +33,16 @@
       {% endfor %}
     </div>
     <div class="form-text text-muted">可多选；保存后会作为“用途”条目写入参考信息。</div>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">负责人</label>
+    <div class="d-flex flex-wrap align-items-center gap-2">
+      <div id="locationResponsibleSummary" class="d-flex flex-wrap gap-2 border rounded-3 px-3 py-2 bg-body-secondary text-body"></div>
+      <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#locationResponsibleModal">
+        管理负责人
+      </button>
+    </div>
+    <div class="form-text text-muted">私人空间若未指定负责人，将默认由当前编辑者负责。</div>
   </div>
   <div class="mb-3">
     <label class="form-label">上级空间（可选）</label>
@@ -58,25 +62,10 @@
     <div class="form-text">用于构建层级结构，留空表示顶层空间。</div>
   </div>
   <div class="mb-3">
-    <label class="form-label">精准坐标</label>
-    <div class="row g-2 align-items-end">
-      <div class="col-sm-6">
-        <input type="text" class="form-control" id="latitude" name="latitude" placeholder="纬度，例如 39.9042"
-               value="{{ '%.6f'|format(location.latitude) if location and location.latitude is not none else '' }}">
-      </div>
-      <div class="col-sm-6">
-        <input type="text" class="form-control" id="longitude" name="longitude" placeholder="经度，例如 116.4074"
-               value="{{ '%.6f'|format(location.longitude) if location and location.longitude is not none else '' }}">
-      </div>
-    </div>
-    <div class="d-flex flex-wrap gap-2 mt-2 location-coordinate-actions">
-      <button type="button" class="btn btn-outline-primary btn-sm" id="detectLocationBtn">自动获取当前位置</button>
-      <button type="button" class="btn btn-outline-success btn-sm" id="openMapPickerBtn" data-bs-toggle="modal" data-bs-target="#mapPickerModal">在地图上选取</button>
-      <button type="button" class="btn btn-outline-secondary btn-sm" id="clearLocationBtn">清除坐标</button>
-    </div>
-    <div class="form-text">可从手机定位或地图选点自动填充，也可手动输入；保留为空则不记录坐标。</div>
-    <input type="hidden" id="coordinate_source" name="coordinate_source"
-           value="{{ location.coordinate_source if location and location.coordinate_source else '' }}">
+    <label for="detail_link" class="form-label">详情链接</label>
+    <input type="url" class="form-control" id="detail_link" name="detail_link"
+          value="{{ location.detail_link if location else '' }}" placeholder="https://example.com">
+    <div class="form-text">可填写空间的相关详情链接（可选）</div>
   </div>
   <div class="mb-3">
     <label for="attachmentInput" class="form-label">空间媒体（图片 / 视频 / 音频，可多选）</label>
@@ -175,14 +164,14 @@
     <textarea class="form-control" id="notes" name="notes" rows="3"
               placeholder="填写地点说明、注意事项等">{{ location.notes if location else '' }}</textarea>
   </div>
-  {% set loc_adv_open = location and ((existing_detail_refs and existing_detail_refs|length > 0) or location.status) %}
+  {% set loc_adv_open = location and ((existing_detail_refs and existing_detail_refs|length > 0) or location.latitude is not none or location.longitude is not none) %}
   <div class="accordion mb-3" id="locationAdvancedAccordion">
     <div class="accordion-item">
       <h2 class="accordion-header" id="locationAdvancedHeader">
         <button class="accordion-button {% if not loc_adv_open %}collapsed{% endif %}" type="button"
                 data-bs-toggle="collapse" data-bs-target="#locationAdvancedSection"
                 aria-expanded="{{ 'true' if loc_adv_open else 'false' }}" aria-controls="locationAdvancedSection">
-          更多属性（参考信息 / 状态）
+          更多属性（参考信息 / 精准坐标）
         </button>
       </h2>
       <div id="locationAdvancedSection" class="accordion-collapse collapse {% if loc_adv_open %}show{% endif %}"
@@ -217,15 +206,25 @@
             <div class="form-text">可录入链接、编号、规则或任何补充信息。</div>
           </div>
           <div class="mb-0">
-            <label for="status" class="form-label">状态</label>
-            {% set status_choices = location_status_choices if location_status_choices is defined else ['正常', '脏', '报修', '危险', '禁止'] %}
-            {% set selected_status = normalize_location_status(location.status) if location else '' %}
-            <select name="status" id="status" class="form-select">
-              <option value="">-- 请选择 --</option>
-              {% for opt in status_choices %}
-                <option value="{{ opt }}" {% if selected_status == opt %}selected{% endif %}>{{ opt }}</option>
-              {% endfor %}
-            </select>
+            <label class="form-label">精准坐标</label>
+            <div class="row g-2 align-items-end">
+              <div class="col-sm-6">
+                <input type="text" class="form-control" id="latitude" name="latitude" placeholder="纬度，例如 39.9042"
+                       value="{{ '%.6f'|format(location.latitude) if location and location.latitude is not none else '' }}">
+              </div>
+              <div class="col-sm-6">
+                <input type="text" class="form-control" id="longitude" name="longitude" placeholder="经度，例如 116.4074"
+                       value="{{ '%.6f'|format(location.longitude) if location and location.longitude is not none else '' }}">
+              </div>
+            </div>
+            <div class="d-flex flex-wrap gap-2 mt-2 location-coordinate-actions">
+              <button type="button" class="btn btn-outline-primary btn-sm" id="detectLocationBtn">自动获取当前位置</button>
+              <button type="button" class="btn btn-outline-success btn-sm" id="openMapPickerBtn" data-bs-toggle="modal" data-bs-target="#mapPickerModal">在地图上选取</button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" id="clearLocationBtn">清除坐标</button>
+            </div>
+            <div class="form-text">可从手机定位或地图选点自动填充，也可手动输入；保留为空则不记录坐标。</div>
+            <input type="hidden" id="coordinate_source" name="coordinate_source"
+                   value="{{ location.coordinate_source if location and location.coordinate_source else '' }}">
           </div>
         </div>
       </div>

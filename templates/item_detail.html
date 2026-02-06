@@ -136,7 +136,16 @@
         <span class="badge bg-light text-dark border">{{ media_entries|length }}</span>
       </div>
       <div class="card-body">
-        {{ render_media_gallery(media_entries, 'itemMediaGallery', media_kind_labels, '暂无图片或影音') }}
+        {{ render_media_gallery(
+            media_entries,
+            'itemMediaGallery',
+            media_kind_labels,
+            '暂无图片或影音',
+            {
+              'layout': 'carousel'
+            }
+          )
+        }}
       </div>
     </div>
     <div class="card">

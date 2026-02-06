@@ -1,5 +1,6 @@
 (function () {
   var overlaySelector = '.media-focus-overlay';
+  var carouselSelector = '[data-role="media-carousel"]';
   var triggerSelector = '[data-action="open-focus-mode"][data-focus-target]';
   var navSelector = '[data-action="focus-nav"]';
   var closeSelector = '[data-action="close-focus-mode"]';
@@ -527,6 +528,20 @@
     overlay.dataset.focusBound = 'true';
   }
 
+  function initInlineCarousel(carousel) {
+    if (!carousel) {
+      return;
+    }
+    if (carousel.dataset.carouselBound === 'true') {
+      return;
+    }
+    carousel.dataset.carouselBound = 'true';
+    observeLazyMedia(carousel);
+    watchTrackResize(carousel);
+    var initialIndex = parseInt(carousel.getAttribute('data-initial-index') || '0', 10) || 0;
+    setActiveSlide(carousel, initialIndex);
+  }
+
   function openOverlay(trigger) {
     var targetId = trigger.getAttribute('data-focus-target');
     if (!targetId) {
@@ -543,7 +558,6 @@
     overlay.setAttribute('aria-hidden', 'false');
     document.body.classList.add('media-focus-open');
     overlay.dataset.lastTap = '0';
-    requestFullscreen(overlay);
     var initialIndex = parseInt(trigger.getAttribute('data-focus-index') || '0', 10) || 0;
     setActiveSlide(overlay, initialIndex);
     window.requestAnimationFrame(function () {
@@ -566,7 +580,6 @@
     if (!overlay) {
       return;
     }
-    exitFullscreen(overlay);
     overlay.classList.remove('is-active');
     overlay.setAttribute('aria-hidden', 'true');
     overlay.setAttribute('hidden', '');
@@ -696,6 +709,16 @@
       toggleMediaCollapse(collapseTrigger);
       return;
     }
+    var carouselNav = event.target.closest('[data-action="carousel-nav"]');
+    if (carouselNav) {
+      event.preventDefault();
+      var carousel = carouselNav.closest(carouselSelector);
+      if (carousel) {
+        var direction = parseInt(carouselNav.getAttribute('data-direction') || '1', 10);
+        stepSlide(carousel, direction);
+      }
+      return;
+    }
     var navTrigger = event.target.closest(navSelector);
     if (navTrigger) {
       event.preventDefault();
@@ -787,6 +810,10 @@
       ensureSlideSizes(overlay);
       updateTrackPosition(overlay, 0);
     });
+    var carousels = document.querySelectorAll(carouselSelector);
+    carousels.forEach(function (carousel) {
+      initInlineCarousel(carousel);
+    });
     bindOrientationWatchers(document);
   });
 
@@ -809,6 +836,9 @@
     if (overlay) {
       updateTrackPosition(overlay, 0);
     }
+    document.querySelectorAll(carouselSelector).forEach(function (carousel) {
+      updateTrackPosition(carousel, 0);
+    });
   }, false);
   window.addEventListener('orientationchange', updateViewportUnit, false);
 

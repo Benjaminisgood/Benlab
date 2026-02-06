@@ -12,25 +12,29 @@
   {% set enable_focus_mode = enable_focus_mode_opt if enable_focus_mode_opt is not none else true %}
   {% set card_image_sizes = opts.get('card_image_sizes') or '(max-width: 576px) 92vw, (max-width: 992px) 45vw, 320px' %}
   {% set focus_image_sizes = opts.get('focus_image_sizes') or '100vw' %}
+  {% set layout = opts.get('layout') or 'grid' %}
+  {% set is_carousel = layout == 'carousel' %}
   {% set initial_visible_opt = opts.get('initial_visible') %}
   {% set initial_visible = (initial_visible_opt if initial_visible_opt is not none else 6)|int %}
   {% set download_all_url = opts.get('download_all_url') %}
   {% set download_all_oss_url = opts.get('download_all_oss_url') %}
   {% set entry_count = entries|length if entries else 0 %}
+  {% set first_entry = entries[0] if entry_count > 0 else none %}
   {% set audio_entries = [] %}
   {% set should_collapse = entry_count > initial_visible %}
+  {% set show_collapse = should_collapse and not is_carousel %}
   {% set oss_entries = entries | selectattr('source', 'equalto', 'oss') | list if entries else [] %}
   {% set has_oss_entries = oss_entries|length > 0 %}
   {% if entry_count %}
     {% set audio_entries = entries | selectattr('kind', 'equalto', 'audio') | list %}
   {% endif %}
   {% if entries %}
-  <div class="{{ gallery_class }}" id="{{ gallery_id }}" data-initial-visible="{{ initial_visible }}" data-total-count="{{ entry_count }}">
-    {% if (enable_focus_mode and entry_count) or download_all_url or should_collapse or has_oss_entries %}
+  <div class="{{ gallery_class }}{% if is_carousel %} media-gallery--carousel{% endif %}" id="{{ gallery_id }}" data-initial-visible="{{ initial_visible }}" data-total-count="{{ entry_count }}">
+    {% if (enable_focus_mode and entry_count) or download_all_url or show_collapse or has_oss_entries %}
     <div class="media-gallery-toolbar">
       <div class="media-gallery-hints">
         {% if enable_focus_mode and entry_count %}
-        <span class="media-gallery-hint text-muted">点击任意卡片开启专注欣赏，双击退出</span>
+        <span class="media-gallery-hint text-muted">点击媒体进入专注欣赏，双击退出</span>
         {% endif %}
         {% if has_oss_entries %}
         <span class="media-gallery-hint text-warning">当前媒体来自 OSS，加载将消耗流量</span>
@@ -42,7 +46,7 @@
           OSS 直连打包
         </a>
         {% endif %}
-        {% if should_collapse %}
+        {% if show_collapse %}
         <button class="btn btn-outline-secondary btn-sm"
                 type="button"
                 data-action="toggle-media-collapse"
@@ -55,6 +59,102 @@
       </div>
     </div>
     {% endif %}
+    {% if is_carousel %}
+    <div class="media-carousel" data-role="media-carousel" data-initial-index="0">
+      <div class="media-carousel-stage">
+        <button type="button"
+                class="media-focus-nav media-focus-nav-prev media-carousel-nav media-carousel-nav-prev"
+                data-action="carousel-nav"
+                data-direction="-1"
+                {% if entry_count <= 1 %}disabled{% endif %}
+                aria-label="上一条">
+          &lsaquo;
+        </button>
+        <div class="media-focus-track" data-role="focus-track">
+          <div class="media-focus-track-inner" data-role="focus-track-inner" style="--media-slide-count: {{ entry_count }}">
+            {% for media in entries %}
+            {% set kind = media.kind|default('file') %}
+            {% set orientation = media.orientation if media.orientation is defined and media.orientation else 'unknown' %}
+            <article class="media-focus-slide{% if loop.first %} is-active{% endif %}"
+                     data-focus-slide
+                     data-index="{{ loop.index0 }}"
+                     data-title="{{ (media.display_name or media_kind_labels.get(kind, '媒体'))|e }}"
+                     data-description="{{ (media.description or '')|e }}"
+                     data-kind="{{ kind }}"
+                     data-orientation="{{ orientation }}"
+                     data-download="{{ media.url|e }}"
+                     aria-hidden="{{ 'false' if loop.first else 'true' }}">
+              <figure class="media-focus-figure"
+                      {% if enable_focus_mode %}
+                      role="button"
+                      tabindex="0"
+                      data-action="open-focus-mode"
+                      data-focus-target="{{ focus_overlay_id }}"
+                      data-focus-index="{{ loop.index0 }}"
+                      aria-label="打开{{ (media.display_name or media_kind_labels.get(kind, '媒体'))|e }}的大图浏览"
+                      {% endif %}>
+                {% if kind == 'image' %}
+                <img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="
+                     data-lazy-src="{{ media.url|e }}"
+                     alt="{{ (media.display_name or media_kind_labels.get('image', '图片'))|e }}"
+                     class="media-focus-image"
+                     data-orientation="{{ orientation }}"
+                     sizes="{{ focus_image_sizes }}"
+                     loading="lazy"
+                     decoding="async">
+                {% elif kind == 'video' %}
+                <video class="media-focus-video"
+                       controls
+                       playsinline
+                       preload="none"
+                       data-lazy-preload="metadata"
+                       data-lazy-poster="{{ media.poster|default('')|e }}">
+                  <source data-lazy-src="{{ media.url|e }}" type="{{ media.mimetype or 'video/mp4' }}">
+                  您的浏览器不支持视频播放。
+                </video>
+                {% elif kind == 'audio' %}
+                <div class="media-focus-audio-inline">
+                  <audio controls preload="none" data-lazy-preload="metadata">
+                    <source data-lazy-src="{{ media.url|e }}" type="{{ media.mimetype or 'audio/mpeg' }}">
+                    您的浏览器不支持音频播放。
+                  </audio>
+                </div>
+                {% else %}
+                <div class="media-focus-file">
+                  <span class="media-focus-file-label">{{ media_kind_labels.get(kind, '文件') }}</span>
+                  <a href="{{ media.url|e }}"
+                     class="btn btn-primary btn-sm"
+                     target="_blank"
+                     rel="noopener"
+                     aria-label="打开{{ (media.display_name or media_kind_labels.get(kind, '文件'))|e }}">
+                    打开
+                  </a>
+                </div>
+                {% endif %}
+              </figure>
+            </article>
+            {% endfor %}
+          </div>
+        </div>
+        <button type="button"
+                class="media-focus-nav media-focus-nav-next media-carousel-nav media-carousel-nav-next"
+                data-action="carousel-nav"
+                data-direction="1"
+                {% if entry_count <= 1 %}disabled{% endif %}
+                aria-label="下一条">
+          &rsaquo;
+        </button>
+      </div>
+      <div class="media-focus-info">
+        <div class="media-focus-counter" data-role="focus-counter">1/{{ entry_count }}</div>
+        <div class="media-focus-caption" data-role="focus-caption">
+          {% if first_entry %}
+            {{ first_entry.description or (first_entry.display_name or media_kind_labels.get(first_entry.kind|default('file'), '媒体')) }}
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    {% else %}
     <div class="{{ grid_class }}" data-role="media-grid">
       {% for media in entries %}
       {% set kind = media.kind|default('file') %}
@@ -79,7 +179,7 @@
                   data-action="open-focus-mode"
                   data-focus-target="{{ focus_overlay_id }}"
                   data-focus-index="{{ loop.index0 }}">
-            全屏
+            专注
           </button>
           {% endif %}
         </div>
@@ -156,9 +256,9 @@
       </div>
       {% endfor %}
     </div>
+    {% endif %}
   </div>
   {% if enable_focus_mode and entry_count %}
-  {% set first_entry = entries[0] if entry_count > 0 else none %}
   <div class="media-focus-overlay" id="{{ focus_overlay_id }}" hidden tabindex="-1" aria-hidden="true">
     <div class="media-focus-backdrop" data-action="close-focus-mode"></div>
     <div class="media-focus-stage" role="dialog" aria-modal="true" aria-label="专注模式媒体浏览">

@@ -203,7 +203,16 @@
         <span class="badge bg-light text-dark border">{{ media_entries|length }}</span>
       </div>
       <div class="card-body">
-        {{ render_media_gallery(media_entries, 'locationMediaGallery', media_kind_labels, '暂无图片或影音') }}
+        {{ render_media_gallery(
+            media_entries,
+            'locationMediaGallery',
+            media_kind_labels,
+            '暂无图片或影音',
+            {
+              'layout': 'carousel'
+            }
+          )
+        }}
       </div>
     </div>
     {% if location.latitude is not none and location.longitude is not none %}

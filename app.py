@@ -2873,7 +2873,7 @@ class Item(db.Model):
     purchase_date = db.Column(db.Date)             # ✅ 购入时间
     notes = db.Column(db.Text)                          # 备注说明
     last_modified = db.Column(db.DateTime, default=datetime.utcnow)  # 最后修改时间
-    purchase_link = db.Column(db.String(200))           # 购买链接
+    purchase_link = db.Column(db.String(200), default='')           # 购买链接
     # 多对多：一个物品可出现在多个位置
     locations = db.relationship(
         'Location',
@@ -4863,7 +4863,7 @@ def add_item():
             responsible_members = [current_user]
         location_ids = request.form.getlist('location_ids')  # ✅ 支持多个位置
         notes = request.form.get('notes')
-        purchase_link = request.form.get('purchase_link')
+        purchase_link = (request.form.get('purchase_link') or '').strip()
         detail_refs = _collect_detail_refs_from_form(request.form)
 
         # 附件处理（支持多选）
@@ -5001,7 +5001,7 @@ def edit_item(item_id):
         loc_ids = [int(x) for x in location_ids] if location_ids else []
         item.locations = Location.query.filter(Location.id.in_(loc_ids)).all() if loc_ids else []
         item.notes = request.form.get('notes')
-        item.purchase_link = request.form.get('purchase_link')
+        item.purchase_link = (request.form.get('purchase_link') or '').strip()
 
         # 删除勾选的旧附件
         remove_attachment_ids_raw = request.form.getlist('remove_attachment_ids')

@@ -76,7 +76,7 @@
   </div>
   <div class="mb-3">
     <label for="purchase_link" class="form-label">购买链接</label>
-    <input type="url" class="form-control" id="purchase_link" name="purchase_link" value="{{ item.purchase_link if item else '' }}">
+    <input type="url" class="form-control" id="purchase_link" name="purchase_link" value="{{ (item.purchase_link or '') if item else '' }}">
   </div>
   <div class="mb-3">
     <label for="attachmentInput" class="form-label">物品媒体（图片 / 视频 / 音频，可多选）</label>

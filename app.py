@@ -836,8 +836,8 @@ def _ensure_string(value):
     return value if isinstance(value, str) else ''
 
 
-def _parse_item_detail_links(raw):
-    """Return normalized list of {'label','url'} dicts from stored string/list."""
+def _parse_item_detail_refs(raw):
+    """Return normalized list of {'label','value'} dicts from stored string/list."""
     if not raw:
         return []
     data = raw
@@ -852,66 +852,69 @@ def _parse_item_detail_links(raw):
             entries = []
             for token in lines:
                 if '|||' in token:
-                    label, url = token.split('|||', 1)
+                    label, value = token.split('|||', 1)
                 elif '|' in token:
-                    label, url = token.split('|', 1)
+                    label, value = token.split('|', 1)
                 else:
-                    label, url = '', token
+                    label, value = '', token
                 label = label.strip()
-                url = url.strip()
-                if url:
-                    entries.append({'label': label, 'url': url})
+                value = value.strip()
+                if value:
+                    entries.append({'label': label, 'value': value})
             if entries:
                 return entries
             chunks = [part.strip() for part in re.split(r'[\n,]', raw) if part.strip()]
-            data = [{'label': '', 'url': chunk} for chunk in chunks]
+            data = [{'label': '', 'value': chunk} for chunk in chunks]
     entries = []
-    if isinstance(data, dict) and 'url' in data:
+    if isinstance(data, dict) and ('value' in data or 'url' in data):
         data = [data]
     if isinstance(data, list):
         for entry in data:
             if isinstance(entry, str):
-                url = entry.strip()
-                if url:
-                    entries.append({'label': '', 'url': url})
+                value = entry.strip()
+                if value:
+                    entries.append({'label': '', 'value': value})
             elif isinstance(entry, dict):
-                url = _ensure_string(entry.get('url')).strip()
+                value = _ensure_string(entry.get('value') or entry.get('url')).strip()
                 label = _ensure_string(entry.get('label')).strip()
-                if url:
-                    entries.append({'label': label, 'url': url})
+                if value:
+                    entries.append({'label': label, 'value': value})
     # 去重，保留顺序
     seen = set()
     normalized = []
     for entry in entries:
-        key = entry['url']
+        key = entry['value']
         if key not in seen:
             normalized.append(entry)
             seen.add(key)
     return normalized
 
 
-def _serialize_item_detail_links(entries, max_length=64):
-    """Serialize list of {'label','url'} dicts into compact string, enforcing length."""
+def _serialize_item_detail_refs(entries, max_length=None):
+    """Serialize list of {'label','value'} dicts into compact string."""
     if not entries:
         return None, False
     payload = []
     seen = set()
     for entry in entries:
-        if not isinstance(entry, dict):
+        label = ''
+        value = ''
+        if isinstance(entry, dict):
+            value = _ensure_string(entry.get('value') or entry.get('url')).strip()
+            label = _ensure_string(entry.get('label')).strip()
+        elif isinstance(entry, str):
+            value = entry.strip()
+        if not value or value in seen:
             continue
-        url = _ensure_string(entry.get('url')).strip()
-        if not url or url in seen:
-            continue
-        label = _ensure_string(entry.get('label')).strip()
-        payload.append({'label': label, 'url': url})
-        seen.add(url)
+        payload.append({'label': label, 'value': value})
+        seen.add(value)
     trimmed = False
     while payload:
         lines = []
         for entry in payload:
             label = entry['label'].replace('\n', ' ').strip()
-            url = entry['url']
-            token = f"{label}|||{url}" if label else url
+            value = entry['value'].replace('\n', ' ').strip()
+            token = f"{label}|||{value}" if label else value
             lines.append(token)
         serialized = '\n'.join(lines)
         if not serialized:
@@ -945,20 +948,23 @@ def _stock_status_intent(value):
     return 'neutral'
 
 
-def _collect_detail_links_from_form(form):
-    labels = form.getlist('detail_link_label')
-    urls = form.getlist('detail_link_url')
+def _collect_detail_refs_from_form(form):
+    labels = form.getlist('detail_ref_label')
+    values = form.getlist('detail_ref_value')
+    if not labels and not values:
+        labels = form.getlist('detail_link_label')
+        values = form.getlist('detail_link_url')
     entries = []
-    for label, url in zip(labels, urls):
-        url = _ensure_string(url).strip()
+    for label, value in zip(labels, values):
+        value = _ensure_string(value).strip()
         label = _ensure_string(label).strip()
-        if url:
-            entries.append({'label': label, 'url': url})
+        if value:
+            entries.append({'label': label, 'value': value})
     if entries:
         return entries
-    fallback = form.get('detail_link_text') or form.get('cas_no')
+    fallback = form.get('detail_ref_text') or form.get('detail_link_text')
     if fallback:
-        return _parse_item_detail_links(fallback)
+        return _parse_item_detail_refs(fallback)
     return []
 
 
@@ -2283,7 +2289,7 @@ class Item(db.Model):
     __tablename__ = 'items'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)    # 物品名称
-    cas_no = db.Column(db.String(64), nullable=True)     # 详情链接集合（JSON 字符串，兼容旧 CAS 数据）
+    detail_refs_raw = db.Column('detail_refs', db.Text)  # 参考信息集合（字符串）
     category = db.Column(db.String(50))                 # 类别/危险级别
     stock_status = db.Column(db.String(50))        # ✅ 新增字段：库存状态
     features = db.Column(db.String(200))           # ✅ 多选：用逗号分隔
@@ -2314,12 +2320,12 @@ class Item(db.Model):
     )
 
     @property
-    def detail_links(self):
-        return _parse_item_detail_links(self.cas_no)
+    def detail_refs(self):
+        return _parse_item_detail_refs(self.detail_refs_raw)
 
-    def set_detail_links(self, entries):
-        serialized, trimmed = _serialize_item_detail_links(entries)
-        self.cas_no = serialized
+    def set_detail_refs(self, entries):
+        serialized, trimmed = _serialize_item_detail_refs(entries)
+        self.detail_refs_raw = serialized
         return trimmed
 
     @property
@@ -2737,6 +2743,17 @@ with app.app_context():
         if 'allow_participant_edit' not in event_cols:
             with db.engine.begin() as conn:
                 conn.execute(text('ALTER TABLE events ADD COLUMN allow_participant_edit BOOLEAN DEFAULT 0'))
+    if 'items' in table_names:
+        item_cols = {col['name'] for col in inspector.get_columns('items')}
+        if 'detail_refs' not in item_cols:
+            with db.engine.begin() as conn:
+                conn.execute(text('ALTER TABLE items ADD COLUMN detail_refs TEXT'))
+        if 'detail_links' in item_cols:
+            with db.engine.begin() as conn:
+                conn.execute(text(
+                    'UPDATE items SET detail_refs = detail_links '
+                    'WHERE detail_refs IS NULL AND detail_links IS NOT NULL'
+                ))
     if Member.query.count() == 0:
         default_user = Member(name="Admin User", username="admin", contact="admin@example.com", notes="Default admin user")
         default_user.set_password("admin")
@@ -3874,7 +3891,7 @@ def item_detail(item_id):
     return render_template(
         'item_detail.html',
         item=item,
-        detail_links=item.detail_links,
+        detail_refs=item.detail_refs,
         event_summary=event_bundle['summary'],
         ongoing_events=event_bundle['ongoing'],
         upcoming_events=event_bundle['upcoming'],
@@ -3924,7 +3941,7 @@ def add_item():
         location_ids = request.form.getlist('location_ids')  # ✅ 支持多个位置
         notes = request.form.get('notes')
         purchase_link = request.form.get('purchase_link')
-        detail_links = _collect_detail_links_from_form(request.form)
+        detail_refs = _collect_detail_refs_from_form(request.form)
 
         # 附件处理（支持多选）
         uploaded_files = request.files.getlist('attachments')
@@ -3963,9 +3980,9 @@ def add_item():
         assigned_members = new_item.assign_responsible_members(responsible_members)
         if features_str == '私人' and not assigned_members:
             new_item.assign_responsible_members([current_user])
-        trimmed_links = new_item.set_detail_links(detail_links)
-        if trimmed_links:
-            flash('部分详情链接过长（字段限 64 字符），已保留前几条，请确认链接长度。', 'warning')
+        trimmed_refs = new_item.set_detail_refs(detail_refs)
+        if trimmed_refs:
+            flash('部分参考信息过长，已保留前几条，请确认长度。', 'warning')
         # 绑定多个位置（若前端未选择则为空列表）
         loc_ids = [int(x) for x in location_ids] if location_ids else []
         if not loc_ids and default_loc_id:
@@ -4028,10 +4045,10 @@ def edit_item(item_id):
         # 更新物品信息
         item.name = request.form.get('name')
         item.category = request.form.get('category')
-        detail_links = _collect_detail_links_from_form(request.form)
-        trimmed_links = item.set_detail_links(detail_links)
-        if trimmed_links:
-            flash('部分详情链接过长（字段限 64 字符），已保留前几条，请确认链接长度。', 'warning')
+        detail_refs = _collect_detail_refs_from_form(request.form)
+        trimmed_refs = item.set_detail_refs(detail_refs)
+        if trimmed_refs:
+            flash('部分参考信息过长，已保留前几条，请确认长度。', 'warning')
 
         item.stock_status = request.form.get('stock_status')  # 单选库存状态
         feature_raw = request.form.get('features')
@@ -4295,17 +4312,11 @@ def search_items():
     if not keyword:
         return jsonify([])
     like_pattern = f"%{keyword}%"
-    keyword_digits = re.sub(r'[^0-9]', '', keyword)
-    digit_pattern = f"%{keyword_digits}%" if keyword_digits else None
-    cas_col = func.coalesce(Item.cas_no, '')
-    cas_no_hyphenless = func.replace(cas_col, '-', '')
     filters = [
         Item.name.ilike(like_pattern),
         Item.notes.ilike(like_pattern),
-        Item.cas_no.ilike(like_pattern)
+        Item.detail_refs_raw.ilike(like_pattern)
     ]
-    if digit_pattern:
-        filters.append(cas_no_hyphenless.like(digit_pattern))
     matches = (
         Item.query
         .filter(or_(*filters))

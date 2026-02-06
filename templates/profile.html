@@ -6,20 +6,26 @@
       <div class="d-flex justify-content-between align-items-start gap-3">
         <div>
           <a href="{{ url_for('item_detail', item_id=entry.id) }}" class="fw-semibold text-decoration-none">{{ entry.name }}</a>
-          {% set detail_links = entry.detail_links %}
-          {% if detail_links %}
-            {% set first_link = detail_links[0] %}
-            {% set is_http = first_link.url and (first_link.url.startswith('http://') or first_link.url.startswith('https://')) %}
+          {% set detail_refs = entry.detail_refs %}
+          {% if detail_refs %}
+            {% set first_ref = detail_refs[0] %}
+            {% set is_http = first_ref.value and (first_ref.value.startswith('http://') or first_ref.value.startswith('https://')) %}
             <div class="small mt-1">
               {% if is_http %}
-                <a href="{{ first_link.url }}" target="_blank" rel="noopener" class="text-decoration-none text-muted">
-                  {{ first_link.label or '查看详情' }}
+                <a href="{{ first_ref.value }}" target="_blank" rel="noopener" class="text-decoration-none text-muted">
+                  {{ first_ref.label or '查看详情' }}
                 </a>
               {% else %}
-                <span class="text-muted">{{ first_link.label or first_link.url }}</span>
+                <span class="text-muted">
+                  {% if first_ref.label %}
+                    {{ first_ref.label }}：{{ first_ref.value }}
+                  {% else %}
+                    {{ first_ref.value }}
+                  {% endif %}
+                </span>
               {% endif %}
-              {% if detail_links|length > 1 %}
-                <span class="text-muted">等 {{ detail_links|length }} 个链接</span>
+              {% if detail_refs|length > 1 %}
+                <span class="text-muted">等 {{ detail_refs|length }} 条</span>
               {% endif %}
             </div>
           {% endif %}

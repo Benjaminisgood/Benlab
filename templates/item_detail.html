@@ -46,24 +46,30 @@
       <li class="list-group-item"><strong>数量：</strong>{% if item.quantity is not none and item.unit %}{{ item.quantity }} {{ item.unit }}{% else %}未指定{% endif %}</li>
       <li class="list-group-item"><strong>购入时间：</strong>{{ item.purchase_date.strftime('%Y-%m-%d') if item.purchase_date else '未指定' }}</li>
       <li class="list-group-item">
-        <strong>详情链接：</strong>
-        {% if detail_links %}
+        <strong>参考信息：</strong>
+        {% if detail_refs %}
         <ul class="list-unstyled mt-2 mb-0">
-          {% for link in detail_links %}
+          {% for ref in detail_refs %}
+          {% set value = ref.value %}
+          {% set display_label = ref.label or ref.value %}
+          {% set is_http = value and (value.startswith('http://') or value.startswith('https://')) %}
           <li class="mb-2">
-            {% set display_label = link.label or link.url %}
-            {% set is_http = link.url and (link.url.startswith('http://') or link.url.startswith('https://')) %}
             {% if is_http %}
-              <a href="{{ link.url }}" target="_blank" rel="noopener" class="d-inline-flex align-items-center gap-2 text-decoration-none">
+              <a href="{{ value }}" target="_blank" rel="noopener" class="d-inline-flex align-items-center gap-2 text-decoration-none">
                 <span class="badge bg-primary-subtle text-primary-emphasis border">{{ loop.index }}</span>
                 <span>{{ display_label }}</span>
               </a>
-              {% if link.label and link.label != link.url %}
-              <div class="small text-muted">{{ link.url }}</div>
+              {% if ref.label and ref.label != value %}
+              <div class="small text-muted">{{ value }}</div>
               {% endif %}
             {% else %}
               <span class="badge bg-primary-subtle text-primary-emphasis border">{{ loop.index }}</span>
-              <span class="text-muted ms-2">{{ display_label }}</span>
+              {% if ref.label %}
+                <span class="fw-semibold ms-2">{{ ref.label }}</span>
+                <span class="text-muted ms-2">{{ value }}</span>
+              {% else %}
+                <span class="text-muted ms-2">{{ value }}</span>
+              {% endif %}
             {% endif %}
           </li>
           {% endfor %}

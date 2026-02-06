@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-{% set existing_detail_links = item.detail_links if item else [] %}
+{% set existing_detail_refs = item.detail_refs if item else [] %}
 {% set allowed_features = ['公共','私人'] %}
 {% set form_id = 'itemForm' %}
 <style>
@@ -195,14 +195,14 @@
     <label for="notes" class="form-label">备注</label>
     <textarea class="form-control" id="notes" name="notes" rows="3">{{ item.notes if item else '' }}</textarea>
   </div>
-  {% set item_adv_open = item and ((existing_detail_links and existing_detail_links|length > 0) or item.category or (item.quantity is not none) or item.unit or item.purchase_date) %}
+  {% set item_adv_open = item and ((existing_detail_refs and existing_detail_refs|length > 0) or item.category or (item.quantity is not none) or item.unit or item.purchase_date) %}
   <div class="accordion mb-3" id="itemAdvancedAccordion">
     <div class="accordion-item">
       <h2 class="accordion-header" id="itemAdvancedHeader">
         <button class="accordion-button {% if not item_adv_open %}collapsed{% endif %}" type="button"
                 data-bs-toggle="collapse" data-bs-target="#itemAdvancedSection"
                 aria-expanded="{{ 'true' if item_adv_open else 'false' }}" aria-controls="itemAdvancedSection">
-          更多属性（详情链接 / 类别 / 数量 / 购入时间）
+          更多属性（参考信息 / 类别 / 数量 / 购入时间）
         </button>
       </h2>
       <div id="itemAdvancedSection" class="accordion-collapse collapse {% if item_adv_open %}show{% endif %}"
@@ -210,31 +210,31 @@
         <div class="accordion-body">
           <div class="mb-3">
             <div class="d-flex justify-content-between align-items-center">
-              <label class="form-label mb-0">详情链接</label>
-              <button type="button" class="btn btn-sm btn-outline-secondary" id="addDetailLinkBtn">新增链接</button>
+              <label class="form-label mb-0">参考信息</label>
+              <button type="button" class="btn btn-sm btn-outline-secondary" id="addDetailRefBtn">新增条目</button>
             </div>
-            <div id="detailLinksContainer" class="d-flex flex-column gap-2 mt-2">
-              {% if existing_detail_links %}
-                {% for link in existing_detail_links %}
-                <div class="input-group detail-link-row">
+            <div id="detailRefsContainer" class="d-flex flex-column gap-2 mt-2">
+              {% if existing_detail_refs %}
+                {% for ref in existing_detail_refs %}
+                <div class="input-group detail-ref-row">
                   <span class="input-group-text">说明</span>
-                  <input type="text" class="form-control" name="detail_link_label" value="{{ link.label }}" placeholder="例如：官网 / 使用指南">
-                  <span class="input-group-text">链接</span>
-                  <input type="url" class="form-control" name="detail_link_url" value="{{ link.url }}" placeholder="https://example.com">
-                  <button class="btn btn-outline-danger detail-link-remove" type="button">&times;</button>
+                  <input type="text" class="form-control" name="detail_ref_label" value="{{ ref.label }}" placeholder="例如：官网 / 规格 / 备注">
+                  <span class="input-group-text">内容</span>
+                  <input type="text" class="form-control" name="detail_ref_value" value="{{ ref.value }}" placeholder="编号 / 链接 / 任意文本">
+                  <button class="btn btn-outline-danger detail-ref-remove" type="button">&times;</button>
                 </div>
                 {% endfor %}
               {% else %}
-                <div class="input-group detail-link-row">
+                <div class="input-group detail-ref-row">
                   <span class="input-group-text">说明</span>
-                  <input type="text" class="form-control" name="detail_link_label" placeholder="例如：官网 / 使用指南">
-                  <span class="input-group-text">链接</span>
-                  <input type="url" class="form-control" name="detail_link_url" placeholder="https://example.com">
-                  <button class="btn btn-outline-danger detail-link-remove" type="button">&times;</button>
+                  <input type="text" class="form-control" name="detail_ref_label" placeholder="例如：官网 / 规格 / 备注">
+                  <span class="input-group-text">内容</span>
+                  <input type="text" class="form-control" name="detail_ref_value" placeholder="编号 / 链接 / 任意文本">
+                  <button class="btn btn-outline-danger detail-ref-remove" type="button">&times;</button>
                 </div>
               {% endif %}
             </div>
-            <div class="form-text">可添加多个链接，用于介绍、教程、社群帖子等。为空则代表暂无。</div>
+            <div class="form-text">可添加多个条目，用于编号、链接、说明等。为空则代表暂无。</div>
           </div>
           <div class="mb-3">
             <label for="category" class="form-label">类别</label>
@@ -360,36 +360,36 @@
       }
     });
   }
-  (function registerDetailLinkEditor() {
-    const container = document.getElementById('detailLinksContainer');
-    const addBtn = document.getElementById('addDetailLinkBtn');
+  (function registerDetailRefEditor() {
+    const container = document.getElementById('detailRefsContainer');
+    const addBtn = document.getElementById('addDetailRefBtn');
     if (!container || !addBtn) {
       return;
     }
-    const createRow = function (labelValue, urlValue) {
+    const createRow = function (labelValue, refValue) {
       const wrapper = document.createElement('div');
-      wrapper.className = 'input-group detail-link-row';
+      wrapper.className = 'input-group detail-ref-row';
       wrapper.innerHTML = `
         <span class="input-group-text">说明</span>
-        <input type="text" class="form-control" name="detail_link_label" placeholder="例如：官网 / 使用指南">
-        <span class="input-group-text">链接</span>
-        <input type="url" class="form-control" name="detail_link_url" placeholder="https://example.com">
-        <button class="btn btn-outline-danger detail-link-remove" type="button">&times;</button>
+        <input type="text" class="form-control" name="detail_ref_label" placeholder="例如：官网 / 规格 / 备注">
+        <span class="input-group-text">内容</span>
+        <input type="text" class="form-control" name="detail_ref_value" placeholder="编号 / 链接 / 任意文本">
+        <button class="btn btn-outline-danger detail-ref-remove" type="button">&times;</button>
       `;
-      const labelInput = wrapper.querySelector('input[name="detail_link_label"]');
-      const urlInput = wrapper.querySelector('input[name="detail_link_url"]');
+      const labelInput = wrapper.querySelector('input[name="detail_ref_label"]');
+      const valueInput = wrapper.querySelector('input[name="detail_ref_value"]');
       if (labelValue) {
         labelInput.value = labelValue;
       }
-      if (urlValue) {
-        urlInput.value = urlValue;
+      if (refValue) {
+        valueInput.value = refValue;
       }
-      wrapper.querySelector('.detail-link-remove').addEventListener('click', function () {
+      wrapper.querySelector('.detail-ref-remove').addEventListener('click', function () {
         if (container.children.length > 1) {
           wrapper.remove();
         } else {
           labelInput.value = '';
-          urlInput.value = '';
+          valueInput.value = '';
         }
       });
       return wrapper;
@@ -397,13 +397,13 @@
     addBtn.addEventListener('click', function () {
       container.appendChild(createRow('', ''));
     });
-    Array.prototype.slice.call(container.querySelectorAll('.detail-link-row')).forEach(function (row) {
-      row.querySelector('.detail-link-remove').addEventListener('click', function () {
+    Array.prototype.slice.call(container.querySelectorAll('.detail-ref-row')).forEach(function (row) {
+      row.querySelector('.detail-ref-remove').addEventListener('click', function () {
         if (container.children.length > 1) {
           row.remove();
         } else {
-          row.querySelector('input[name="detail_link_label"]').value = '';
-          row.querySelector('input[name="detail_link_url"]').value = '';
+          row.querySelector('input[name="detail_ref_label"]').value = '';
+          row.querySelector('input[name="detail_ref_value"]').value = '';
         }
       });
     });

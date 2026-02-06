@@ -7,7 +7,7 @@
 
 <div class="d-flex flex-column flex-md-row align-items-md-center gap-2 mb-3">
   <div class="flex-grow-1 position-relative">
-    <input type="text" id="itemsFilterInput" class="form-control" placeholder="输入名称 / 备注 / 详情链接 / 类别等 立即筛选">
+    <input type="text" id="itemsFilterInput" class="form-control" placeholder="输入名称 / 备注 / 参考信息 / 类别等 立即筛选">
     <div id="itemsSuggestions" class="list-group position-absolute w-100 shadow-sm d-none" style="z-index: 20;"></div>
   </div>
 </div>
@@ -42,12 +42,12 @@
         {% set row_class = row_class ~ ' inventory-row-' ~ status_intent %}
       {% endif %}
       {% set location_names = item.locations | map(attribute='name') | list %}
-      {% set detail_links_blob = item.detail_links | map(attribute='url') | list %}
+      {% set detail_refs_blob = item.detail_refs | map(attribute='value') | list %}
       {% set responsible_labels = [] %}
       {% for member in item.responsible_members %}
         {% set _ = responsible_labels.append(member.name or member.username) %}
       {% endfor %}
-      {% set search_blob = (item.name ~ ' ' ~ (item.category or '-') ~ ' ' ~ (item.stock_status or '-') ~ ' ' ~ (item.features or '-') ~ ' ' ~ (detail_links_blob|join(' ')) ~ ' ' ~ (item.notes or '-') ~ ' ' ~ (responsible_labels|join(' ')) ~ ' ' ~ (location_names|join(' '))) %}
+      {% set search_blob = (item.name ~ ' ' ~ (item.category or '-') ~ ' ' ~ (item.stock_status or '-') ~ ' ' ~ (item.features or '-') ~ ' ' ~ (detail_refs_blob|join(' ')) ~ ' ' ~ (item.notes or '-') ~ ' ' ~ (responsible_labels|join(' ')) ~ ' ' ~ (location_names|join(' '))) %}
 
       <tr class="{{ row_class }}" data-search="{{ search_blob|lower }}">
         <td class="col-item-name">

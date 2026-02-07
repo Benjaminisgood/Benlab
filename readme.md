@@ -687,6 +687,7 @@ export ALIYUN_OSS_ASSUME_PUBLIC=0
 - **大文件上传失败？** 检查 `MAX_CONTENT_LENGTH` 与反向代理的上传限制（如 Nginx 的 `client_max_body_size`）。
 - **直传提示“网络错误 / 超时”？** 优先检查 OSS Bucket CORS（需允许站点源 + `PUT`）；也可先将 `DIRECT_OSS_UPLOAD_ENABLED=0` 回退为服务端上传。
 - **二维码无法访问？** 确认服务域名/端口正确，反向代理未拦截静态与 `/attachments/` 路由。
+- **AI 自动填写提示“AI 服务连接失败 / SSL UNEXPECTED_EOF_WHILE_READING”？** 先检查 `.env` 里的 `CHAT_ANYWHERE_API_BASE_URL` 是否可访问；如使用 ChatAnywhere，建议为 `https://api.chatanywhere.tech/v1`，并重启服务（`./benlab.sh restart`）。若你所在网络无法直连 OpenAI/第三方模型服务，需要配置可达的 OpenAI 兼容网关或为服务器提供可用的外网出口。
 
 ## 路线图（Roadmap）
 - [ ] 支持批量导入（CSV/Excel）与模板校验

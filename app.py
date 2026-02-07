@@ -7,6 +7,7 @@ import time
 import base64
 import mimetypes
 import hashlib
+import ssl
 from datetime import datetime, timedelta, timezone
 import re
 import json
@@ -2394,7 +2395,11 @@ def _chatanywhere_runtime_config():
         or os.getenv('OPENAI_API_KEY')
         or ''
     ).strip()
-    base_url = (os.getenv('CHAT_ANYWHERE_API_BASE_URL') or 'https://api.chatanywhere.com/v1').strip().rstrip('/')
+    base_url = (os.getenv('CHAT_ANYWHERE_API_BASE_URL') or 'https://api.chatanywhere.tech/v1').strip().rstrip('/')
+    # 兼容旧配置：ChatAnywhere 旧域名 `api.chatanywhere.com` 已不可用。
+    # 如果用户仍在使用旧域名，自动迁移到新域名避免直接报错。
+    if 'api.chatanywhere.com' in base_url:
+        base_url = base_url.replace('api.chatanywhere.com', 'api.chatanywhere.tech')
     model = (
         os.getenv('CHAT_ANYWHERE_MODEL')
         or os.getenv('CHAT_ANYWHERE_VISION_MODEL')
@@ -2768,8 +2773,10 @@ def _chatanywhere_chat_completion(messages, max_tokens=900):
             except json.JSONDecodeError:
                 detail = ''
         raise RuntimeError(detail or f'AI 服务返回错误（HTTP {exc.code}）。')
+    except ssl.SSLError as exc:
+        raise RuntimeError(f'AI 服务 SSL 握手失败（{runtime.get("endpoint","")}）：{exc}')
     except (URLError, OSError) as exc:
-        raise RuntimeError(f'AI 服务连接失败：{exc}')
+        raise RuntimeError(f'AI 服务连接失败（{runtime.get("endpoint","")}）：{exc}')
     try:
         parsed = json.loads(raw_body.decode('utf-8', errors='ignore'))
     except json.JSONDecodeError:

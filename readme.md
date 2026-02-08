@@ -619,8 +619,8 @@ CREATE INDEX IF NOT EXISTS idx_attachments_event_id ON attachments(event_id);
 ```
 
 ## 附件与存储策略
-- 默认使用 OSS 存储；`attachments/` 用于本地落盘或同步缓存。
-- `/attachments/<filename>` 动态路由可访问本地附件，方便迁移或排查。
+- `BENLAB_STORAGE_MODE=oss`：仅通过 OSS 读写附件（不做本地同步/缓存）；页面展示直接使用 OSS URL（签名或公共域名）。此模式下不使用 `/attachments/<filename>` 本地路由。
+- `BENLAB_STORAGE_MODE=local`：仅使用服务器本地 `attachments/` 落盘；`/attachments/<filename>` 用于访问本地附件。
 - 编辑表单允许批量删除旧附件，系统会自动清理冗余文件。
 - **OSS 直传**：启用 OSS 时默认使用前端直传，无需额外开关。
   - `ALIYUN_OSS_PUBLIC_BASE_URL` 可配置绑定域名/CNAME；当 `ALIYUN_OSS_ASSUME_PUBLIC=1` 时会用作对外访问域名。

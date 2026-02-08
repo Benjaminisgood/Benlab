@@ -252,9 +252,7 @@
         media_kind_labels,
         '暂无活动媒体',
         {
-          'initial_visible': 6,
-          'download_all_url': url_for('download_event_media_archive', event_id=event.id),
-          'download_all_oss_url': url_for('download_event_media_archive_oss', event_id=event.id) if config['USE_OSS'] else None
+          'initial_visible': 6
         }
       )
     }}

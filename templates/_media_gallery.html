@@ -16,8 +16,6 @@
   {% set is_carousel = layout == 'carousel' %}
   {% set initial_visible_opt = opts.get('initial_visible') %}
   {% set initial_visible = (initial_visible_opt if initial_visible_opt is not none else 6)|int %}
-  {% set download_all_url = opts.get('download_all_url') %}
-  {% set download_all_oss_url = opts.get('download_all_oss_url') %}
   {% set entry_count = entries|length if entries else 0 %}
   {% set first_entry = entries[0] if entry_count > 0 else none %}
   {% set audio_entries = [] %}
@@ -30,7 +28,7 @@
   {% endif %}
   {% if entries %}
   <div class="{{ gallery_class }}{% if is_carousel %} media-gallery--carousel{% endif %}" id="{{ gallery_id }}" data-initial-visible="{{ initial_visible }}" data-total-count="{{ entry_count }}">
-    {% if (enable_focus_mode and entry_count) or download_all_url or show_collapse or has_oss_entries %}
+    {% if (enable_focus_mode and entry_count) or show_collapse or has_oss_entries %}
     <div class="media-gallery-toolbar">
       <div class="media-gallery-hints">
         {% if enable_focus_mode and entry_count %}
@@ -41,11 +39,6 @@
         {% endif %}
       </div>
       <div class="media-gallery-actions">
-        {% if download_all_oss_url %}
-        <a class="btn btn-outline-success btn-sm" href="{{ download_all_oss_url }}">
-          OSS 直连打包
-        </a>
-        {% endif %}
         {% if show_collapse %}
         <button class="btn btn-outline-secondary btn-sm"
                 type="button"

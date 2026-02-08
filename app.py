@@ -1,7 +1,6 @@
 import os
 import glob
 import tempfile
-import zipfile
 import threading
 import time
 import base64
@@ -15,7 +14,7 @@ from io import BytesIO
 import urllib.request
 from urllib.error import URLError, HTTPError
 from urllib.parse import urljoin, urlsplit, urlunsplit
-from flask import Flask, render_template, request, redirect, url_for, flash, send_file, send_from_directory, abort, jsonify, after_this_request
+from flask import Flask, render_template, request, redirect, url_for, flash, send_file, send_from_directory, abort, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -107,7 +106,7 @@ os.makedirs(TEMP_PAGE_DIR, exist_ok=True)
 app.config['MAX_CONTENT_LENGTH'] = 2500 * 1024 * 1024  # 限制上传2500MB以内的文件
 
 # 存储模式：
-# - oss (默认)：上传至 OSS，并可同步/清理 OSS 上的对象
+# - oss (默认)：仅使用 OSS（不做本地缓存/回退）
 # - local：仅使用服务器本地 attachments/，不访问 OSS
 # - auto：OSS 配置齐全且依赖可用时使用 OSS，否则退回本地
 storage_mode = (os.getenv('BENLAB_STORAGE_MODE') or os.getenv('STORAGE_MODE') or '').strip().lower()
@@ -161,10 +160,6 @@ app.config['DIRECT_OSS_UPLOAD_VALIDATE_CORS'] = _parse_env_flag(
     default=True
 )
 app.config['DIRECT_UPLOAD_URL_EXPIRATION'] = max(60, direct_upload_expiration)
-app.config['ATTACHMENTS_SYNC_ON_START'] = _parse_env_flag(
-    os.getenv('ATTACHMENTS_SYNC_ON_START'),
-    default=True
-)
 app.config['ATTACHMENTS_CLEANUP_ON_START'] = _parse_env_flag(
     os.getenv('ATTACHMENTS_CLEANUP_ON_START'),
     default=True
@@ -1607,51 +1602,12 @@ def _attachment_storage_roots():
     attachments_root = app.config.get('ATTACHMENTS_FOLDER')
     return [attachments_root] if attachments_root else []
 
-
-def _attachment_ref_candidates(ref, prefer_prefix=False):
+def _normalize_attachment_ref(ref):
+    """Normalize a stored attachment reference into a relative token or OSS key."""
     if not ref or _is_external_media(ref):
-        return []
-    token = str(ref).strip().replace('\\', '/')
-    token = token.lstrip('/')
-    if not token:
-        return []
-    prefix = (app.config.get('OSS_PREFIX') or '').strip('/ ')
-    candidates = []
-    if not prefix:
-        candidates.append(token)
-        return candidates
-    prefix_token = f"{prefix}/"
-    if token.startswith(prefix_token):
-        candidates.append(token)
-        stripped = token[len(prefix_token):]
-        if stripped:
-            candidates.append(stripped)
-        return candidates
-    if prefer_prefix:
-        candidates.append(f"{prefix}/{token}")
-        candidates.append(token)
-    else:
-        candidates.append(token)
-        candidates.append(f"{prefix}/{token}")
-    return candidates
-
-
-def _local_attachment_root():
-    root = app.config.get('ATTACHMENTS_FOLDER')
-    if root and os.path.isdir(root):
-        return root
-    return None
-
-
-def _ensure_local_attachment_root():
-    root = app.config.get('ATTACHMENTS_FOLDER')
-    if not root:
         return None
-    try:
-        os.makedirs(root, exist_ok=True)
-    except OSError:
-        return None
-    return root
+    token = str(ref).strip().replace('\\', '/').lstrip('/')
+    return token or None
 
 
 def _safe_attachment_path(root, ref):
@@ -1665,35 +1621,31 @@ def _safe_attachment_path(root, ref):
 
 
 def _find_local_attachment(ref):
-    if not ref:
+    token = _normalize_attachment_ref(ref)
+    if not token:
         return None
     for root in _attachment_storage_roots():
         if not root or not os.path.isdir(root):
             continue
-        for candidate_ref in _attachment_ref_candidates(ref):
-            candidate = _safe_attachment_path(root, candidate_ref)
-            if candidate and os.path.exists(candidate):
-                return candidate
+        candidate = _safe_attachment_path(root, token)
+        if candidate and os.path.exists(candidate):
+            return candidate
     return None
 
 
 def _resolve_local_attachment_ref(ref):
-    if not ref:
+    token = _normalize_attachment_ref(ref)
+    if not token:
         return None, None
     for root in _attachment_storage_roots():
         if not root or not os.path.isdir(root):
             continue
-        for candidate_ref in _attachment_ref_candidates(ref):
-            candidate = _safe_attachment_path(root, candidate_ref)
-            if candidate and os.path.exists(candidate):
-                root_abs = os.path.abspath(root)
-                rel = os.path.relpath(candidate, root_abs)
-                return root_abs, rel
+        candidate = _safe_attachment_path(root, token)
+        if candidate and os.path.exists(candidate):
+            root_abs = os.path.abspath(root)
+            rel = os.path.relpath(candidate, root_abs)
+            return root_abs, rel
     return None, None
-
-
-def _local_attachment_exists(ref):
-    return bool(_find_local_attachment(ref))
 
 
 def _generate_stored_filename(original_name):
@@ -1713,20 +1665,26 @@ def save_uploaded_media(file_storage):
     stored_name = _generate_stored_filename(file_storage.filename)
     if app.config.get('USE_OSS'):
         bucket = _get_oss_bucket()
-        if bucket:
-            prefix = app.config.get('OSS_PREFIX')
-            object_key = f"{prefix}/{stored_name}" if prefix else stored_name
+        if not bucket:
+            abort(503, description='OSS 存储未启用或不可用，无法上传。')
+        prefix = app.config.get('OSS_PREFIX')
+        object_key = f"{prefix}/{stored_name}" if prefix else stored_name
+        try:
             file_storage.stream.seek(0)
-            try:
-                bucket.put_object(object_key, file_storage.stream.read())
-                return object_key
-            except Exception as exc:
-                # Keep write path available when OSS has transient failures.
-                app.logger.warning('OSS 上传失败，回退本地存储: %s', exc)
-                try:
-                    file_storage.stream.seek(0)
-                except Exception:
-                    pass
+        except Exception:
+            pass
+        try:
+            # Stream to OSS to avoid buffering large uploads into memory.
+            headers = {}
+            mime_value = _ensure_string(getattr(file_storage, 'mimetype', '')).strip()
+            if mime_value:
+                headers['Content-Type'] = mime_value
+            bucket.put_object(object_key, file_storage.stream, headers=headers or None)
+            return object_key
+        except Exception as exc:
+            # OSS mode is OSS-only: do not fall back to local storage.
+            app.logger.warning('OSS 上传失败: %s', exc)
+            abort(503, description='OSS 上传失败，请稍后重试。')
     attachments_root = app.config.get('ATTACHMENTS_FOLDER')
     if not attachments_root:
         return None
@@ -1815,17 +1773,20 @@ def _read_media_bytes(ref, timeout=10):
     if _is_external_media(ref):
         url = _normalize_external_url(ref)
     else:
-        local_path = _find_local_attachment(ref)
-        if local_path:
-            try:
-                with open(local_path, 'rb') as fh:
-                    return fh.read()
-            except OSError:
-                return None
         if app.config.get('USE_OSS'):
-            candidates = _attachment_ref_candidates(ref, prefer_prefix=True)
-            key = candidates[0] if candidates else ref
+            # OSS mode is OSS-only: do not read from local attachments cache.
+            key = _normalize_attachment_ref(ref)
+            if not key:
+                return None
             url = _build_oss_url(key)
+        else:
+            local_path = _find_local_attachment(ref)
+            if local_path:
+                try:
+                    with open(local_path, 'rb') as fh:
+                        return fh.read()
+                except OSError:
+                    return None
     if not url:
         return None
     try:
@@ -1854,91 +1815,6 @@ def _iter_oss_objects(prefix=None):
                 break
         else:
             break
-
-
-def _sync_oss_attachments_to_local():
-    if not app.config.get('USE_OSS'):
-        return {'downloaded': 0, 'skipped': 0}
-    attachments_root = _ensure_local_attachment_root()
-    if not attachments_root:
-        return {'downloaded': 0, 'skipped': 0}
-    bucket = _get_oss_bucket()
-    if not bucket:
-        return {'downloaded': 0, 'skipped': 0}
-    prefix = app.config.get('OSS_PREFIX') or None
-    if prefix:
-        prefix = f"{prefix}/"
-    downloaded = 0
-    skipped = 0
-    root_abs = os.path.abspath(attachments_root)
-    for obj in _iter_oss_objects(prefix=prefix):
-        key = getattr(obj, 'key', None)
-        if not key or key.endswith('/'):
-            continue
-        local_path = _safe_attachment_path(root_abs, key)
-        if not local_path:
-            continue
-        expected_size = getattr(obj, 'size', None)
-        if os.path.exists(local_path) and expected_size is not None:
-            try:
-                if os.path.getsize(local_path) == expected_size:
-                    skipped += 1
-                    continue
-            except OSError:
-                pass
-        local_dir = os.path.dirname(local_path)
-        if local_dir and not os.path.isdir(local_dir):
-            os.makedirs(local_dir, exist_ok=True)
-        try:
-            bucket.get_object_to_file(key, local_path)
-            downloaded += 1
-        except Exception:
-            continue
-    return {'downloaded': downloaded, 'skipped': skipped}
-
-
-def _sync_attachments_async(refs):
-    if not refs:
-        return
-    if not app.config.get('USE_OSS'):
-        return
-    if not _ensure_local_attachment_root():
-        return
-    unique_refs = []
-    seen = set()
-    for ref in refs:
-        if not ref or _is_external_media(ref):
-            continue
-        for candidate in _attachment_ref_candidates(ref, prefer_prefix=True):
-            if not candidate or candidate in seen:
-                continue
-            seen.add(candidate)
-            unique_refs.append(candidate)
-    if not unique_refs:
-        return
-
-    def runner():
-        root = _ensure_local_attachment_root()
-        if not root:
-            return
-        bucket = _get_oss_bucket()
-        if not bucket:
-            return
-        root_abs = os.path.abspath(root)
-        for key in unique_refs:
-            local_path = _safe_attachment_path(root_abs, key)
-            if not local_path or os.path.exists(local_path):
-                continue
-            local_dir = os.path.dirname(local_path)
-            if local_dir and not os.path.isdir(local_dir):
-                os.makedirs(local_dir, exist_ok=True)
-            try:
-                bucket.get_object_to_file(key, local_path)
-            except Exception:
-                continue
-
-    thread = threading.Thread(target=runner, name='attachment-sync-on-demand', daemon=True)
-    thread.start()
 
 
 def _collect_referenced_attachment_keys():
@@ -2038,20 +1914,14 @@ def _cleanup_orphaned_attachments():
 
 
 def _start_attachment_housekeeping():
-    sync_enabled = bool(app.config.get('ATTACHMENTS_SYNC_ON_START'))
     cleanup_enabled = bool(app.config.get('ATTACHMENTS_CLEANUP_ON_START'))
-    if not sync_enabled and not cleanup_enabled:
+    if not cleanup_enabled:
         return
     if os.environ.get('FLASK_DEBUG') == '1' and os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
         return
 
     def runner():
         with app.app_context():
-            if sync_enabled and _local_attachment_root():
-                try:
-                    _sync_oss_attachments_to_local()
-                except Exception as exc:
-                    app.logger.warning('附件同步任务失败: %s', exc)
             if cleanup_enabled:
                 try:
                     _cleanup_orphaned_attachments()
@@ -2224,84 +2094,6 @@ def _start_db_backup_worker():
     thread = threading.Thread(target=runner, name='db-backup-worker', daemon=True)
     thread.start()
 
-
-def _safe_media_basename(ref, fallback_index=0):
-    token = (ref or '').split('?', 1)[0].split('#', 1)[0]
-    base = os.path.basename(token) or f"media-{fallback_index or 1}"
-    safe = secure_filename(base) or f"media-{fallback_index or 1}"
-    name, ext = os.path.splitext(safe)
-    return name or f"media-{fallback_index or 1}", ext
-
-
-def _collect_event_media_refs(event, allow_external=True):
-    media_refs = []
-    seen = set()
-    for att in getattr(event, 'attachments', []) or []:
-        ref = getattr(att, 'filename', None)
-        if not ref or ref in seen:
-            continue
-        if not allow_external and _is_external_media(ref):
-            continue
-        seen.add(ref)
-        media_refs.append(ref)
-    return media_refs
-
-
-def _build_archive_file(media_refs):
-    archive_file = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
-    used_names = set()
-    success_count = 0
-    with zipfile.ZipFile(archive_file, mode='w', compression=zipfile.ZIP_DEFLATED) as zf:
-        for idx, ref in enumerate(media_refs, start=1):
-            data = _read_media_bytes(ref)
-            if not data:
-                continue
-            arcname = _build_archive_name(ref, used_names, idx)
-            zf.writestr(arcname, data)
-            success_count += 1
-    archive_file.flush()
-    try:
-        archive_file.close()
-    except Exception:
-        pass
-    return archive_file.name, success_count
-
-
-def _upload_archive_to_oss(path, event_id):
-    if not path or not app.config.get('USE_OSS'):
-        return None, None
-    bucket = _get_oss_bucket()
-    if not bucket:
-        return None, None
-    prefix = app.config.get('OSS_PREFIX')
-    timestamp = datetime.utcnow().strftime('%Y%m%d%H%M%S')
-    filename = f"event-{event_id}-media-{timestamp}.zip"
-    object_key = f"archives/{filename}"
-    if prefix:
-        object_key = f"{prefix}/{object_key}"
-    bucket.put_object_from_file(object_key, path)
-    expiry = app.config.get('DIRECT_UPLOAD_URL_EXPIRATION', 900)
-    try:
-        expires_in = int(expiry)
-    except (TypeError, ValueError):
-        expires_in = 900
-    expires_in = max(60, expires_in)
-    signed_url = bucket.sign_url('GET', object_key, expires_in)
-    signed_url = _finalize_signed_upload_url(signed_url)
-
-    def _delete_later():
-        try:
-            bucket.delete_object(object_key)
-        except Exception:
-            pass
-
-    try:
-        threading.Timer(expires_in + 300, _delete_later).start()
-    except Exception:
-        pass
-    return signed_url, object_key
-
-
 def _finalize_signed_upload_url(url):
     """Rewrite signed OSS URL to desired domain/scheme for front-end direct uploads."""
     if not url:
@@ -2348,10 +2140,14 @@ def _collect_remote_object_keys(field_name):
     if not field_name or not app.config.get('USE_OSS') or not app.config.get('DIRECT_OSS_UPLOAD_ENABLED'):
         return []
     remote_field = f"{field_name}{REMOTE_FIELD_SUFFIX}"
+    prefix = (app.config.get('OSS_PREFIX') or '').strip('/ ')
+    required_prefix = f"{prefix}/" if prefix else ''
     seen = set()
     refs = []
     for raw in request.form.getlist(remote_field):
         normalized = _normalize_object_key(raw)
+        if required_prefix and (not normalized or not normalized.startswith(required_prefix)):
+            continue
         if not normalized or normalized in seen:
             continue
         seen.add(normalized)
@@ -3723,6 +3519,8 @@ def _send_local_attachment(filename):
 
 @app.route('/attachments/<path:filename>')
 def uploaded_attachment(filename):
+    if app.config.get('USE_OSS'):
+        abort(404)
     return _send_local_attachment(filename)
 
 
@@ -4224,7 +4022,6 @@ def add_event():
                     existing_refs.add(url)
         event.touch()
         db.session.commit()
-        _sync_attachments_async(event.attachment_filenames)
 
         missing_items, missing_locations = compute_missing_resources(event)
         if missing_items:
@@ -4253,7 +4050,6 @@ def event_detail(event_id):
     event = _load_event_for_edit(event_id)
     if not event.can_view(current_user):
         abort(403)
-    _sync_attachments_async(event.attachment_filenames)
 
     participant_links = sorted(
         event.participant_links,
@@ -4280,88 +4076,6 @@ def event_detail(event_id):
         feedback_post_url=url_for('post_event_feedback', event_id=event.id),
         share_meta=share_meta
     )
-
-
-def _build_archive_name(ref, used_names, index):
-    base_name, ext = _safe_media_basename(ref, index)
-    candidate = f"{base_name}{ext}"
-    counter = 2
-    while candidate in used_names:
-        candidate = f"{base_name}-{counter}{ext}"
-        counter += 1
-    used_names.add(candidate)
-    return candidate
-
-
-@app.route('/events/<int:event_id>/media/archive')
-@login_required
-def download_event_media_archive(event_id):
-    event = _load_event_for_edit(event_id)
-    if not event.can_view(current_user):
-        abort(403)
-    media_refs = _collect_event_media_refs(event, allow_external=True)
-    if not media_refs:
-        abort(404, description='该事项暂无可下载的媒体文件')
-    archive_path, success_count = _build_archive_file(media_refs)
-
-    @after_this_request
-    def cleanup(response):  # pragma: no cover - cleanup helper
-        try:
-            os.remove(archive_path)
-        except OSError:
-            pass
-        return response
-
-    if success_count == 0:
-        try:
-            os.remove(archive_path)
-        except OSError:
-            pass
-        abort(404, description='媒体文件暂不可用，请稍后重试')
-
-    filename = f"event-{event.id}-media.zip"
-    return send_file(
-        archive_path,
-        mimetype='application/zip',
-        as_attachment=True,
-        download_name=filename
-    )
-
-
-@app.route('/events/<int:event_id>/media/archive/oss')
-@login_required
-def download_event_media_archive_oss(event_id):
-    if not app.config.get('USE_OSS'):
-        abort(404)
-    event = _load_event_for_edit(event_id)
-    if not event.can_view(current_user):
-        abort(403)
-    media_refs = _collect_event_media_refs(event, allow_external=False)
-    if not media_refs:
-        abort(404, description='该事项暂无存储在 OSS 的媒体文件')
-
-    archive_path, success_count = _build_archive_file(media_refs)
-
-    @after_this_request
-    def cleanup(response):  # pragma: no cover - cleanup helper
-        try:
-            os.remove(archive_path)
-        except OSError:
-            pass
-        return response
-
-    if success_count == 0:
-        try:
-            os.remove(archive_path)
-        except OSError:
-            pass
-        abort(404, description='媒体文件暂不可用，请稍后重试')
-
-    signed_url, _ = _upload_archive_to_oss(archive_path, event_id)
-    if not signed_url:
-        abort(503, description='OSS 存储未启用或不可用，无法生成直链下载')
-    return redirect(signed_url)
-
 
 @app.route('/events/<int:event_id>/poster.png')
 def event_share_poster(event_id):
@@ -4572,12 +4286,13 @@ def edit_event(event_id):
         event.items = selected_items
         event.locations = selected_locations
 
+        pending_delete_refs = []
         remove_attachment_ids_raw = request.form.getlist('remove_event_attachment_ids')
         remove_attachment_ids = {int(x) for x in remove_attachment_ids_raw if x.isdigit()}
         if remove_attachment_ids:
             for att in list(event.attachments):
                 if att.id in remove_attachment_ids:
-                    remove_uploaded_file(att.filename)
+                    pending_delete_refs.append(att.filename)
                     event.attachments.remove(att)
                     db.session.delete(att)
 
@@ -4598,6 +4313,8 @@ def edit_event(event_id):
 
         event.touch()
         db.session.commit()
+        for ref in pending_delete_refs:
+            remove_uploaded_file(ref)
 
         missing_items, missing_locations = compute_missing_resources(event)
         if missing_items:
@@ -4646,10 +4363,11 @@ def delete_event(event_id):
         abort(403)
     event_title = event.title
     event_identifier = event.id
-    for att in list(event.attachments):
-        remove_uploaded_file(att.filename)
+    refs_to_delete = [att.filename for att in list(event.attachments)]
     db.session.delete(event)
     db.session.commit()
+    for ref in refs_to_delete:
+        remove_uploaded_file(ref)
     log = Log(
         user_id=current_user.id,
         event_id=event_identifier,
@@ -4775,7 +4493,6 @@ def item_detail(item_id):
             selectinload(Item.locations)
         ).get_or_404(item_id)
     )
-    _sync_attachments_async(item.attachment_filenames)
     events = (
         Event.query
         .join(event_items)
@@ -4927,7 +4644,6 @@ def add_item():
                 new_item.attachments.append(Attachment(filename=url))
                 existing_refs.add(url)
         db.session.commit()
-        _sync_attachments_async(new_item.attachment_filenames)
 
         # ✅ 写入日志
         log = Log(
@@ -5010,13 +4726,14 @@ def edit_item(item_id):
         item.notes = request.form.get('notes')
         item.purchase_link = (request.form.get('purchase_link') or '').strip()
 
-        # 删除勾选的旧附件
+        # 删除勾选的旧附件（延后到提交成功后再真正删除文件，避免中途失败导致文件已删但事务回滚。）
+        pending_delete_refs = []
         remove_attachment_ids_raw = request.form.getlist('remove_attachment_ids')
         remove_attachment_ids = {int(x) for x in remove_attachment_ids_raw if x.isdigit()}
         if remove_attachment_ids:
             for att in list(item.attachments):
                 if att.id in remove_attachment_ids:
-                    remove_uploaded_file(att.filename)
+                    pending_delete_refs.append(att.filename)
                     item.attachments.remove(att)
                     db.session.delete(att)
 
@@ -5040,7 +4757,8 @@ def edit_item(item_id):
 
         item.last_modified = datetime.utcnow()
         db.session.commit()
-        _sync_attachments_async(item.attachment_filenames)
+        for ref in pending_delete_refs:
+            remove_uploaded_file(ref)
 
         # 记录日志
         log = Log(user_id=current_user.id, item_id=item.id, action_type="修改物品", details=f"Edited item {item.name}")
@@ -5073,10 +4791,11 @@ def delete_item(item_id):
     item = Item.query.get_or_404(item_id)
     if item.features == '私人' and current_user not in item.responsible_members:
         abort(403)
-    for fname in set(item.attachment_filenames):
-        remove_uploaded_file(fname)
+    refs_to_delete = sorted(set(item.attachment_filenames))
     db.session.delete(item)
     db.session.commit()
+    for fname in refs_to_delete:
+        remove_uploaded_file(fname)
     # 记录日志
     log = Log(user_id=current_user.id, item_id=item_id, action_type="删除物品", details=f"Deleted item {item.name}")
     db.session.add(log)
@@ -5352,7 +5071,6 @@ def add_location():
             member_objs = [current_user]
         new_loc.responsible_members = member_objs
         db.session.commit()
-        _sync_attachments_async(new_loc.attachment_filenames)
         # 记录日志
         log = Log(user_id=current_user.id, location_id=new_loc.id, action_type="新增位置", details=f"Added location {new_loc.name}")
         db.session.add(log)
@@ -5409,12 +5127,13 @@ def edit_location(loc_id):
             longitude = None
             coordinate_source = None
 
+        pending_delete_refs = []
         remove_attachment_ids_raw = request.form.getlist('remove_attachment_ids')
         remove_attachment_ids = {int(x) for x in remove_attachment_ids_raw if x.isdigit()}
         if remove_attachment_ids:
             for att in list(location.attachments):
                 if att.id in remove_attachment_ids:
-                    remove_uploaded_file(att.filename)
+                    pending_delete_refs.append(att.filename)
                     location.attachments.remove(att)
                     db.session.delete(att)
 
@@ -5448,7 +5167,8 @@ def edit_location(loc_id):
         location.coordinate_source = coordinate_source
         location.last_modified = datetime.utcnow()
         db.session.commit()
-        _sync_attachments_async(location.attachment_filenames)
+        for ref in pending_delete_refs:
+            remove_uploaded_file(ref)
         # 记录日志
         log = Log(user_id=current_user.id, location_id=location.id, action_type="修改位置", details=f"Edited location {location.name}")
         db.session.add(log)
@@ -5474,10 +5194,11 @@ def delete_location(loc_id):
     location = Location.query.get_or_404(loc_id)
     if location.responsible_members and current_user not in location.responsible_members:
         abort(403)
-    for fname in set(location.attachment_filenames):
-        remove_uploaded_file(fname)
+    refs_to_delete = sorted(set(location.attachment_filenames))
     db.session.delete(location)
     db.session.commit()
+    for fname in refs_to_delete:
+        remove_uploaded_file(fname)
     # 记录日志
     log = Log(user_id=current_user.id, location_id=loc_id, action_type="删除位置", details=f"Deleted location {location.name}")
     db.session.add(log)
@@ -5489,7 +5210,6 @@ def delete_location(loc_id):
 @login_required
 def view_location(loc_id):
     location = Location.query.get_or_404(loc_id)
-    _sync_attachments_async(location.attachment_filenames)
     # 获取该位置包含的所有物品（多对多）
     items_at_location = sorted(location.items, key=lambda item: item.name.lower())
     # 分类统计状态标签（如：用完、少量、借出）
@@ -6038,13 +5758,15 @@ def edit_profile(member_id):
                     stored_name = save_uploaded_media(image_file)
                     if stored_name:
                         new_photo_ref = stored_name
+        pending_delete_photo = None
         if new_photo_ref:
             if member.photo and member.photo != new_photo_ref:
-                remove_uploaded_file(member.photo)
+                pending_delete_photo = member.photo
             member.photo = new_photo_ref
         member.last_modified = datetime.utcnow()
         db.session.commit()
-        _sync_attachments_async([member.photo])
+        if pending_delete_photo:
+            remove_uploaded_file(pending_delete_photo)
         flash('个人信息已更新', 'success')
         return redirect(url_for('profile', member_id=member_id))
     locations = Location.query.order_by(func.lower(Location.name)).all()
@@ -6113,13 +5835,14 @@ def inject_attachment_helpers():
             return None, None
         if _is_external_media(ref):
             return _normalize_external_url(ref), 'external'
+        if app.config.get('USE_OSS'):
+            key = _normalize_attachment_ref(ref)
+            if not key:
+                return None, None
+            return _build_oss_url(key), 'oss'
         root, rel_path = _resolve_local_attachment_ref(ref)
         if root and rel_path:
             return url_for('uploaded_attachment', filename=rel_path), 'local'
-        if app.config.get('USE_OSS'):
-            candidates = _attachment_ref_candidates(ref, prefer_prefix=True)
-            key = candidates[0] if candidates else ref.lstrip('/')
-            return _build_oss_url(key), 'oss'
         return url_for('uploaded_attachment', filename=ref), 'local'
 
     def resolve_media_url(ref):

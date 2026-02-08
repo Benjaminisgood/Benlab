@@ -62,7 +62,7 @@ PID_FILE="${PID_FILE:-$PROJECT_PATH/flask.pid}"
 LOG_FILE="${LOG_FILE:-$PROJECT_PATH/flask.log}"
 ACCESS_LOG_FILE="${ACCESS_LOG_FILE:-$PROJECT_PATH/flask-access.log}"
 ENV_FILE="${ENV_FILE:-$PROJECT_PATH/.env}"
-PORT="${PORT:-5001}"
+PORT="${PORT:-}"
 REQ_FILE="${REQ_FILE:-$PROJECT_PATH/requirements.txt}"
 BIND_HOST="${BIND_HOST:-0.0.0.0}"
 GUNICORN_APP="${GUNICORN_APP:-app:app}"
@@ -97,6 +97,21 @@ load_env_file() {
 }
 
 load_env_file
+
+# ===== 端口解析（优先 .env，其次环境变量，多级回退） =====
+# 优先级：PORT -> FLASK_RUN_PORT -> BENSCI_PORT -> 80
+PORT="${PORT:-${FLASK_RUN_PORT:-${BENSCI_PORT:-80}}}"
+PORT="${PORT//[[:space:]]/}"
+if ! [[ "$PORT" =~ ^[0-9]+$ ]] || [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+  error "端口无效: ${PORT:-<empty>} (期望 1-65535)"
+  exit 1
+fi
+if [ "$PORT" -lt 1024 ]; then
+  uid="${EUID:-$(id -u)}"
+  if [ "$uid" -ne 0 ]; then
+    warn "端口 $PORT < 1024，通常需要 root 权限（可在 .env 设置 PORT=5000 或用 sudo 启动）。"
+  fi
+fi
 
 # ===== Python 版本检测 =====
 if ! command -v python3 &>/dev/null; then

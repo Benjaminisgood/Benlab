@@ -39,6 +39,7 @@
       - [`messages`（留言）](#messages留言)
       - [`attachments`（统一附件）](#attachments统一附件)
       - [关联表（多对多）](#关联表多对多)
+    - [旧字段收敛规则（必须遵守）](#旧字段收敛规则必须遵守)
     - [常见输入列名映射（原始列 -\> 目标列）](#常见输入列名映射原始列---目标列)
     - [将任意“原始数据表”转换为 Benlab SQLite 的步骤](#将任意原始数据表转换为-benlab-sqlite-的步骤)
     - [可直接执行的 SQLite DDL（当前版本）](#可直接执行的-sqlite-ddl当前版本)
@@ -100,14 +101,14 @@ export FLASK_APP=app.py
 export FLASK_SECRET_KEY='请替换为随机字符串'
 # 如需调整监听地址或端口，可添加：
 # export HOST=0.0.0.0
-# export PORT=5001
+# export PORT=5000
 ```
 
 ### 3. 启动服务
 ```bash
 python app.py
 # 或使用 Flask CLI：
-# flask run --host="${HOST:-0.0.0.0}" --port="${PORT:-5001}"
+# flask run --host="${HOST:-0.0.0.0}" --port="${PORT:-5000}"
 ```
 
 首次启动会自动创建管理员账号 `admin/admin`，请第一时间登录后台修改密码并补充个人资料。
@@ -126,7 +127,7 @@ chmod +x benlab.sh
 ```bash
 ./benlab.sh start
 ```
-- 会自动创建/复用 `venv`、安装 `requirements.txt`、确保 `attachments/` 和 `instance/` 目录存在、计算合理的 Gunicorn workers，并默认监听 `0.0.0.0:5001`。
+- 会自动创建/复用 `venv`、安装 `requirements.txt`、确保 `attachments/` 和 `instance/` 目录存在、计算合理的 Gunicorn workers，并默认监听 `0.0.0.0:80`（如未设置 `PORT`/`FLASK_RUN_PORT`/`BENSCI_PORT`）。
 
 4) 其他常用命令：
 ```bash
@@ -153,7 +154,7 @@ pip install -r requirements.txt
 $env:FLASK_APP = "app.py"
 $env:FLASK_SECRET_KEY = "请替换为随机字符串"
 $env:HOST = "0.0.0.0"
-$env:PORT = "5001"
+$env:PORT = "5000"
 ```
 
 3) 启动服务（开发/测试）：
@@ -166,7 +167,7 @@ flask run --host=$env:HOST --port=$env:PORT
 4) 生产运行（Windows 推荐 Waitress）：
 ```powershell
 pip install waitress
-waitress-serve --listen=0.0.0.0:5001 app:app
+waitress-serve --listen=0.0.0.0:5000 app:app
 ```
 
 5) 可选：将变量写入系统（新开终端生效）：
@@ -174,7 +175,7 @@ waitress-serve --listen=0.0.0.0:5001 app:app
 setx FLASK_APP "app.py"
 setx FLASK_SECRET_KEY "请替换为随机字符串"
 setx HOST "0.0.0.0"
-setx PORT "5001"
+setx PORT "5000"
 ```
 
 ## 配置项
@@ -182,7 +183,7 @@ setx PORT "5001"
 | --- | --- | --- |
 | `FLASK_SECRET_KEY` | `dev-only-change-me` | Flask 会话密钥，生产环境必须替换为强随机值 |
 | `HOST` / `FLASK_RUN_HOST` | `0.0.0.0` | 服务监听地址 |
-| `PORT` / `FLASK_RUN_PORT` / `BENSCI_PORT` | `5001` | 多级端口回退，优先级 `PORT` → `FLASK_RUN_PORT` → `BENSCI_PORT` |
+| `PORT` / `FLASK_RUN_PORT` / `BENSCI_PORT` | `80`（benlab.sh）/ `5000`（python app.py） | 多级端口回退，优先级 `PORT` → `FLASK_RUN_PORT` → `BENSCI_PORT` |
 | `SQLALCHEMY_DATABASE_URI` | `sqlite:///lab.db?timeout=30` | 支持改为 PostgreSQL/MySQL 等，例如 `postgresql+psycopg://user:pass@host/db` |
 | `ATTACHMENTS_FOLDER` | `./attachments` | 上传文件保存目录，默认位于项目根目录 |
 | `BENLAB_STORAGE_MODE` | `oss` | 存储模式：`oss` 使用 OSS；`local` 仅本地存储（不上传/不同步 OSS）；`auto` 自动选择（OSS 配置齐全且依赖可用时启用 OSS） |
@@ -665,7 +666,7 @@ export ALIYUN_OSS_ASSUME_PUBLIC=0
   ```
 - Windows 环境可使用 Waitress：
   ```powershell
-  waitress-serve --listen=0.0.0.0:5001 app:app
+  waitress-serve --listen=0.0.0.0:5000 app:app
   ```
 - 置于 Nginx/Caddy 反向代理之后，并启用 HTTPS；Flask 已通过 ProxyFix 支持 `X-Forwarded-*` 头。
 - 将 `FLASK_SECRET_KEY`、数据库凭据写入安全的环境变量或密钥管理服务。

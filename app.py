@@ -1,4 +1,5 @@
 import os
+import contextlib
 import glob
 import tempfile
 import threading
@@ -22,6 +23,7 @@ from werkzeug.utils import secure_filename
 from collections import Counter
 from sqlalchemy.orm import selectinload, load_only
 from sqlalchemy import or_, func, text, inspect
+from sqlalchemy.exc import IntegrityError
 from flask_migrate import Migrate
 from markupsafe import Markup, escape
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
@@ -3329,16 +3331,81 @@ def _migrate_legacy_attachments(inspector, table_names):
             pass
         app.config['ATTACHMENTS_CLEANUP_ON_START'] = False
 
-# 初始化数据库并创建默认用户
-with app.app_context():
+# ---- 启动初始化（避免 Gunicorn 多 worker 导入阶段重复执行）----
+# 说明：
+# 1) 不在模块导入阶段做 DB/线程等副作用，避免 Gunicorn 多 worker 导入时并发踩坑。
+# 2) 使用 flock() 做进程间互斥，确保 schema/seed/migration 不会被多个 worker 同时跑。
+# 3) 默认管理员初始化改为幂等：存在则跳过，并发情况下用唯一约束 + IntegrityError 兜底。
+try:
+    import fcntl  # Unix-only
+except Exception:  # pragma: no cover - Windows or restricted env
+    fcntl = None
+
+_startup_done = False
+_startup_once_lock = threading.Lock()
+_jobs_leader_lock_fh = None
+
+
+@contextlib.contextmanager
+def _exclusive_process_lock(lock_path):
+    """Best-effort inter-process exclusive lock (no-op if fcntl unavailable)."""
+    if not fcntl:
+        yield None
+        return
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    fh = open(lock_path, 'a+')
+    try:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        yield fh
+    finally:
+        try:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+        except Exception:
+            pass
+        fh.close()
+
+
+def _try_acquire_jobs_leader(lock_path):
+    """Return True if this worker should run background housekeeping threads."""
+    global _jobs_leader_lock_fh
+    if _jobs_leader_lock_fh is not None:
+        return True
+    if not fcntl:
+        return False
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    fh = open(lock_path, 'a+')
+    try:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (BlockingIOError, OSError):
+        fh.close()
+        return False
+    try:
+        fh.seek(0)
+        fh.truncate()
+        fh.write(str(os.getpid()))
+        fh.flush()
+    except Exception:
+        pass
+    # Keep file handle open so the lock remains held for the process lifetime.
+    _jobs_leader_lock_fh = fh
+    return True
+
+
+def _run_schema_migrations_and_seed():
     if app.config.get('DIRECT_OSS_UPLOAD_ENABLED') and not _oss_direct_upload_ready():
         app.config['DIRECT_OSS_UPLOAD_ENABLED'] = False
+
     db.create_all()
+
+    inspector = None
+    table_names = []
     try:
         inspector = inspect(db.engine)
         table_names = inspector.get_table_names()
     except Exception:
+        inspector = None
         table_names = []
+
     if 'locations' in table_names:
         existing_cols = {col['name'] for col in inspector.get_columns('locations')}
         alter_statements = []
@@ -3408,6 +3475,7 @@ with app.app_context():
             migrated_locations = True
         if migrated_locations:
             db.session.commit()
+
     if 'logs' in table_names:
         log_cols = {col['name'] for col in inspector.get_columns('logs')}
         if 'event_id' not in log_cols:
@@ -3444,14 +3512,59 @@ with app.app_context():
                         pass
 
     _migrate_legacy_attachments(inspector, table_names)
-    if Member.query.count() == 0:
-        default_user = Member(name="Admin User", username="admin", contact="admin@example.com", notes="Default admin user")
+
+    # 仅在“全新库（members 为空）”时创建默认管理员；存在则跳过。
+    try:
+        has_any_member = db.session.query(Member.id).limit(1).first() is not None
+    except Exception:
+        has_any_member = True
+    if not has_any_member and not Member.query.filter_by(username="admin").first():
+        default_user = Member(
+            name="Admin User",
+            username="admin",
+            contact="admin@example.com",
+            notes="Default admin user",
+        )
         default_user.set_password("admin")
         db.session.add(default_user)
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:
+            # 多 worker 并发或重复运行时，若已存在同名用户则忽略。
+            db.session.rollback()
 
-_start_attachment_housekeeping()
-_start_db_backup_worker()
+
+def _ensure_startup_initialized():
+    global _startup_done
+    if _startup_done:
+        return
+    with _startup_once_lock:
+        if _startup_done:
+            return
+
+        schema_lock_path = os.path.join(app.instance_path, 'benlab-startup-schema.lock')
+        with _exclusive_process_lock(schema_lock_path):
+            with app.app_context():
+                _run_schema_migrations_and_seed()
+
+        # 只允许一个 worker 启动后台线程（附件清理/DB 备份），避免重复跑。
+        jobs_lock_path = os.path.join(app.instance_path, 'benlab-startup-jobs.lock')
+        if _try_acquire_jobs_leader(jobs_lock_path):
+            _start_attachment_housekeeping()
+            _start_db_backup_worker()
+
+        _startup_done = True
+
+
+@app.before_request
+def _benlab_startup_before_request():
+    _ensure_startup_initialized()
+
+
+if hasattr(app, 'before_serving'):
+    @app.before_serving
+    def _benlab_startup_before_serving():
+        _ensure_startup_initialized()
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -5937,7 +6050,7 @@ if __name__ == "__main__":
         os.getenv("PORT")
         or os.getenv("FLASK_RUN_PORT")
         or os.getenv("BENSCI_PORT")
-        or 5001
+        or 5000
     )
     debug = os.getenv("FLASK_DEBUG", "0") == "1"
     app.run(host=host, port=port, debug=debug)

@@ -2187,6 +2187,19 @@ def _limit_text(value, max_length):
     return text_value[:max_length]
 
 
+def _normalize_ai_provider(value):
+    token = _ensure_string(value).strip().lower()
+    if not token:
+        return 'chatanywhere'
+    if token in {'chatanywhere', 'chat-anywhere', 'chat_anywhere', 'chat'}:
+        return 'chatanywhere'
+    if token in {'deepseek', 'deep-seek', 'deep_seek'}:
+        return 'deepseek'
+    if token in {'aliyun', 'alibaba', 'alicloud', 'dashscope', 'bailian', 'qwen'}:
+        return 'aliyun'
+    return token
+
+
 def _chatanywhere_runtime_config():
     api_key = (
         os.getenv('CHAT_ANYWHERE_API_KEY')
@@ -2207,11 +2220,87 @@ def _chatanywhere_runtime_config():
     ).strip()
     endpoint = f"{base_url}/chat/completions" if base_url else ''
     return {
+        'provider': 'chatanywhere',
+        'provider_display': 'ChatAnywhere',
+        'api_key_env': 'CHAT_ANYWHERE_API_KEY',
+        'base_url_env': 'CHAT_ANYWHERE_API_BASE_URL',
+        'default_model': 'gpt-4o-mini',
         'api_key': api_key,
         'base_url': base_url,
         'endpoint': endpoint,
         'model': model
     }
+
+
+def _deepseek_runtime_config():
+    api_key = (
+        os.getenv('DEEPSEEK_API_KEY')
+        or os.getenv('OPENAI_API_KEY')
+        or ''
+    ).strip()
+    base_url = (os.getenv('DEEPSEEK_API_BASE_URL') or 'https://api.deepseek.com/v1').strip().rstrip('/')
+    model = (
+        os.getenv('DEEPSEEK_MODEL')
+        or os.getenv('DEEPSEEK_VISION_MODEL')
+        or os.getenv('DEEPSEEK_CHAT_MODEL')
+        or 'deepseek-chat'
+    ).strip()
+    endpoint = f"{base_url}/chat/completions" if base_url else ''
+    return {
+        'provider': 'deepseek',
+        'provider_display': 'DeepSeek',
+        'api_key_env': 'DEEPSEEK_API_KEY',
+        'base_url_env': 'DEEPSEEK_API_BASE_URL',
+        'default_model': 'deepseek-chat',
+        'api_key': api_key,
+        'base_url': base_url,
+        'endpoint': endpoint,
+        'model': model
+    }
+
+
+def _aliyun_runtime_config():
+    api_key = (
+        os.getenv('ALIYUN_AI_API_KEY')
+        or os.getenv('DASHSCOPE_API_KEY')
+        or os.getenv('OPENAI_API_KEY')
+        or ''
+    ).strip()
+    base_url = (
+        os.getenv('ALIYUN_AI_API_BASE_URL')
+        or os.getenv('DASHSCOPE_API_BASE_URL')
+        or 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+    ).strip().rstrip('/')
+    model = (
+        os.getenv('ALIYUN_AI_MODEL')
+        or os.getenv('DASHSCOPE_MODEL')
+        or os.getenv('ALIYUN_AI_VISION_MODEL')
+        or os.getenv('DASHSCOPE_VISION_MODEL')
+        or 'qwen-vl-max-latest'
+    ).strip()
+    endpoint = f"{base_url}/chat/completions" if base_url else ''
+    return {
+        'provider': 'aliyun',
+        'provider_display': '阿里云百炼',
+        'api_key_env': 'ALIYUN_AI_API_KEY / DASHSCOPE_API_KEY',
+        'base_url_env': 'ALIYUN_AI_API_BASE_URL / DASHSCOPE_API_BASE_URL',
+        'default_model': 'qwen-vl-max-latest',
+        'api_key': api_key,
+        'base_url': base_url,
+        'endpoint': endpoint,
+        'model': model
+    }
+
+
+def _ai_runtime_config():
+    provider = _normalize_ai_provider(os.getenv('AI_AUTOFILL_PROVIDER') or os.getenv('AI_PROVIDER') or '')
+    if provider == 'chatanywhere':
+        return _chatanywhere_runtime_config()
+    if provider == 'deepseek':
+        return _deepseek_runtime_config()
+    if provider == 'aliyun':
+        return _aliyun_runtime_config()
+    raise ValueError(f"AI_AUTOFILL_PROVIDER 配置无效：{provider}，仅支持 chatanywhere、deepseek 或 aliyun。")
 
 
 def _normalize_ai_uploaded_refs(raw_refs):
@@ -2482,8 +2571,12 @@ def _build_ai_autofill_messages(form_type, context, image_inputs):
             '"notes":"", "detail_refs":[{"label":"","value":""}], "quantity":"", "unit":"", "purchase_link":""}'
         )
         task_text = (
-            "你是盘点助手。请根据图片推断物品信息，优先提取名称、规格、品牌、用途、注意事项。"
-            "若不确定字段就返回空字符串，不要编造。detail_refs 最多 8 条。"
+            "你是盘点助手。请根据具体物品判断并提取最重要的性质与特质，"
+            "比如：如果是实验室药品，须优先覆盖名称、规格、品牌、材质、用途、状态与注意事项等。"
+            "文本字段尽量中英双语（中文在前，英文放在括号内，例如：不锈钢杯（Stainless steel cup））。"
+            "严格按模板字段优先填写：凡是可映射到 name/category/stock_status/quantity/unit/purchase_link/notes 的信息，"
+            "必须写入对应字段，不要重复写进 detail_refs（例如数量与单位不要再写到参考信息）。"
+            "若无法确定就返回空字符串，不要编造。detail_refs 最多 8 条，优先保留高价值信息。"
         )
     else:
         schema_text = (
@@ -2492,13 +2585,19 @@ def _build_ai_autofill_messages(form_type, context, image_inputs):
             '"usage_tags":["study|leisure|event|public|rental|storage|travel|residence|other"]}'
         )
         task_text = (
-            "你是空间盘点助手。请根据图片推断空间名称、风险/维护状态、空间说明、规则和注意事项。"
-            "若不确定字段就返回空字符串，不要编造。detail_refs 最多 8 条。"
+            "你是空间地点位置的盘点助手。请根据具体空间判断并提取最重要的性质与特质，"
+            "比如：如果是实验室空间，须优先覆盖空间名称、风险/维护状态、功能分区、规则与注意事项等。"
+            "文本字段尽量中英双语（中文在前，英文放在括号内）。"
+            "严格按模板字段优先填写：凡是可映射到 name/status/notes/detail_link/usage_tags 的信息，"
+            "必须写入对应字段，不要重复写进 detail_refs。"
+            "若无法确定就返回空字符串，不要编造。detail_refs 最多 8 条，优先保留高价值信息。"
         )
     context_text = json.dumps(context_payload, ensure_ascii=False)
     system_message = (
         "你必须只返回 JSON 对象，不能输出任何额外文本。"
         "字段不存在时返回空字符串或空数组。"
+        "模板字段优先：detail_refs 仅保留模板字段无法承载但有价值的补充信息，禁止与已填写字段重复。"
+        "输出应简洁、可读、可直接写入表单。"
     )
     user_content = [{
         'type': 'text',
@@ -2529,14 +2628,17 @@ def _extract_chat_message_text(content):
     return ''
 
 
-def _chatanywhere_chat_completion(messages, max_tokens=900):
-    runtime = _chatanywhere_runtime_config()
+def _ai_chat_completion(messages, max_tokens=900):
+    runtime = _ai_runtime_config()
+    provider_display = runtime.get('provider_display') or 'AI'
     if not runtime.get('api_key'):
-        raise ValueError('CHAT_ANYWHERE_API_KEY 未配置，无法使用 AI 自动填写。')
+        key_name = runtime.get('api_key_env') or 'API_KEY'
+        raise ValueError(f'{key_name} 未配置，无法使用 AI 自动填写。')
     if not runtime.get('endpoint'):
-        raise ValueError('CHAT_ANYWHERE_API_BASE_URL 未配置，无法使用 AI 自动填写。')
+        base_name = runtime.get('base_url_env') or 'API_BASE_URL'
+        raise ValueError(f'{base_name} 未配置，无法使用 AI 自动填写。')
     request_payload = {
-        'model': runtime.get('model') or 'gpt-4o-mini',
+        'model': runtime.get('model') or runtime.get('default_model') or 'gpt-4o-mini',
         'messages': messages,
         'temperature': 0.2,
         'max_tokens': max_tokens
@@ -2570,27 +2672,32 @@ def _chatanywhere_chat_completion(messages, max_tokens=900):
                         detail = err.strip()
             except json.JSONDecodeError:
                 detail = ''
-        raise RuntimeError(detail or f'AI 服务返回错误（HTTP {exc.code}）。')
+        raise RuntimeError(detail or f'{provider_display} 服务返回错误（HTTP {exc.code}）。')
     except ssl.SSLError as exc:
-        raise RuntimeError(f'AI 服务 SSL 握手失败（{runtime.get("endpoint","")}）：{exc}')
+        raise RuntimeError(f'{provider_display} 服务 SSL 握手失败（{runtime.get("endpoint","")}）：{exc}')
     except (URLError, OSError) as exc:
-        raise RuntimeError(f'AI 服务连接失败（{runtime.get("endpoint","")}）：{exc}')
+        raise RuntimeError(f'{provider_display} 服务连接失败（{runtime.get("endpoint","")}）：{exc}')
     try:
         parsed = json.loads(raw_body.decode('utf-8', errors='ignore'))
     except json.JSONDecodeError:
-        raise RuntimeError('AI 服务返回了无法解析的响应。')
+        raise RuntimeError(f'{provider_display} 服务返回了无法解析的响应。')
     if not isinstance(parsed, dict):
-        raise RuntimeError('AI 服务响应格式不正确。')
+        raise RuntimeError(f'{provider_display} 服务响应格式不正确。')
     choices = parsed.get('choices')
     if not isinstance(choices, list) or not choices:
-        raise RuntimeError('AI 服务未返回有效结果。')
+        raise RuntimeError(f'{provider_display} 服务未返回有效结果。')
     first_choice = choices[0] if isinstance(choices[0], dict) else {}
     message = first_choice.get('message') if isinstance(first_choice, dict) else {}
     content = message.get('content') if isinstance(message, dict) else ''
     text_content = _extract_chat_message_text(content).strip()
     if not text_content:
-        raise RuntimeError('AI 服务未返回可用文本。')
+        raise RuntimeError(f'{provider_display} 服务未返回可用文本。')
     return text_content, request_payload['model']
+
+
+def _chatanywhere_chat_completion(messages, max_tokens=900):
+    # 兼容历史函数名：当前已支持通过 AI_AUTOFILL_PROVIDER 切换供应商。
+    return _ai_chat_completion(messages, max_tokens=max_tokens)
 
 
 def _build_direct_upload_config():
@@ -4675,7 +4782,8 @@ def add_item():
         if not stock_status:
             flash('请选择有效的物品状态。', 'danger')
             return redirect(request.url)
-        feature_raw = request.form.get('features')
+        is_public_feature = request.form.get('is_public_feature') in {'1', 'on', 'true', 'yes'}
+        feature_raw = '公共' if is_public_feature else request.form.get('features')
         features_str = _normalize_item_feature(feature_raw)  # 统一为公共/私人
         if not features_str:
             flash('请选择物品归属（公共或私人）。', 'danger')
@@ -4769,6 +4877,8 @@ def add_item():
         db.session.commit()
 
         flash('物品已添加', 'success')
+        if default_loc_id:
+            return redirect(url_for('view_location', loc_id=default_loc_id))
         return redirect(url_for('items'))
 
     # GET 请求
@@ -4809,7 +4919,8 @@ def edit_item(item_id):
         if not item.stock_status:
             flash('请选择有效的物品状态。', 'danger')
             return redirect(request.url)
-        feature_raw = request.form.get('features')
+        is_public_feature = request.form.get('is_public_feature') in {'1', 'on', 'true', 'yes'}
+        feature_raw = '公共' if is_public_feature else request.form.get('features')
         features_str = _normalize_item_feature(feature_raw)          # 单选物品归属
         if not features_str:
             flash('请选择物品归属（公共或私人）。', 'danger')
@@ -5099,7 +5210,7 @@ def ai_form_autofill():
 
     messages = _build_ai_autofill_messages(form_type, context, image_inputs)
     try:
-        content, model_name = _chatanywhere_chat_completion(messages, max_tokens=900)
+        content, model_name = _ai_chat_completion(messages, max_tokens=900)
     except ValueError as exc:
         return jsonify({'error': 'config_missing', 'message': str(exc)}), 503
     except RuntimeError as exc:

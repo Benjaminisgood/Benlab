@@ -214,8 +214,6 @@
                      id="locationResp{{ m.id }}" data-label="{{ m.name or m.username }}"
                      {% if location and m in location.responsible_members %}
                        checked
-                     {% elif not location and m.id == current_user.id %}
-                       checked
                      {% endif %}>
               <label class="card-select card-select-surface d-flex justify-content-between align-items-center w-100 p-3 border rounded-3 shadow-sm" for="locationResp{{ m.id }}">
                 <div class="d-flex align-items-center gap-2">

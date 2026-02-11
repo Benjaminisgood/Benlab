@@ -28,7 +28,7 @@
 
     {# 将物品分为普通和“舍弃” #}
     {% for item in items %}
-      {% set normalized_status = normalize_item_stock_status(item.stock_status) %}
+      {% set normalized_status = normalize_item_stock_status(item.status) %}
       {% if normalized_status == '舍弃' %}
         {% set _ = discarded_items.append(item) %}
       {% else %}
@@ -37,7 +37,7 @@
     {% endfor %}
 
     {% for item in active_items + discarded_items %}
-      {% set item_status = normalize_item_stock_status(item.stock_status) %}
+      {% set item_status = normalize_item_stock_status(item.status) %}
       {% set status_intent = stock_status_intent(item_status) %}
       {% set row_class = 'inventory-row' %}
       {% if status_intent != 'neutral' %}

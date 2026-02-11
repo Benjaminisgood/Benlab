@@ -11,12 +11,12 @@
     <input type="text" class="form-control" id="name" name="name" value="{{ item.name if item else '' }}" required>
   </div>
   <div class="mb-3">
-    <label for="stock_status">物品状态</label>
-    {% set stock_status_choices = item_stock_status_choices if item_stock_status_choices is defined else ['正常','少量','用完','借出','舍弃'] %}
-    {% set selected_stock_status = normalize_item_stock_status(item.stock_status) if item else '正常' %}
-    <select name="stock_status" class="form-select">
-      {% for opt in stock_status_choices %}
-      <option value="{{ opt }}" {% if selected_stock_status == opt %}selected{% endif %}>{{ opt }}</option>
+    <label for="status">物品状态</label>
+    {% set item_status_choices = item_status_choices if item_status_choices is defined else ['正常','少量','用完','借出','舍弃'] %}
+    {% set selected_item_status = normalize_item_stock_status(item.status) if item else '正常' %}
+    <select name="status" id="status" class="form-select">
+      {% for opt in item_status_choices %}
+      <option value="{{ opt }}" {% if selected_item_status == opt %}selected{% endif %}>{{ opt }}</option>
       {% endfor %}
     </select>
   </div>
@@ -143,14 +143,14 @@
     <label for="notes" class="form-label">备注</label>
     <textarea class="form-control" id="notes" name="notes" rows="3">{{ item.notes if item else '' }}</textarea>
   </div>
-  {% set item_adv_open = item and ((existing_detail_refs and existing_detail_refs|length > 0) or item.category or (item.quantity is not none) or item.unit or item.purchase_date) %}
+  {% set item_adv_open = item and ((existing_detail_refs and existing_detail_refs|length > 0) or item.category or item.quantity_desc or item.purchase_date) %}
   <div class="accordion mb-3" id="itemAdvancedAccordion">
     <div class="accordion-item">
       <h2 class="accordion-header" id="itemAdvancedHeader">
         <button class="accordion-button {% if not item_adv_open %}collapsed{% endif %}" type="button"
                 data-bs-toggle="collapse" data-bs-target="#itemAdvancedSection"
                 aria-expanded="{{ 'true' if item_adv_open else 'false' }}" aria-controls="itemAdvancedSection">
-          更多属性（参考信息 / 类别 / 数量 / 购入时间）
+          更多属性（参考信息 / 类别 / 数量描述 / 购入时间）
         </button>
       </h2>
       <div id="itemAdvancedSection" class="accordion-collapse collapse {% if item_adv_open %}show{% endif %}"
@@ -195,15 +195,11 @@
             </datalist>
           </div>
           <div class="mb-3">
-            <label for="quantity" class="form-label">数量</label>
-            <div class="input-group">
-              <input type="number" step="0.01" class="form-control" name="quantity" value="{{ item.quantity if item else '' }}">
-              <select class="form-select" name="unit">
-                {% for u in ['瓶','个','包','支','盒','mL','L','vL','g','kg','t'] %}
-                  <option value="{{ u }}" {% if item and item.unit == u %}selected{% endif %}>{{ u }}</option>
-                {% endfor %}
-              </select>
-            </div>
+            <label for="quantity_desc" class="form-label">数量描述</label>
+            <input type="text" class="form-control" id="quantity_desc" name="quantity_desc"
+                   value="{{ item.quantity_desc if item else '' }}"
+                   placeholder="例如：10瓶500g / 2箱(24瓶/箱) / 余量约300mL">
+            <div class="form-text">自由填写数量、包装和规格的组合描述，便于记录复杂情况。</div>
           </div>
           <div class="mb-0">
             <label for="purchase_date" class="form-label">购入/生产时间</label>
@@ -316,9 +312,8 @@
     const externalUrlsInput = document.getElementById('externalAttachmentUrls');
     const nameInput = document.getElementById('name');
     const categoryInput = document.getElementById('category');
-    const stockInput = form ? form.querySelector('select[name="stock_status"]') : null;
-    const quantityInput = form ? form.querySelector('input[name="quantity"]') : null;
-    const unitInput = form ? form.querySelector('select[name="unit"]') : null;
+    const statusInput = form ? form.querySelector('select[name="status"]') : null;
+    const quantityDescInput = form ? form.querySelector('input[name="quantity_desc"]') : null;
     const purchaseLinkInput = document.getElementById('purchase_link');
     const notesInput = document.getElementById('notes');
     const detailRefsContainer = document.getElementById('detailRefsContainer');
@@ -409,20 +404,16 @@
         categoryInput.value = suggestion.category;
         updatedCount += 1;
       }
-      if (stockInput && suggestion.stock_status && stockInput.value !== suggestion.stock_status) {
-        stockInput.value = suggestion.stock_status;
+      if (statusInput && suggestion.status && statusInput.value !== suggestion.status) {
+        statusInput.value = suggestion.status;
         updatedCount += 1;
       }
       if (purchaseLinkInput && suggestion.purchase_link && !purchaseLinkInput.value.trim()) {
         purchaseLinkInput.value = suggestion.purchase_link;
         updatedCount += 1;
       }
-      if (quantityInput && (suggestion.quantity || suggestion.quantity === 0) && !quantityInput.value.trim()) {
-        quantityInput.value = String(suggestion.quantity);
-        updatedCount += 1;
-      }
-      if (unitInput && suggestion.unit && !unitInput.value.trim()) {
-        unitInput.value = suggestion.unit;
+      if (quantityDescInput && suggestion.quantity_desc && !quantityDescInput.value.trim()) {
+        quantityDescInput.value = suggestion.quantity_desc;
         updatedCount += 1;
       }
       if (notesInput && suggestion.notes) {
@@ -478,7 +469,8 @@
       formData.append('context_json', JSON.stringify({
         name: nameInput ? nameInput.value : '',
         category: categoryInput ? categoryInput.value : '',
-        stock_status: stockInput ? stockInput.value : '',
+        status: statusInput ? statusInput.value : '',
+        quantity_desc: quantityDescInput ? quantityDescInput.value : '',
         notes: notesInput ? notesInput.value : '',
         purchase_link: purchaseLinkInput ? purchaseLinkInput.value : ''
       }));

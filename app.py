@@ -2496,36 +2496,43 @@ def _normalize_ai_suggestion(form_type, payload):
     if form_type == 'item':
         name = _limit_text(payload.get('name'), 100)
         category = _limit_text(payload.get('category'), 80)
-        stock_status = _normalize_item_stock_status(payload.get('stock_status'))
+        status = _normalize_item_stock_status(payload.get('status'))
         features = _normalize_item_feature(payload.get('features'))
         notes = _limit_text(payload.get('notes'), _AI_AUTOFILL_NOTES_LIMIT)
         detail_refs = _normalize_ai_detail_refs(payload.get('detail_refs'))
-        unit = _limit_text(payload.get('unit'), 20)
+        quantity_desc = _limit_text(payload.get('quantity_desc'), 120)
         purchase_link = _limit_text(payload.get('purchase_link'), 280)
+        if not quantity_desc:
+            quantity = payload.get('quantity')
+            quantity_token = ''
+            if isinstance(quantity, (int, float)):
+                if isinstance(quantity, float) and quantity.is_integer():
+                    quantity_token = str(int(quantity))
+                else:
+                    quantity_token = str(quantity)
+            elif isinstance(quantity, str):
+                quantity_token = quantity.strip()
+            unit_legacy = _limit_text(payload.get('unit'), 20)
+            if quantity_token and unit_legacy:
+                quantity_desc = _limit_text(f'{quantity_token}{unit_legacy}', 120)
+            elif quantity_token:
+                quantity_desc = _limit_text(quantity_token, 120)
+            elif unit_legacy:
+                quantity_desc = _limit_text(unit_legacy, 120)
         if name:
             suggestion['name'] = name
         if category:
             suggestion['category'] = category
-        if stock_status:
-            suggestion['stock_status'] = stock_status
+        if status:
+            suggestion['status'] = status
         if features:
             suggestion['features'] = features
         if notes:
             suggestion['notes'] = notes
         if detail_refs:
             suggestion['detail_refs'] = detail_refs
-        quantity = payload.get('quantity')
-        if isinstance(quantity, (int, float)):
-            suggestion['quantity'] = quantity
-        elif isinstance(quantity, str):
-            quantity_text = quantity.strip()
-            if re.match(r'^-?\d+(\.\d+)?$', quantity_text):
-                try:
-                    suggestion['quantity'] = float(quantity_text)
-                except ValueError:
-                    pass
-        if unit:
-            suggestion['unit'] = unit
+        if quantity_desc:
+            suggestion['quantity_desc'] = quantity_desc
         if purchase_link and re.match(r'^https?://', purchase_link, flags=re.IGNORECASE):
             suggestion['purchase_link'] = purchase_link
         return suggestion
@@ -2561,21 +2568,22 @@ def _normalize_ai_suggestion(form_type, payload):
 def _build_ai_autofill_messages(form_type, context, image_inputs):
     context_payload = {}
     if isinstance(context, dict):
-        for key in ('name', 'notes', 'category', 'stock_status', 'status', 'detail_link', 'purchase_link'):
+        for key in ('name', 'notes', 'category', 'status', 'detail_link', 'purchase_link', 'quantity_desc'):
             value = _limit_text(context.get(key), 200)
             if value:
                 context_payload[key] = value
     if form_type == 'item':
         schema_text = (
-            '{"name":"", "category":"", "stock_status":"正常|少量|用完|借出|舍弃", '
-            '"notes":"", "detail_refs":[{"label":"","value":""}], "quantity":"", "unit":"", "purchase_link":""}'
+            '{"name":"", "category":"", "status":"正常|少量|用完|借出|舍弃", '
+            '"notes":"", "detail_refs":[{"label":"","value":""}], "quantity_desc":"", "purchase_link":""}'
         )
         task_text = (
             "你是盘点助手。请根据具体物品判断并提取最重要的性质与特质，"
             "比如：如果是实验室药品，须优先覆盖名称、规格、品牌、材质、用途、状态与注意事项等。"
             "文本字段尽量中英双语（中文在前，英文放在括号内，例如：不锈钢杯（Stainless steel cup））。"
-            "严格按模板字段优先填写：凡是可映射到 name/category/stock_status/quantity/unit/purchase_link/notes 的信息，"
-            "必须写入对应字段，不要重复写进 detail_refs（例如数量与单位不要再写到参考信息）。"
+            "严格按模板字段优先填写：凡是可映射到 name/category/status/quantity_desc/purchase_link/notes 的信息，"
+            "必须写入对应字段，不要重复写进 detail_refs（例如数量/包装/规格统一写入 quantity_desc）。"
+            "quantity_desc 必须是可直接入库的简短描述，例如：10瓶500g、2箱(24瓶/箱)、余量约300mL。"
             "若无法确定就返回空字符串，不要编造。detail_refs 最多 8 条，优先保留高价值信息。"
         )
     else:
@@ -2777,11 +2785,10 @@ class Item(db.Model):
     name = db.Column(db.String(100), nullable=False)    # 物品名称
     detail_refs_raw = db.Column('detail_refs', db.Text)  # 参考信息集合（字符串）
     category = db.Column(db.String(50))                 # 类别/危险级别
-    stock_status = db.Column(db.String(50))        # ✅ 新增字段：库存状态
+    status = db.Column(db.String(50))              # ✅ 物品状态
     features = db.Column(db.String(200))           # ✅ 多选：用逗号分隔
     value = db.Column(db.Float)                    # ✅ 价值（数字）
-    quantity = db.Column(db.Float)                 # ✅ 数量
-    unit = db.Column(db.String(20))                # ✅ 单位（例如：瓶、包）
+    quantity_desc = db.Column(db.String(120))      # ✅ 数量/规格描述（例如：10瓶500g）
     purchase_date = db.Column(db.Date)             # ✅ 购入时间
     notes = db.Column(db.Text)                          # 备注说明
     last_modified = db.Column(db.DateTime, default=datetime.utcnow)  # 最后修改时间
@@ -3605,18 +3612,115 @@ def _run_schema_migrations_and_seed():
         item_cols = {col['name'] for col in inspector.get_columns('items')}
         item_alter_statements = []
         if 'detail_refs' not in item_cols:
-            item_alter_statements.append('ALTER TABLE items ADD COLUMN detail_refs TEXT')
+            item_alter_statements.append(('required', 'ALTER TABLE items ADD COLUMN detail_refs TEXT'))
+        if 'quantity_desc' not in item_cols:
+            item_alter_statements.append(('required', 'ALTER TABLE items ADD COLUMN quantity_desc VARCHAR(120)'))
+        if 'status' not in item_cols:
+            item_alter_statements.append(('required', 'ALTER TABLE items ADD COLUMN status VARCHAR(50)'))
+        if 'stock_status' in item_cols:
+            item_alter_statements.append((
+                'best_effort',
+                "UPDATE items SET status = COALESCE(NULLIF(TRIM(status), ''), TRIM(COALESCE(stock_status, ''))) "
+                "WHERE stock_status IS NOT NULL AND TRIM(stock_status) != ''"
+            ))
+        if 'quantity' in item_cols and 'unit' in item_cols:
+            item_alter_statements.append((
+                'best_effort',
+                "UPDATE items SET quantity_desc = TRIM(COALESCE(CAST(quantity AS TEXT), '') || COALESCE(unit, '')) "
+                "WHERE (quantity_desc IS NULL OR TRIM(quantity_desc) = '') "
+                "AND (quantity IS NOT NULL OR (unit IS NOT NULL AND TRIM(unit) != ''))"
+            ))
+        elif 'quantity' in item_cols:
+            item_alter_statements.append((
+                'best_effort',
+                "UPDATE items SET quantity_desc = TRIM(COALESCE(CAST(quantity AS TEXT), '')) "
+                "WHERE (quantity_desc IS NULL OR TRIM(quantity_desc) = '') AND quantity IS NOT NULL"
+            ))
+        elif 'unit' in item_cols:
+            item_alter_statements.append((
+                'best_effort',
+                "UPDATE items SET quantity_desc = TRIM(COALESCE(unit, '')) "
+                "WHERE (quantity_desc IS NULL OR TRIM(quantity_desc) = '') AND unit IS NOT NULL AND TRIM(unit) != ''"
+            ))
+        if 'quantity' in item_cols:
+            item_alter_statements.append(('best_effort', 'ALTER TABLE items DROP COLUMN quantity'))
+        if 'unit' in item_cols:
+            item_alter_statements.append(('best_effort', 'ALTER TABLE items DROP COLUMN unit'))
+        if 'stock_status' in item_cols:
+            item_alter_statements.append(('best_effort', 'ALTER TABLE items DROP COLUMN stock_status'))
         if 'responsible_id' in item_cols:
-            item_alter_statements.append('ALTER TABLE items DROP COLUMN responsible_id')
+            item_alter_statements.append(('best_effort', 'ALTER TABLE items DROP COLUMN responsible_id'))
         if 'detail_links' in item_cols:
-            item_alter_statements.append('ALTER TABLE items DROP COLUMN detail_links')
+            item_alter_statements.append(('best_effort', 'ALTER TABLE items DROP COLUMN detail_links'))
         if item_alter_statements:
             with db.engine.begin() as conn:
-                for stmt in item_alter_statements:
-                    try:
+                for level, stmt in item_alter_statements:
+                    if level == 'required':
                         conn.execute(text(stmt))
-                    except Exception:
-                        pass
+                    else:
+                        try:
+                            conn.execute(text(stmt))
+                        except Exception:
+                            pass
+        refreshed_item_cols = {col['name'] for col in inspect(db.engine).get_columns('items')}
+        if 'quantity' in refreshed_item_cols or 'unit' in refreshed_item_cols or 'stock_status' in refreshed_item_cols:
+            has_quantity_desc = 'quantity_desc' in refreshed_item_cols
+            has_quantity = 'quantity' in refreshed_item_cols
+            has_unit = 'unit' in refreshed_item_cols
+            has_status = 'status' in refreshed_item_cols
+            has_stock_status = 'stock_status' in refreshed_item_cols
+            if has_quantity_desc and has_quantity and has_unit:
+                quantity_expr = "COALESCE(NULLIF(TRIM(quantity_desc), ''), TRIM(COALESCE(CAST(quantity AS TEXT), '') || COALESCE(unit, '')))"
+            elif has_quantity_desc and has_quantity:
+                quantity_expr = "COALESCE(NULLIF(TRIM(quantity_desc), ''), TRIM(COALESCE(CAST(quantity AS TEXT), '')))"
+            elif has_quantity_desc and has_unit:
+                quantity_expr = "COALESCE(NULLIF(TRIM(quantity_desc), ''), TRIM(COALESCE(unit, '')))"
+            elif has_quantity_desc:
+                quantity_expr = "TRIM(COALESCE(quantity_desc, ''))"
+            elif has_quantity and has_unit:
+                quantity_expr = "TRIM(COALESCE(CAST(quantity AS TEXT), '') || COALESCE(unit, ''))"
+            elif has_quantity:
+                quantity_expr = "TRIM(COALESCE(CAST(quantity AS TEXT), ''))"
+            elif has_unit:
+                quantity_expr = "TRIM(COALESCE(unit, ''))"
+            else:
+                quantity_expr = "''"
+            if has_status and has_stock_status:
+                status_expr = "COALESCE(NULLIF(TRIM(status), ''), TRIM(COALESCE(stock_status, '')))"
+            elif has_status:
+                status_expr = "TRIM(COALESCE(status, ''))"
+            elif has_stock_status:
+                status_expr = "TRIM(COALESCE(stock_status, ''))"
+            else:
+                status_expr = "''"
+            with db.engine.begin() as conn:
+                conn.execute(text('PRAGMA foreign_keys = OFF'))
+                conn.execute(text(
+                    "CREATE TABLE items_new ("
+                    "id INTEGER PRIMARY KEY, "
+                    "name TEXT NOT NULL, "
+                    "detail_refs TEXT, "
+                    "category TEXT, "
+                    "status TEXT, "
+                    "features TEXT, "
+                    "value REAL, "
+                    "quantity_desc TEXT, "
+                    "purchase_date DATE, "
+                    "notes TEXT, "
+                    "last_modified DATETIME, "
+                    "purchase_link TEXT"
+                    ")"
+                ))
+                conn.execute(text(
+                    "INSERT INTO items_new "
+                    "(id, name, detail_refs, category, status, features, value, quantity_desc, "
+                    "purchase_date, notes, last_modified, purchase_link) "
+                    f"SELECT id, name, detail_refs, category, {status_expr}, features, value, {quantity_expr}, "
+                    "purchase_date, notes, last_modified, purchase_link FROM items"
+                ))
+                conn.execute(text('DROP TABLE items'))
+                conn.execute(text('ALTER TABLE items_new RENAME TO items'))
+                conn.execute(text('PRAGMA foreign_keys = ON'))
 
     _migrate_legacy_attachments(inspector, table_names)
 
@@ -4008,7 +4112,7 @@ def build_lab_universe_graph(center_member):
             'item',
             {
                 'category': item.category,
-                'stockStatus': item.stock_status
+                'status': item.status
             }
         )
         links.append({
@@ -4096,7 +4200,7 @@ def build_lab_universe_graph(center_member):
                 'item',
                 {
                     'category': item.category,
-                    'stockStatus': item.stock_status
+                    'status': item.status
                 }
             )
             links.append({
@@ -4778,8 +4882,8 @@ def add_item():
         # 获取表单数据
         name = request.form.get('name')
         category = request.form.get('category')
-        stock_status = _normalize_item_stock_status(request.form.get('stock_status'))
-        if not stock_status:
+        item_status = _normalize_item_stock_status(request.form.get('status'))
+        if not item_status:
             flash('请选择有效的物品状态。', 'danger')
             return redirect(request.url)
         is_public_feature = request.form.get('is_public_feature') in {'1', 'on', 'true', 'yes'}
@@ -4792,9 +4896,7 @@ def add_item():
         value = request.form.get('value')
         value = float(value) if value else None          # ✅ 数字输入
 
-        quantity = request.form.get('quantity')
-        quantity = float(quantity) if quantity else None # ✅ 数量输入
-        unit = request.form.get('unit')                  # ✅ 单位选择
+        quantity_desc = _limit_text(request.form.get('quantity_desc'), 120)
 
         purchase_date_str = request.form.get('purchase_date')  # ✅ 日期处理
         purchase_date = datetime.strptime(purchase_date_str, '%Y-%m-%d').date() if purchase_date_str else None
@@ -4833,11 +4935,10 @@ def add_item():
         new_item = Item(
             name=name,
             category=category,
-            stock_status=stock_status,
+            status=item_status,
             features=features_str,
             value=value,
-            quantity=quantity,
-            unit=unit,
+            quantity_desc=quantity_desc,
             purchase_date=purchase_date,
             notes=notes,
             purchase_link=purchase_link
@@ -4897,7 +4998,7 @@ def add_item():
         item=None,
         default_loc_id=default_loc_id,
         categories=categories,
-        item_stock_status_choices=_ITEM_STOCK_STATUS_CHOICES
+        item_status_choices=_ITEM_STOCK_STATUS_CHOICES
     )
 
 @app.route('/items/<int:item_id>/edit', methods=['GET', 'POST'])
@@ -4915,8 +5016,8 @@ def edit_item(item_id):
         if trimmed_refs:
             flash('部分参考信息过长，已保留前几条，请确认长度。', 'warning')
 
-        item.stock_status = _normalize_item_stock_status(request.form.get('stock_status'))
-        if not item.stock_status:
+        item.status = _normalize_item_stock_status(request.form.get('status'))
+        if not item.status:
             flash('请选择有效的物品状态。', 'danger')
             return redirect(request.url)
         is_public_feature = request.form.get('is_public_feature') in {'1', 'on', 'true', 'yes'}
@@ -4927,9 +5028,8 @@ def edit_item(item_id):
             return redirect(request.url)
         item.features = features_str
         
-        item.value = request.form.get('value', type=float)    # 新增：价值（数值）
-        item.quantity = request.form.get('quantity', type=float)  # 数量（数字）
-        item.unit = request.form.get('unit')                      # 数量单位
+        item.value = request.form.get('value', type=float)         # 新增：价值（数值）
+        item.quantity_desc = _limit_text(request.form.get('quantity_desc'), 120)  # 数量/规格描述
 
         purchase_date_str = request.form.get('purchase_date')
         if purchase_date_str:
@@ -5006,7 +5106,7 @@ def edit_item(item_id):
         locations=locations,
         item=item,
         categories=categories,
-        item_stock_status_choices=_ITEM_STOCK_STATUS_CHOICES
+        item_status_choices=_ITEM_STOCK_STATUS_CHOICES
     )
 
 @app.route('/items/<int:item_id>/delete', methods=['POST'])
@@ -5443,7 +5543,7 @@ def view_location(loc_id):
     responsible_counter = Counter()
     responsible_map = {}
     for item in items_at_location:
-        item_status = _normalize_item_stock_status(item.stock_status)
+        item_status = _normalize_item_stock_status(item.status)
         if item_status:
             status_counter[item_status] += 1
         if item.category:
@@ -5661,14 +5761,14 @@ def profile(member_id):
     all_locations = list(member.responsible_locations)
 
     # 分开“告警”和“正常”
-    critical_items = [it for it in all_items if _is_item_alert_status(it.stock_status)]
+    critical_items = [it for it in all_items if _is_item_alert_status(it.status)]
     critical_items.sort(
         key=lambda it: (
-            _ITEM_ALERT_STATUS_PRIORITY.get(_normalize_item_stock_status(it.stock_status), 99),
+            _ITEM_ALERT_STATUS_PRIORITY.get(_normalize_item_stock_status(it.status), 99),
             (it.name or '').lower()
         )
     )
-    normal_items = [it for it in all_items if not _is_item_alert_status(it.stock_status)]
+    normal_items = [it for it in all_items if not _is_item_alert_status(it.status)]
     normal_items.sort(key=lambda it: (it.name or '').lower())
     items_resp = critical_items + normal_items  # 告警状态的置顶
 
@@ -5686,7 +5786,7 @@ def profile(member_id):
     item_alert_counts = {status: 0 for status in _ITEM_ALERT_STOCK_STATUSES}
     item_alert_samples = {status: [] for status in _ITEM_ALERT_STOCK_STATUSES}
     for item in critical_items:
-        status = _normalize_item_stock_status(item.stock_status)
+        status = _normalize_item_stock_status(item.status)
         if not status:
             continue
         item_alert_counts[status] += 1

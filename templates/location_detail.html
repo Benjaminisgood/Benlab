@@ -271,7 +271,7 @@
                   {% endif %}
                 </div>
                 <div class="text-end">
-                  {% set item_status = normalize_item_stock_status(item.stock_status) %}
+                  {% set item_status = normalize_item_stock_status(item.status) %}
                   {% if item_status %}
                   {% set status_intent = stock_status_intent(item_status) %}
                   <span class="badge badge-item-status badge-item-status-{{ status_intent }}">{{ item_status }}</span>
@@ -329,7 +329,7 @@
                   {% endif %}
                 </div>
                 <div class="text-end">
-                  {% set item_status = normalize_item_stock_status(it.stock_status) %}
+                  {% set item_status = normalize_item_stock_status(it.status) %}
                   {% if item_status %}
                   {% set status_intent = stock_status_intent(item_status) %}
                   <span class="badge badge-item-status badge-item-status-{{ status_intent }}">{{ item_status }}</span>

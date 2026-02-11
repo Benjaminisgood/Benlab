@@ -31,7 +31,7 @@
           {% endif %}
         </div>
         <div class="text-end">
-          {% set item_status = normalize_item_stock_status(entry.stock_status) %}
+          {% set item_status = normalize_item_stock_status(entry.status) %}
           <div class="d-flex flex-wrap justify-content-end gap-1">
             {% if item_status %}
               {% set status_intent = stock_status_intent(item_status) %}
@@ -400,7 +400,7 @@
           {% endif %}
         </div>
         <div class="text-end text-muted small">
-          {% set interest_stock_status = normalize_item_stock_status(entry.item.stock_status) %}
+          {% set interest_stock_status = normalize_item_stock_status(entry.item.status) %}
           {% if interest_stock_status %}
             库存：{{ interest_stock_status }}
           {% endif %}
@@ -423,7 +423,7 @@
             {% endif %}
           </div>
           <div class="text-end text-muted small">
-            {% set interest_stock_status = normalize_item_stock_status(entry.item.stock_status) %}
+            {% set interest_stock_status = normalize_item_stock_status(entry.item.status) %}
             {% if interest_stock_status %}
               库存：{{ interest_stock_status }}
             {% endif %}

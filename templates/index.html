@@ -144,7 +144,7 @@
       if (d.type === 'member' && d.meta?.username) info.push(`用户名: ${d.meta.username}`);
       if (d.type === 'member' && d.meta?.relation) info.push(`关系: ${d.meta.relation}`);
       if (d.type === 'item' && d.meta?.category) info.push(`类别: ${d.meta.category}`);
-      if (d.type === 'item' && d.meta?.stockStatus) info.push(`库存: ${d.meta.stockStatus}`);
+      if (d.type === 'item' && d.meta?.status) info.push(`状态: ${d.meta.status}`);
       if (d.type === 'event' && d.meta?.startTime) info.push(`开始: ${d.meta.startTime}`);
       if (d.type === 'event' && d.meta?.visibility) info.push(`可见性: ${d.meta.visibility}`);
       return info.join('\n');

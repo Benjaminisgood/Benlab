@@ -242,7 +242,7 @@
             <label class="card-select card-select-surface d-flex justify-content-between align-items-center w-100 p-3 border rounded-3 shadow-sm" for="eventItem{{ item.id }}">
               <div class="d-flex align-items-center gap-2">
                 <span class="fw-semibold">{{ item.name }}</span>
-                {% set item_status = normalize_item_stock_status(item.stock_status) %}
+                {% set item_status = normalize_item_stock_status(item.status) %}
                 {% if item_status %}
                   {% set status_intent = stock_status_intent(item_status) %}
                   <span class="badge badge-item-status badge-item-status-{{ status_intent }}">{{ item_status }}</span>

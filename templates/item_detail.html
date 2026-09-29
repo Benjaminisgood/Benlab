@@ -47,6 +47,24 @@
       </li>
       <li class="list-group-item"><strong>物品状态：</strong>{{ normalize_item_stock_status(item.status) or '未指定' }}</li>
       <li class="list-group-item">
+        <strong>处置：</strong>
+        {% if item.disposition_label %}
+          <span class="badge {{ disposition_badge_class(item.disposition) }}">{{ item.disposition_label }}</span>
+        {% else %}
+          <span class="text-muted">在用（未标记）</span>
+        {% endif %}
+      </li>
+      <li class="list-group-item">
+        <strong>标签：</strong>
+        {% if item.tag_list %}
+          {% for tag in item.tag_list %}
+            <a class="badge bg-light text-dark border text-decoration-none" href="{{ url_for('find_items', q=tag) }}">{{ tag }}</a>
+          {% endfor %}
+        {% else %}
+          <span class="text-muted">无</span>
+        {% endif %}
+      </li>
+      <li class="list-group-item">
         <strong>物品归属：</strong>
         {% if item.features in ['公共','私人'] %}
           {% set feature_tone = feature_intent(item.features) %}
@@ -105,7 +123,7 @@
         <strong>存放位置：</strong>
         {% if item.locations %}
           {% for loc in item.locations %}
-            <a href="{{ url_for('view_location', loc_id=loc.id) }}">{{ loc.name }}</a>{% if not loop.last %}，{% endif %}
+            <a href="{{ url_for('view_location', loc_id=loc.id) }}">{{ location_paths.get(loc.id, loc.name) if location_paths is defined else loc.name }}</a>{% if not loop.last %}，{% endif %}
           {% endfor %}
         {% else %}
           未指定

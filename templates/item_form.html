@@ -20,6 +20,23 @@
       {% endfor %}
     </select>
   </div>
+  <div class="mb-3">
+    <label for="disposition" class="form-label">处置（断舍离）</label>
+    {% set disposition_choices = disposition_choices if disposition_choices is defined else ['在用','闲置','转让','收藏','想买','已处理'] %}
+    {% set selected_disposition = item.disposition_label if item else '' %}
+    <select name="disposition" id="disposition" class="form-select">
+      <option value="" {% if not selected_disposition %}selected{% endif %}>未标记（视为在用）</option>
+      {% for opt in disposition_choices %}
+      <option value="{{ opt }}" {% if selected_disposition == opt %}selected{% endif %}>{{ opt }}</option>
+      {% endfor %}
+    </select>
+    <div class="form-text">库存状态仍表示正常/少量/用完/借出/舍弃。处置用来标记闲置、转让、想买或已经处理掉。</div>
+  </div>
+  <div class="mb-3">
+    <label for="tags" class="form-label">标签</label>
+    <input type="text" class="form-control" id="tags" name="tags" value="{{ item.tags if item and item.tags else '' }}" placeholder="常用, 桌面, 线材">
+    <div class="form-text">用逗号或顿号分隔，方便按标签找东西。</div>
+  </div>
 
   {% set ownership_value = item.features if item and item.features in allowed_features else '私人' %}
   <div class="mb-3">

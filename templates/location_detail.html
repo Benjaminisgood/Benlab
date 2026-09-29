@@ -20,6 +20,9 @@
   <a href="{{ url_for('add_item', loc_id=location.id) }}" class="btn btn-outline-success">
     新建物品并加入
   </a>
+  <a href="{{ url_for('bulk_add_items', loc_id=location.id) }}" class="btn btn-success">
+    在此快速录入
+  </a>
   <button type="button" class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#removeItemsModal" {% if not items %}disabled{% endif %}>
     移除物品
   </button>

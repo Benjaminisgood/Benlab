@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h3 class="mb-0">快速录入</h3>
+  <a href="{{ url_for('items') }}" class="btn btn-outline-secondary">返回物品列表</a>
+</div>
+<p class="text-muted">一次把一个抽屉里的东西记下来。每行一个物品，照片会贴到本批全部物品上。</p>
+
+<form method="post" enctype="multipart/form-data" action="{{ url_for('bulk_add_items', loc_id=default_loc_id) if default_loc_id else url_for('bulk_add_items') }}">
+  <div class="mb-3">
+    <label for="location_id" class="form-label">放入位置</label>
+    <select class="form-select" id="location_id" name="location_id">
+      <option value="">暂不指定位置</option>
+      {% for loc in locations %}
+      <option value="{{ loc.id }}" {% if default_loc_id == loc.id %}selected{% endif %}>{{ location_paths.get(loc.id, loc.name) }}</option>
+      {% endfor %}
+    </select>
+    <div class="form-text">某一行如果自己写了位置，以那一行为准。</div>
+  </div>
+
+  <div class="row">
+    <div class="col-md-4 mb-3">
+      <label for="status" class="form-label">默认库存状态</label>
+      <select class="form-select" id="status" name="status">
+        {% for opt in item_status_choices %}
+        <option value="{{ opt }}" {% if opt == '正常' %}selected{% endif %}>{{ opt }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-4 mb-3">
+      <label for="features" class="form-label">默认归属</label>
+      <select class="form-select" id="features" name="features">
+        <option value="私人" selected>私人</option>
+        <option value="公共">公共</option>
+      </select>
+    </div>
+    <div class="col-md-4 mb-3">
+      <label for="disposition" class="form-label">默认处置</label>
+      <select class="form-select" id="disposition" name="disposition">
+        <option value="">未标记（在用）</option>
+        {% for opt in disposition_choices %}
+        <option value="{{ opt }}">{{ opt }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
+  <div class="mb-3">
+    <label for="lines" class="form-label">多行录入</label>
+    <textarea class="form-control" id="lines" name="lines" rows="12" placeholder="充电器&#10;鼠标 | 1 | 电子 | 常用,桌面&#10;USB线 | 3 | 电子 | 线材 | 正常 | 闲置">{{ posted_lines or '' }}</textarea>
+    <div class="form-text">
+      每行：<code>名称 | 数量 | 类别 | 标签 | 库存状态 | 处置 | 备注</code>。只写名称也可以。用 <code>#</code> 开头的行会被跳过。标签用逗号或顿号分隔。
+    </div>
+  </div>
+
+  <div class="mb-3">
+    <label for="csv_file" class="form-label">或上传 CSV</label>
+    <input class="form-control" type="file" id="csv_file" name="csv_file" accept=".csv,text/csv">
+    <div class="form-text">
+      表头用中文或英文都可以，例如 <code>名称,数量,类别,标签,状态,处置,位置,归属,备注</code>。位置可以写 <code>宿舍 &gt; 书桌 &gt; 第二个抽屉</code>。没有表头时按「名称,数量,类别,标签,库存状态,处置,备注」读取。
+    </div>
+  </div>
+
+  <div class="mb-3">
+    <label for="attachments" class="form-label">本批共用照片</label>
+    <input class="form-control" type="file" id="attachments" name="attachments" accept="image/*" multiple>
+    <div class="form-text">拍一张抽屉照片，会挂到这次录入的每一个物品上。以后单个删除物品时，只要还有别的物品用着这张照片，文件会保留。</div>
+  </div>
+
+  <button type="submit" class="btn btn-primary">录入这些物品</button>
+</form>
+{% endblock %}

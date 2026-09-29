@@ -184,7 +184,8 @@ setx PORT "5000"
 | `FLASK_SECRET_KEY` | `dev-only-change-me` | Flask 会话密钥，生产环境必须替换为强随机值 |
 | `HOST` / `FLASK_RUN_HOST` | `0.0.0.0` | 服务监听地址 |
 | `PORT` / `FLASK_RUN_PORT` / `BENSCI_PORT` | `80`（benlab.sh）/ `5000`（python app.py） | 多级端口回退，优先级 `PORT` → `FLASK_RUN_PORT` → `BENSCI_PORT` |
-| `SQLALCHEMY_DATABASE_URI` | `sqlite:///lab.db?timeout=30` | 支持改为 PostgreSQL/MySQL 等，例如 `postgresql+psycopg://user:pass@host/db` |
+| `SQLALCHEMY_DATABASE_URI` | `sqlite:///lab.db?timeout=30` | 数据库连接。默认 SQLite；设置后 `app.py` 会读取该变量 |
+| `BENLAB_API_TOKEN` | 空 | 设置后开放 `/api/v1/*`。请求头用 `Authorization: Bearer <token>` 或 `X-Benlab-Token`。未设置时这些接口返回 404 |
 | `ATTACHMENTS_FOLDER` | `./attachments` | 上传文件保存目录，默认位于项目根目录 |
 | `BENLAB_STORAGE_MODE` | `oss` | 存储模式：`oss` 使用 OSS；`local` 仅本地存储（不上传/不同步 OSS）；`auto` 自动选择（OSS 配置齐全且依赖可用时启用 OSS） |
 | `PUBLIC_BASE_URL` | `''` | 事项分享/二维码使用的外部访问域名（不影响 OSS） |
@@ -226,9 +227,57 @@ Benlab/
 
 ## 核心模块详解
 ### 物品管理
-- 支持按名称、备注、参考信息搜索与分类筛选。
-- 维护状态（`正常`、`少量`、`用完`、`借出`、`舍弃`）、特性标签、购入日期、数量单位与采购链接。
-- 可指定负责人并关联多个存放位置；详情页提供上一张/下一张图片轮播及二维码跳转。
+- 支持按名称、标签、备注、参考信息和位置路径搜索。
+- 库存状态仍是 `正常`、`少量`、`用完`、`借出`、`舍弃`。另外有处置字段：`在用`、`闲置`、`转让`、`收藏`、`想买`、`已处理`，用来做个人物品的断舍离，不改原来的库存含义。
+- 可指定负责人并关联多个存放位置；列表和「找东西」会显示完整路径，例如 `宿舍 > 书桌 > 第二个抽屉`。
+
+### 快速录入
+打开 `/items/bulk`（位置页上的「在此快速录入」会带上当前位置）。
+
+- 多行文本：每行一个物品。`名称 | 数量 | 类别 | 标签 | 库存状态 | 处置 | 备注`。只写名称也可以。`#` 开头是注释。
+- CSV：表头认「常见输入列名映射」里的中文/英文列名，例如 `名称,数量,类别,标签,状态,处置,位置`。位置可写完整路径。没有表头时按上面的字段顺序读。
+- 可以上传一张或多张照片，同一张照片会挂到本批每个物品上。
+- 私人归属会把当前登录用户记成负责人。
+
+### 找东西
+打开 `/find`。按名称、标签、类别、备注或位置路径搜索，结果带完整位置路径。
+
+### 断舍离
+打开 `/items/declutter`。页面列出：
+
+- 没有存放位置的物品（「想买」除外）
+- 处置为 `闲置` 或 `转让` 的物品
+- 超过 N 天没更新的物品（默认 180 天，可用 `?days=90`）
+- 同一类别里名称相同或很像的物品
+
+勾选后可以批量改成 `转让` / `已处理` 等处置，也可以顺便改库存状态。`已处理` 和库存 `舍弃` 的物品不再出现在候选里。
+
+### JSON API
+设置环境变量 `BENLAB_API_TOKEN` 后可用。未设置时 `/api/v1/*` 关闭（404）。
+
+```bash
+export BENLAB_API_TOKEN='换成一长串随机字符'
+curl -H "Authorization: Bearer $BENLAB_API_TOKEN" 'http://127.0.0.1:5000/api/v1/search?q=充电器'
+```
+
+也可用请求头 `X-Benlab-Token`。写入记在 `admin` 账号（没有 admin 时用第一个成员）的操作日志上。
+
+| 方法 | 路径 | 作用 |
+| --- | --- | --- |
+| GET | `/api/v1/items?q=&location_id=&category=&status=&disposition=&no_location=1&limit=&offset=` | 列出/筛选物品 |
+| POST | `/api/v1/items` | 新建。正文可以是单个物品，或 `{"items":[...]}`，或 `{"text":"鼠标 \\| 1 \\| 电子","location_id":3}`，或 `{"csv":"名称,数量\\n台灯,1"}` |
+| GET / PATCH | `/api/v1/items/<id>` | 查看 / 局部更新 |
+| POST | `/api/v1/items/disposition` | `{"ids":[1,2],"disposition":"转让","status":"舍弃"}`，`status` 可省略 |
+| GET | `/api/v1/declutter?days=180` | 断舍离候选，结构与页面一致 |
+| GET | `/api/v1/search?q=` | 同时搜物品和位置，物品带 `locations[].path` |
+| GET / POST | `/api/v1/locations` | 列出（`q` 匹配名称或路径）/ 新建 |
+| GET / PATCH | `/api/v1/locations/<id>` | 查看 / 更新 |
+
+物品字段：`name`（必填）、`quantity_desc`、`category`、`tags`（字符串或数组）、`status`、`disposition`、`features`、`notes`、`value`、`purchase_link`、`purchase_date`、`location_id` / `location_ids` / `location`（名称或 `宿舍 > 书桌`）。
+
+库存状态只允许 `正常/少量/用完/借出/舍弃`。处置只允许 `在用/闲置/转让/收藏/想买/已处理`（`拥有` 会当成 `在用`，`待购` 会当成 `想买`）。归属只允许 `公共/私人`。
+
+页面上原来的 `/api/items/search` 和 `/api/locations/search` 仍然要登录，不走这个令牌。
 
 ### 位置管理
 - 多级父子结构，快速浏览子区域并追踪空间状态。
@@ -318,11 +367,12 @@ Benlab/
 | `name` | TEXT | NOT NULL | 物品名 |
 | `detail_refs` | TEXT | NULL | 参考信息（建议每行 `label|||value`） |
 | `category` | TEXT | NULL | 类别 |
-| `stock_status` | TEXT | NULL | 状态：`正常/少量/用完/借出/舍弃` |
+| `status` | TEXT | NULL | 库存状态：`正常/少量/用完/借出/舍弃`。旧列名 `stock_status` 会在启动时并入此列 |
 | `features` | TEXT | NULL | 归属：`公共/私人` |
 | `value` | REAL | NULL | 价值 |
-| `quantity` | REAL | NULL | 数量 |
-| `unit` | TEXT | NULL | 单位 |
+| `quantity_desc` | TEXT | NULL | 数量/规格描述。旧列 `quantity` + `unit` 会在启动时并入此列 |
+| `disposition` | TEXT | NULL | 处置：`在用/闲置/转让/收藏/想买/已处理`。空值视为在用 |
+| `tags` | TEXT | NULL | 标签，逗号分隔 |
 | `purchase_date` | DATE | NULL | 购入日期 |
 | `notes` | TEXT | NULL | 备注 |
 | `last_modified` | DATETIME | NULL | 最近修改时间 |
@@ -440,8 +490,14 @@ Benlab/
 | `用户名` / `账号` / `user_name` | `members.username` | 必须唯一 |
 | `姓名` / `成员名` | `members.name` | 必填 |
 | `联系电话` / `手机号` / `contact` | `members.contact` | 可空 |
-| `物品名` / `名称` / `item_name` | `items.name` | 物品主名称 |
-| `库存状态` / `状态` / `stock_status` | `items.stock_status` | 仅允许 `正常/少量/用完/借出/舍弃` |
+| `物品名` / `名称` / `item_name` / `name` | `items.name` | 物品主名称 |
+| `库存状态` / `状态` / `stock_status` / `status` | `items.status` | 仅允许 `正常/少量/用完/借出/舍弃`。旧文档里的 `items.stock_status` 即此列 |
+| `处置` / `处置状态` / `去留` / `disposition` | `items.disposition` | `在用/闲置/转让/收藏/想买/已处理`。`拥有`→`在用`，`待购`→`想买`，`丢掉/扔掉/卖出`→`已处理` |
+| `类别` / `分类` / `category` | `items.category` | 可空 |
+| `数量` / `数量描述` / `规格` / `quantity` / `quantity_desc` | `items.quantity_desc` | 文本，不再拆成 quantity/unit |
+| `标签` / `tags` / `tag` | `items.tags` | 逗号或顿号分隔 |
+| `备注` / `说明` / `notes` | `items.notes` | 可空 |
+| `位置` / `存放位置` / `地点` / `location` | `item_locations` | 写成位置 id、位置名，或 `宿舍 > 书桌 > 第二个抽屉` |
 | `归属` / `可见性` / `features` | `items.features` | 仅允许 `公共/私人` |
 | `采购链接` / `购买链接` | `items.purchase_link` | URL 或文本 |
 | `详情链接` / `detail_link`（物品） | `items.detail_refs` | 推荐转为 `来源|||链接` 格式写入 |
@@ -462,7 +518,8 @@ Benlab/
 3. 再导入关系表：`item_members`, `item_locations`, `location_members`, `event_participants`, `event_items`, `event_locations`, `member_follows`。
 4. 最后导入附件表：`attachments`（统一附件）。
 5. 枚举值清洗：
-   - `items.stock_status` 仅允许：`正常/少量/用完/借出/舍弃`
+   - `items.status`（旧名 `stock_status`）仅允许：`正常/少量/用完/借出/舍弃`
+   - `items.disposition` 仅允许：`在用/闲置/转让/收藏/想买/已处理`（可空）
    - `items.features` 仅允许：`公共/私人`
    - `locations.status` 仅允许：`正常/脏/报修/危险/禁止`
    - `events.visibility` 仅允许：`personal/internal/public`
@@ -496,11 +553,12 @@ CREATE TABLE IF NOT EXISTS items (
   name TEXT NOT NULL,
   detail_refs TEXT,
   category TEXT,
-  stock_status TEXT,
+  status TEXT,
   features TEXT,
   value REAL,
-  quantity REAL,
-  unit TEXT,
+  quantity_desc TEXT,
+  disposition TEXT,
+  tags TEXT,
   purchase_date DATE,
   notes TEXT,
   last_modified DATETIME,

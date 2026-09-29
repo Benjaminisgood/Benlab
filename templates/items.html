@@ -1,8 +1,13 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3 page-header-actions">
+<div class="d-flex justify-content-between align-items-center mb-3 page-header-actions flex-wrap gap-2">
   <h3 class="mb-0">社区物品总览</h3>
-  <a href="{{ url_for('add_item') }}" class="btn btn-primary">新增物品</a>
+  <div class="d-flex flex-wrap gap-2">
+    <a href="{{ url_for('find_items') }}" class="btn btn-outline-secondary">找东西</a>
+    <a href="{{ url_for('bulk_add_items') }}" class="btn btn-outline-primary">快速录入</a>
+    <a href="{{ url_for('declutter_items') }}" class="btn btn-outline-warning">断舍离</a>
+    <a href="{{ url_for('add_item') }}" class="btn btn-primary">新增物品</a>
+  </div>
 </div>
 
 <div class="d-flex flex-column flex-md-row align-items-md-center gap-2 mb-3">
@@ -43,13 +48,16 @@
       {% if status_intent != 'neutral' %}
         {% set row_class = row_class ~ ' inventory-row-' ~ status_intent %}
       {% endif %}
-      {% set location_names = item.locations | map(attribute='name') | list %}
+      {% set location_names = [] %}
+      {% for loc in item.locations %}
+        {% set _ = location_names.append(location_paths.get(loc.id, loc.name) if location_paths is defined else loc.name) %}
+      {% endfor %}
       {% set detail_refs_blob = item.detail_refs | map(attribute='value') | list %}
       {% set responsible_labels = [] %}
       {% for member in item.responsible_members %}
         {% set _ = responsible_labels.append(member.name or member.username) %}
       {% endfor %}
-      {% set search_blob = (item.name ~ ' ' ~ (item.category or '-') ~ ' ' ~ (item_status or '-') ~ ' ' ~ (item.features or '-') ~ ' ' ~ (detail_refs_blob|join(' ')) ~ ' ' ~ (item.notes or '-') ~ ' ' ~ (responsible_labels|join(' ')) ~ ' ' ~ (location_names|join(' '))) %}
+      {% set search_blob = (item.name ~ ' ' ~ (item.category or '-') ~ ' ' ~ (item_status or '-') ~ ' ' ~ (item.disposition_label or '') ~ ' ' ~ (item.tags or '') ~ ' ' ~ (item.features or '-') ~ ' ' ~ (detail_refs_blob|join(' ')) ~ ' ' ~ (item.notes or '-') ~ ' ' ~ (responsible_labels|join(' ')) ~ ' ' ~ (location_names|join(' '))) %}
 
       <tr class="{{ row_class }}" data-search="{{ search_blob|lower }}">
         <td class="col-item-name">
@@ -58,14 +66,20 @@
             {% if item_status %}
               <span class="badge badge-item-status badge-item-status-{{ status_intent }}">{{ item_status }}</span>
             {% endif %}
+            {% if item.disposition_label %}
+              <span class="badge {{ disposition_badge_class(item.disposition) }}">{{ item.disposition_label }}</span>
+            {% endif %}
+            {% for tag in item.tag_list %}
+              <span class="badge bg-light text-dark border">{{ tag }}</span>
+            {% endfor %}
           </div>
         </td>
         <td class="col-item-location">
           {% if item.locations and item.locations|length > 0 %}
             {% for loc in item.locations %}
-              <a href="{{ url_for('view_location', loc_id=loc.id) }}" class="me-1">{{ loc.name }}</a>{% if not loop.last %}, {% endif %}
+              <a href="{{ url_for('view_location', loc_id=loc.id) }}" class="me-1">{{ location_paths.get(loc.id, loc.name) if location_paths is defined else loc.name }}</a>{% if not loop.last %}<br>{% endif %}
             {% endfor %}
-          {% else %}-{% endif %}
+          {% else %}<span class="text-warning">未指定位置</span>{% endif %}
         </td>
         <td class="col-item-responsible">
           <div class="d-flex flex-wrap align-items-center gap-2">
@@ -149,6 +163,12 @@
       row.className = 'list-group-item list-group-item-action d-flex justify-content-between align-items-center';
       row.href = item.detailUrl;
       row.textContent = item.name;
+      if (item.locationPaths && item.locationPaths.length) {
+        var path = document.createElement('span');
+        path.className = 'text-muted small ms-2';
+        path.textContent = item.locationPaths.join('；');
+        row.appendChild(path);
+      }
       if (item.category) {
         var badge = document.createElement('span');
         badge.className = 'badge bg-light text-dark border ms-3';

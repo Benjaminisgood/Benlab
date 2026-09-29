@@ -1,6 +1,7 @@
 import os
 import contextlib
 import glob
+import hmac
 import tempfile
 import threading
 import time
@@ -9,6 +10,7 @@ import mimetypes
 import hashlib
 import ssl
 from datetime import datetime, timedelta, timezone
+from functools import wraps
 import re
 import json
 from io import BytesIO
@@ -27,6 +29,17 @@ from sqlalchemy.exc import IntegrityError
 from flask_migrate import Migrate
 from markupsafe import Markup, escape
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
+from inventory_ops import (
+    DISPOSITION_CHOICES,
+    build_location_paths,
+    cluster_near_duplicates,
+    join_tags,
+    match_location_id,
+    normalize_disposition,
+    parse_bulk_lines,
+    parse_csv_text,
+    split_tags,
+)
 
 try:
     from PIL import Image, ImageDraw, ImageFont, ImageOps
@@ -85,11 +98,12 @@ app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'dev-only-change-me')
 app.config['REMEMBER_COOKIE_DURATION'] = timedelta(days=30)
 # 注意：SQLite 在多进程/并发写入下会锁表；生产建议换 PostgreSQL。
 # 这里为提高并发容忍度，加入超时参数；并在 engine options 中关闭线程检查。
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///lab.db?timeout=30'
-app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-    'pool_pre_ping': True,
-    'connect_args': {'check_same_thread': False}
-}
+_db_uri = (os.getenv('SQLALCHEMY_DATABASE_URI') or '').strip() or 'sqlite:///lab.db?timeout=30'
+app.config['SQLALCHEMY_DATABASE_URI'] = _db_uri
+_engine_options = {'pool_pre_ping': True}
+if _db_uri.startswith('sqlite'):
+    _engine_options['connect_args'] = {'check_same_thread': False}
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = _engine_options
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['EVENT_SHARE_TOKEN_MAX_AGE'] = int(os.getenv('EVENT_SHARE_TOKEN_MAX_AGE', 60 * 60 * 24 * 30))
 app.config['EVENT_SHARE_TOKEN_SALT'] = os.getenv('EVENT_SHARE_TOKEN_SALT', 'benlab-event-share')
@@ -823,6 +837,16 @@ _ITEM_ALERT_MESSAGE_TEMPLATES = {
     '舍弃': '你有 {count} 个标记为舍弃的物品，请尽快完成弃置处理。',
     '少量': '你有 {count} 个库存少量的物品，建议尽快补货。',
     '借出': '你有 {count} 个借出中的物品，请及时跟进归还。'
+}
+_ITEM_DISPOSITION_CHOICES = DISPOSITION_CHOICES
+_DECLUTTER_MARKED_DISPOSITIONS = {'闲置', '转让'}
+_DISPOSITION_BADGES = {
+    '在用': 'text-bg-light',
+    '闲置': 'text-bg-warning',
+    '转让': 'text-bg-info',
+    '收藏': 'text-bg-success',
+    '想买': 'text-bg-primary',
+    '已处理': 'text-bg-secondary',
 }
 _MEMBER_RELATION_TYPES = {
     'study': '上学',
@@ -2789,6 +2813,8 @@ class Item(db.Model):
     features = db.Column(db.String(200))           # ✅ 多选：用逗号分隔
     value = db.Column(db.Float)                    # ✅ 价值（数字）
     quantity_desc = db.Column(db.String(120))      # ✅ 数量/规格描述（例如：10瓶500g）
+    disposition = db.Column(db.String(20))         # 处置：在用/闲置/转让/收藏/想买/已处理
+    tags = db.Column(db.Text)                      # 逗号分隔标签
     purchase_date = db.Column(db.Date)             # ✅ 购入时间
     notes = db.Column(db.Text)                          # 备注说明
     last_modified = db.Column(db.DateTime, default=datetime.utcnow)  # 最后修改时间
@@ -2820,6 +2846,18 @@ class Item(db.Model):
         serialized, trimmed = _serialize_item_detail_refs(entries)
         self.detail_refs_raw = serialized
         return trimmed
+
+    @property
+    def tag_list(self):
+        return split_tags(self.tags)
+
+    def set_tags(self, value):
+        self.tags = join_tags(value)
+        return self.tag_list
+
+    @property
+    def disposition_label(self):
+        return normalize_disposition(self.disposition) or ''
 
     @property
     def attachment_filenames(self):
@@ -3693,34 +3731,60 @@ def _run_schema_migrations_and_seed():
                 status_expr = "TRIM(COALESCE(stock_status, ''))"
             else:
                 status_expr = "''"
+            extra_defs = []
+            extra_insert = []
+            extra_select = []
+            if 'disposition' in refreshed_item_cols:
+                extra_defs.append('disposition TEXT')
+                extra_insert.append('disposition')
+                extra_select.append('disposition')
+            if 'tags' in refreshed_item_cols:
+                extra_defs.append('tags TEXT')
+                extra_insert.append('tags')
+                extra_select.append('tags')
+            create_cols = (
+                "id INTEGER PRIMARY KEY, "
+                "name TEXT NOT NULL, "
+                "detail_refs TEXT, "
+                "category TEXT, "
+                "status TEXT, "
+                "features TEXT, "
+                "value REAL, "
+                "quantity_desc TEXT, "
+                "purchase_date DATE, "
+                "notes TEXT, "
+                "last_modified DATETIME, "
+                "purchase_link TEXT"
+            )
+            if extra_defs:
+                create_cols = create_cols + ", " + ", ".join(extra_defs)
+            insert_cols = (
+                "id, name, detail_refs, category, status, features, value, quantity_desc, "
+                "purchase_date, notes, last_modified, purchase_link"
+            )
+            select_cols = (
+                f"id, name, detail_refs, category, {status_expr}, features, value, {quantity_expr}, "
+                "purchase_date, notes, last_modified, purchase_link"
+            )
+            if extra_insert:
+                insert_cols = insert_cols + ", " + ", ".join(extra_insert)
+                select_cols = select_cols + ", " + ", ".join(extra_select)
             with db.engine.begin() as conn:
                 conn.execute(text('PRAGMA foreign_keys = OFF'))
+                conn.execute(text(f"CREATE TABLE items_new ({create_cols})"))
                 conn.execute(text(
-                    "CREATE TABLE items_new ("
-                    "id INTEGER PRIMARY KEY, "
-                    "name TEXT NOT NULL, "
-                    "detail_refs TEXT, "
-                    "category TEXT, "
-                    "status TEXT, "
-                    "features TEXT, "
-                    "value REAL, "
-                    "quantity_desc TEXT, "
-                    "purchase_date DATE, "
-                    "notes TEXT, "
-                    "last_modified DATETIME, "
-                    "purchase_link TEXT"
-                    ")"
-                ))
-                conn.execute(text(
-                    "INSERT INTO items_new "
-                    "(id, name, detail_refs, category, status, features, value, quantity_desc, "
-                    "purchase_date, notes, last_modified, purchase_link) "
-                    f"SELECT id, name, detail_refs, category, {status_expr}, features, value, {quantity_expr}, "
-                    "purchase_date, notes, last_modified, purchase_link FROM items"
+                    f"INSERT INTO items_new ({insert_cols}) SELECT {select_cols} FROM items"
                 ))
                 conn.execute(text('DROP TABLE items'))
                 conn.execute(text('ALTER TABLE items_new RENAME TO items'))
                 conn.execute(text('PRAGMA foreign_keys = ON'))
+
+        with db.engine.begin() as conn:
+            live_item_cols = {row[1] for row in conn.execute(text('PRAGMA table_info(items)'))}
+            if 'disposition' not in live_item_cols:
+                conn.execute(text('ALTER TABLE items ADD COLUMN disposition VARCHAR(20)'))
+            if 'tags' not in live_item_cols:
+                conn.execute(text('ALTER TABLE items ADD COLUMN tags TEXT'))
 
     _migrate_legacy_attachments(inspector, table_names)
 
@@ -4798,13 +4862,15 @@ def items():
         ).group_by(event_items.c.item_id).all()
     )
     categories, category_payload, uncategorized_payload = _build_item_category_payload(items_list)
+    catalog = _location_catalog()
     return render_template(
         'items.html',
         items=items_list,
         categories=categories,
         category_payload=category_payload,
         uncategorized_items=uncategorized_payload,
-        item_event_counts=event_counts
+        item_event_counts=event_counts,
+        location_paths=catalog['paths']
     )
 
 @app.route('/items/<int:item_id>')
@@ -4871,7 +4937,8 @@ def item_detail(item_id):
         interest_relation_lookup=interest_relation_lookup,
         categories=categories,
         category_payload=category_payload,
-        uncategorized_items=uncategorized_payload
+        uncategorized_items=uncategorized_payload,
+        location_paths=_location_catalog()['paths']
     )
 
 @app.route('/items/add', methods=['GET', 'POST'])
@@ -4897,6 +4964,12 @@ def add_item():
         value = float(value) if value else None          # ✅ 数字输入
 
         quantity_desc = _limit_text(request.form.get('quantity_desc'), 120)
+        disposition_raw = request.form.get('disposition')
+        disposition = normalize_disposition(disposition_raw)
+        if _ensure_string(disposition_raw).strip() and not disposition:
+            flash('请选择有效的处置状态。', 'danger')
+            return redirect(request.url)
+        tags_value = join_tags(request.form.get('tags'))
 
         purchase_date_str = request.form.get('purchase_date')  # ✅ 日期处理
         purchase_date = datetime.strptime(purchase_date_str, '%Y-%m-%d').date() if purchase_date_str else None
@@ -4939,6 +5012,8 @@ def add_item():
             features=features_str,
             value=value,
             quantity_desc=quantity_desc,
+            disposition=disposition,
+            tags=tags_value,
             purchase_date=purchase_date,
             notes=notes,
             purchase_link=purchase_link
@@ -4998,7 +5073,8 @@ def add_item():
         item=None,
         default_loc_id=default_loc_id,
         categories=categories,
-        item_status_choices=_ITEM_STOCK_STATUS_CHOICES
+        item_status_choices=_ITEM_STOCK_STATUS_CHOICES,
+        disposition_choices=_ITEM_DISPOSITION_CHOICES
     )
 
 @app.route('/items/<int:item_id>/edit', methods=['GET', 'POST'])
@@ -5030,6 +5106,13 @@ def edit_item(item_id):
         
         item.value = request.form.get('value', type=float)         # 新增：价值（数值）
         item.quantity_desc = _limit_text(request.form.get('quantity_desc'), 120)  # 数量/规格描述
+        disposition_raw = request.form.get('disposition')
+        disposition = normalize_disposition(disposition_raw)
+        if _ensure_string(disposition_raw).strip() and not disposition:
+            flash('请选择有效的处置状态。', 'danger')
+            return redirect(request.url)
+        item.disposition = disposition
+        item.set_tags(request.form.get('tags'))
 
         purchase_date_str = request.form.get('purchase_date')
         if purchase_date_str:
@@ -5082,7 +5165,8 @@ def edit_item(item_id):
         item.last_modified = datetime.utcnow()
         db.session.commit()
         for ref in pending_delete_refs:
-            remove_uploaded_file(ref)
+            if not Attachment.query.filter_by(filename=ref).first():
+                remove_uploaded_file(ref)
 
         # 记录日志
         log = Log(user_id=current_user.id, item_id=item.id, action_type="修改物品", details=f"Edited item {item.name}")
@@ -5106,7 +5190,8 @@ def edit_item(item_id):
         locations=locations,
         item=item,
         categories=categories,
-        item_status_choices=_ITEM_STOCK_STATUS_CHOICES
+        item_status_choices=_ITEM_STOCK_STATUS_CHOICES,
+        disposition_choices=_ITEM_DISPOSITION_CHOICES
     )
 
 @app.route('/items/<int:item_id>/delete', methods=['POST'])
@@ -5119,7 +5204,8 @@ def delete_item(item_id):
     db.session.delete(item)
     db.session.commit()
     for fname in refs_to_delete:
-        remove_uploaded_file(fname)
+        if not Attachment.query.filter_by(filename=fname).first():
+            remove_uploaded_file(fname)
     # 记录日志
     log = Log(user_id=current_user.id, item_id=item_id, action_type="删除物品", details=f"Deleted item {item.name}")
     db.session.add(log)
@@ -5257,28 +5343,947 @@ def search_items():
     keyword = (request.args.get('q') or '').strip()
     if not keyword:
         return jsonify([])
-    like_pattern = f"%{keyword}%"
-    filters = [
-        Item.name.ilike(like_pattern),
-        Item.notes.ilike(like_pattern),
-        Item.detail_refs_raw.ilike(like_pattern)
-    ]
-    matches = (
-        Item.query
-        .filter(or_(*filters))
-        .order_by(func.lower(Item.name))
-        .limit(12)
-        .all()
-    )
+    matches, catalog = _search_items(keyword, limit=12)
     payload = []
     for item in matches:
+        paths = [catalog['paths'].get(loc.id) or loc.name for loc in item.locations]
         payload.append({
             'id': item.id,
             'name': item.name,
             'category': item.category,
+            'tags': item.tag_list,
+            'disposition': item.disposition_label,
+            'locationPaths': paths,
             'detailUrl': url_for('item_detail', item_id=item.id)
         })
     return jsonify(payload)
+
+
+def _location_catalog():
+    locations = Location.query.all()
+    records = [
+        {'id': loc.id, 'name': loc.name, 'parent_id': loc.parent_id}
+        for loc in locations
+    ]
+    return {
+        'locations': locations,
+        'by_id': {loc.id: loc for loc in locations},
+        'paths': build_location_paths(records),
+    }
+
+
+def _serialize_item(item, paths):
+    locations = []
+    for loc in item.locations or []:
+        locations.append({
+            'id': loc.id,
+            'name': loc.name,
+            'path': paths.get(loc.id) or loc.name,
+        })
+    return {
+        'id': item.id,
+        'name': item.name,
+        'category': item.category or '',
+        'status': item.status or '',
+        'disposition': item.disposition_label,
+        'features': item.features or '',
+        'tags': item.tag_list,
+        'quantity_desc': item.quantity_desc or '',
+        'value': item.value,
+        'notes': item.notes or '',
+        'purchase_link': item.purchase_link or '',
+        'purchase_date': item.purchase_date.isoformat() if item.purchase_date else None,
+        'last_modified': item.last_modified.isoformat(sep=' ', timespec='minutes') if item.last_modified else None,
+        'locations': locations,
+        'detail_url': url_for('item_detail', item_id=item.id),
+    }
+
+
+def _serialize_location(loc, paths):
+    return {
+        'id': loc.id,
+        'name': loc.name,
+        'parent_id': loc.parent_id,
+        'path': paths.get(loc.id) or loc.name,
+        'status': loc.status or '',
+        'notes': loc.notes or '',
+        'latitude': loc.latitude,
+        'longitude': loc.longitude,
+        'is_public': bool(loc.is_public),
+        'detail_url': url_for('view_location', loc_id=loc.id),
+    }
+
+
+def _parse_optional_float(raw):
+    if raw in (None, ''):
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        raise ValueError(f'无效的价值：{raw}')
+
+
+def _parse_optional_date(raw):
+    if raw in (None, ''):
+        return None
+    token = str(raw).strip()
+    for fmt in ('%Y-%m-%d', '%Y/%m/%d'):
+        try:
+            return datetime.strptime(token[:10], fmt).date()
+        except ValueError:
+            continue
+    raise ValueError(f'无效的日期：{raw}')
+
+
+def _locations_from_payload(payload, catalog, default_location):
+    locs = []
+    seen = set()
+    raw_ids = payload.get('location_ids')
+    if raw_ids is None and payload.get('location_id') not in (None, ''):
+        raw_ids = [payload.get('location_id')]
+    if isinstance(raw_ids, (str, int)):
+        raw_ids = [raw_ids]
+    for raw in raw_ids or []:
+        if raw in (None, ''):
+            continue
+        try:
+            loc_id = int(raw)
+        except (TypeError, ValueError):
+            raise ValueError(f'无效的位置 id：{raw}')
+        loc = catalog['by_id'].get(loc_id)
+        if not loc:
+            raise ValueError(f'找不到位置 id={loc_id}')
+        if loc.id not in seen:
+            locs.append(loc)
+            seen.add(loc.id)
+    if payload.get('location'):
+        loc_id, error = match_location_id(payload.get('location'), catalog['paths'])
+        if error:
+            raise ValueError(error)
+        loc = catalog['by_id'].get(loc_id)
+        if loc and loc.id not in seen:
+            locs.append(loc)
+            seen.add(loc.id)
+    if not locs and default_location is not None:
+        locs.append(default_location)
+    return locs
+
+
+def _build_new_item(payload, actor, catalog, default_location, defaults, now, shared_filenames, action_type):
+    name = _limit_text(payload.get('name'), 100)
+    if not name:
+        raise ValueError('缺少物品名称')
+    status_raw = payload.get('status')
+    if status_raw in (None, ''):
+        status_raw = (defaults or {}).get('status') or '正常'
+    status = _normalize_item_stock_status(status_raw)
+    if not status:
+        raise ValueError(f'无效的库存状态：{status_raw}')
+    disp_raw = payload.get('disposition')
+    if disp_raw in (None, ''):
+        disp_raw = (defaults or {}).get('disposition')
+    disposition = None
+    if disp_raw not in (None, ''):
+        disposition = normalize_disposition(disp_raw)
+        if not disposition:
+            raise ValueError(f'无效的处置状态：{disp_raw}')
+    feature_raw = payload.get('features')
+    if feature_raw in (None, ''):
+        feature_raw = (defaults or {}).get('features') or '私人'
+    features = _normalize_item_feature(feature_raw)
+    if not features:
+        raise ValueError(f'无效的归属：{feature_raw}')
+    item = Item(
+        name=name,
+        category=_limit_text(payload.get('category'), 50) or None,
+        status=status,
+        features=features,
+        disposition=disposition,
+        tags=join_tags(payload.get('tags')),
+        quantity_desc=_limit_text(payload.get('quantity_desc'), 120) or None,
+        value=_parse_optional_float(payload.get('value')),
+        notes=_limit_text(payload.get('notes'), 4000) or None,
+        purchase_link=_limit_text(payload.get('purchase_link'), 200) or '',
+        purchase_date=_parse_optional_date(payload.get('purchase_date')),
+        last_modified=now,
+    )
+    if features == '私人':
+        item.assign_responsible_members([actor])
+    item.locations = _locations_from_payload(payload, catalog, default_location)
+    db.session.add(item)
+    db.session.flush()
+    seen_files = set()
+    for filename in shared_filenames or []:
+        if filename and filename not in seen_files:
+            item.attachments.append(Attachment(filename=filename))
+            seen_files.add(filename)
+    db.session.add(Log(
+        user_id=actor.id,
+        item_id=item.id,
+        action_type=action_type,
+        details=f'Added item {item.name}'
+    ))
+    return item
+
+
+def _ingest_item_batch(payloads, actor, *, default_location_id=None, defaults=None, shared_filenames=None, action_type='新增物品'):
+    catalog = _location_catalog()
+    default_location = None
+    if default_location_id not in (None, ''):
+        try:
+            default_location_id = int(default_location_id)
+        except (TypeError, ValueError):
+            raise ValueError('默认位置 id 无效')
+        default_location = catalog['by_id'].get(default_location_id)
+        if default_location is None:
+            raise ValueError('默认位置不存在')
+    created = []
+    errors = []
+    now = datetime.utcnow()
+    for index, payload in enumerate(payloads or [], start=1):
+        if not isinstance(payload, dict):
+            errors.append({'index': index, 'message': '条目必须是对象'})
+            continue
+        try:
+            created.append(_build_new_item(
+                payload,
+                actor,
+                catalog,
+                default_location,
+                defaults,
+                now,
+                shared_filenames,
+                action_type,
+            ))
+        except ValueError as exc:
+            errors.append({'index': index, 'message': str(exc)})
+    if created:
+        db.session.commit()
+    else:
+        db.session.rollback()
+    return created, errors, _location_catalog()
+
+
+def _payloads_from_bulk_sources(lines_text, csv_text):
+    payloads = []
+    errors = []
+    if lines_text and str(lines_text).strip():
+        rows, row_errors = parse_bulk_lines(lines_text)
+        payloads.extend(rows)
+        errors.extend(row_errors)
+    if csv_text and str(csv_text).strip():
+        rows, row_errors = parse_csv_text(csv_text)
+        payloads.extend(rows)
+        errors.extend(row_errors)
+    return payloads, errors
+
+
+def _search_items(keyword, limit=50):
+    keyword = (keyword or '').strip()
+    catalog = _location_catalog()
+    if not keyword:
+        return [], catalog
+    like = f'%{keyword}%'
+    text_ids = {
+        row[0]
+        for row in db.session.query(Item.id).filter(or_(
+            Item.name.ilike(like),
+            Item.tags.ilike(like),
+            Item.category.ilike(like),
+            Item.notes.ilike(like),
+            Item.quantity_desc.ilike(like),
+            Item.detail_refs_raw.ilike(like),
+            Item.disposition.ilike(like),
+        )).all()
+    }
+    needle = keyword.lower()
+    matched_loc_ids = [
+        loc_id for loc_id, path in catalog['paths'].items()
+        if needle in (path or '').lower()
+    ]
+    loc_item_ids = set()
+    if matched_loc_ids:
+        loc_item_ids = {
+            row[0]
+            for row in db.session.query(item_locations.c.item_id).filter(
+                item_locations.c.location_id.in_(matched_loc_ids)
+            ).all()
+        }
+    ids = list(text_ids | loc_item_ids)
+    if not ids:
+        return [], catalog
+    if len(ids) > 900:
+        ids = ids[:900]
+    query = (
+        Item.query.options(
+            selectinload(Item.locations),
+            selectinload(Item.responsible_members),
+        )
+        .filter(Item.id.in_(ids))
+        .order_by(func.lower(Item.name))
+    )
+    if limit:
+        query = query.limit(int(limit))
+    return query.all(), catalog
+
+
+def _collect_declutter(stale_days):
+    try:
+        stale_days = int(stale_days or 180)
+    except (TypeError, ValueError):
+        stale_days = 180
+    stale_days = max(7, min(stale_days, 3650))
+    cutoff = datetime.utcnow() - timedelta(days=stale_days)
+    catalog = _location_catalog()
+    items = (
+        Item.query.options(selectinload(Item.locations))
+        .order_by(func.lower(Item.name))
+        .all()
+    )
+    serialized = [_serialize_item(item, catalog['paths']) for item in items]
+    by_id = {row['id']: row for row in serialized}
+    no_location = []
+    marked = []
+    stale = []
+    for item, row in zip(items, serialized):
+        disposition = row['disposition']
+        status = _normalize_item_stock_status(item.status)
+        if status == '舍弃' or disposition == '已处理':
+            continue
+        if not item.locations and disposition != '想买':
+            no_location.append(row)
+        if disposition in _DECLUTTER_MARKED_DISPOSITIONS:
+            marked.append(row)
+        if disposition == '想买':
+            continue
+        if item.last_modified is None or item.last_modified < cutoff:
+            stale.append(row)
+    stale.sort(key=lambda row: row.get('last_modified') or '')
+    dup_records = [
+        {
+            'id': item.id,
+            'name': item.name,
+            'category': item.category or '',
+            'disposition': normalize_disposition(item.disposition) or '',
+            'status': item.status or '',
+        }
+        for item in items
+    ]
+    duplicates = []
+    for group in cluster_near_duplicates(dup_records):
+        duplicates.append([by_id[member['id']] for member in group if member['id'] in by_id])
+    return {
+        'stale_days': stale_days,
+        'no_location': no_location,
+        'marked': marked,
+        'stale': stale,
+        'duplicates': duplicates,
+        'total_items': len(items),
+    }
+
+
+def _apply_disposition_bulk(item_ids, disposition, actor, stock_status=None, *, enforce_private=False):
+    normalized = normalize_disposition(disposition)
+    if not normalized:
+        raise ValueError('请选择有效的处置状态')
+    normalized_status = None
+    if stock_status not in (None, ''):
+        normalized_status = _normalize_item_stock_status(stock_status)
+        if not normalized_status:
+            raise ValueError('无效的库存状态')
+    ids = []
+    for raw in item_ids or []:
+        try:
+            ids.append(int(raw))
+        except (TypeError, ValueError):
+            continue
+    ids = list(dict.fromkeys(ids))
+    if not ids:
+        raise ValueError('请先勾选物品')
+    items = Item.query.filter(Item.id.in_(ids)).all()
+    updated = []
+    skipped = []
+    now = datetime.utcnow()
+    for item in items:
+        if enforce_private and item.features == '私人' and actor not in (item.responsible_members or []):
+            skipped.append(item.id)
+            continue
+        item.disposition = normalized
+        if normalized_status:
+            item.status = normalized_status
+        item.last_modified = now
+        detail = f'将 {item.name} 的处置设为 {normalized}'
+        if normalized_status:
+            detail += f'，库存状态设为 {normalized_status}'
+        db.session.add(Log(
+            user_id=actor.id if actor else None,
+            item_id=item.id,
+            action_type='断舍离',
+            details=detail,
+        ))
+        updated.append(item.id)
+    db.session.commit()
+    return updated, skipped
+
+
+def _patch_item(item, payload, actor):
+    catalog = _location_catalog()
+    if 'name' in payload:
+        name = _limit_text(payload.get('name'), 100)
+        if not name:
+            raise ValueError('物品名称不能为空')
+        item.name = name
+    if 'category' in payload:
+        item.category = _limit_text(payload.get('category'), 50) or None
+    if 'status' in payload:
+        status = _normalize_item_stock_status(payload.get('status'))
+        if not status:
+            raise ValueError('无效的库存状态')
+        item.status = status
+    if 'disposition' in payload:
+        raw_disp = payload.get('disposition')
+        disposition = normalize_disposition(raw_disp)
+        if raw_disp not in (None, '') and not disposition:
+            raise ValueError('无效的处置状态')
+        item.disposition = disposition
+    if 'features' in payload:
+        features = _normalize_item_feature(payload.get('features'))
+        if not features:
+            raise ValueError('无效的归属')
+        item.features = features
+        if features == '私人' and not item.responsible_members:
+            item.assign_responsible_members([actor])
+    if 'tags' in payload:
+        item.set_tags(payload.get('tags'))
+    if 'quantity_desc' in payload:
+        item.quantity_desc = _limit_text(payload.get('quantity_desc'), 120) or None
+    if 'notes' in payload:
+        item.notes = _limit_text(payload.get('notes'), 4000) or None
+    if 'purchase_link' in payload:
+        item.purchase_link = _limit_text(payload.get('purchase_link'), 200) or ''
+    if 'value' in payload:
+        item.value = _parse_optional_float(payload.get('value'))
+    if 'purchase_date' in payload:
+        item.purchase_date = _parse_optional_date(payload.get('purchase_date'))
+    if any(key in payload for key in ('location_ids', 'location_id', 'location')):
+        item.locations = _locations_from_payload(payload, catalog, None)
+    item.last_modified = datetime.utcnow()
+    db.session.add(Log(
+        user_id=actor.id,
+        item_id=item.id,
+        action_type='修改物品',
+        details=f'API edited item {item.name}',
+    ))
+
+
+def _parent_would_cycle(loc_id, parent_id):
+    seen = set()
+    current = parent_id
+    while current:
+        if current == loc_id or current in seen:
+            return True
+        seen.add(current)
+        parent = db.session.get(Location, current)
+        if not parent:
+            return False
+        current = parent.parent_id
+    return False
+
+
+def _create_location_record(payload, actor):
+    name = _limit_text(payload.get('name'), 100)
+    if not name:
+        raise ValueError('缺少位置名称')
+    parent_id = payload.get('parent_id')
+    if parent_id in ('', None):
+        parent_id = None
+    else:
+        try:
+            parent_id = int(parent_id)
+        except (TypeError, ValueError):
+            raise ValueError('上级位置 id 无效')
+        if db.session.get(Location, parent_id) is None:
+            raise ValueError('上级位置不存在')
+    status_raw = payload.get('status')
+    status = _normalize_location_status(status_raw) or '正常'
+    if status_raw not in (None, '') and _normalize_location_status(status_raw) is None:
+        raise ValueError('无效的位置状态')
+    latitude = payload.get('latitude')
+    longitude = payload.get('longitude')
+    if latitude not in (None, '') and _parse_coordinate(latitude) is None:
+        raise ValueError('无效的纬度')
+    if longitude not in (None, '') and _parse_coordinate(longitude) is None:
+        raise ValueError('无效的经度')
+    is_public = str(payload.get('is_public')).strip().lower() in {'1', 'true', 'yes', 'on'}
+    loc = Location(
+        name=name,
+        parent_id=parent_id,
+        status=status,
+        notes=_limit_text(payload.get('notes'), 4000) or None,
+        is_public=is_public,
+        latitude=_parse_coordinate(latitude),
+        longitude=_parse_coordinate(longitude),
+        last_modified=datetime.utcnow(),
+    )
+    db.session.add(loc)
+    db.session.flush()
+    if not is_public:
+        loc.responsible_members = [actor]
+    db.session.add(Log(
+        user_id=actor.id,
+        location_id=loc.id,
+        action_type='新增位置',
+        details=f'Added location {loc.name}',
+    ))
+    db.session.commit()
+    return loc
+
+
+def _patch_location(loc, payload, actor):
+    if 'name' in payload:
+        name = _limit_text(payload.get('name'), 100)
+        if not name:
+            raise ValueError('位置名称不能为空')
+        loc.name = name
+    if 'parent_id' in payload:
+        parent_id = payload.get('parent_id')
+        if parent_id in ('', None):
+            loc.parent_id = None
+        else:
+            try:
+                parent_id = int(parent_id)
+            except (TypeError, ValueError):
+                raise ValueError('上级位置 id 无效')
+            if db.session.get(Location, parent_id) is None:
+                raise ValueError('上级位置不存在')
+            if _parent_would_cycle(loc.id, parent_id):
+                raise ValueError('上级位置不能是自己或自己的子位置')
+            loc.parent_id = parent_id
+    if 'status' in payload:
+        status = _normalize_location_status(payload.get('status')) or '正常'
+        if payload.get('status') not in (None, '') and _normalize_location_status(payload.get('status')) is None:
+            raise ValueError('无效的位置状态')
+        loc.status = status
+    if 'notes' in payload:
+        loc.notes = _limit_text(payload.get('notes'), 4000) or None
+    if 'is_public' in payload:
+        loc.is_public = str(payload.get('is_public')).strip().lower() in {'1', 'true', 'yes', 'on'}
+    if 'latitude' in payload:
+        if payload.get('latitude') not in (None, '') and _parse_coordinate(payload.get('latitude')) is None:
+            raise ValueError('无效的纬度')
+        loc.latitude = _parse_coordinate(payload.get('latitude'))
+    if 'longitude' in payload:
+        if payload.get('longitude') not in (None, '') and _parse_coordinate(payload.get('longitude')) is None:
+            raise ValueError('无效的经度')
+        loc.longitude = _parse_coordinate(payload.get('longitude'))
+    loc.last_modified = datetime.utcnow()
+    db.session.add(Log(
+        user_id=actor.id,
+        location_id=loc.id,
+        action_type='修改位置',
+        details=f'API edited location {loc.name}',
+    ))
+    db.session.commit()
+
+
+def _api_actor():
+    actor = Member.query.filter_by(username='admin').first()
+    if actor:
+        return actor
+    return Member.query.order_by(Member.id).first()
+
+
+def _benlab_api_token():
+    return (os.getenv('BENLAB_API_TOKEN') or '').strip()
+
+
+def api_token_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        expected = _benlab_api_token()
+        if not expected:
+            return jsonify({
+                'ok': False,
+                'error': 'api_disabled',
+                'message': '未设置 BENLAB_API_TOKEN，接口已关闭。',
+            }), 404
+        presented = (request.headers.get('X-Benlab-Token') or '').strip()
+        auth = (request.headers.get('Authorization') or '').strip()
+        if auth.lower().startswith('bearer '):
+            presented = auth[7:].strip()
+        try:
+            matched = hmac.compare_digest(presented.encode('utf-8'), expected.encode('utf-8'))
+        except Exception:
+            matched = False
+        if not presented or not matched:
+            return jsonify({
+                'ok': False,
+                'error': 'unauthorized',
+                'message': 'API 令牌无效。',
+            }), 401
+        return view(*args, **kwargs)
+    return wrapped
+
+
+def _json_error(error, message, status):
+    return jsonify({'ok': False, 'error': error, 'message': message}), status
+
+
+def _require_api_actor():
+    actor = _api_actor()
+    if not actor:
+        return None, _json_error('no_actor', '库中没有成员，无法写入。', 500)
+    return actor, None
+
+
+@app.route('/items/bulk', methods=['GET', 'POST'])
+@login_required
+def bulk_add_items():
+    default_loc_id = request.values.get('loc_id', type=int)
+    posted_lines = ''
+    if request.method == 'POST':
+        posted_lines = request.form.get('lines') or ''
+        chosen_loc = request.form.get('location_id', type=int) or default_loc_id
+        lines = posted_lines
+        csv_text = ''
+        csv_file = request.files.get('csv_file')
+        if csv_file and csv_file.filename:
+            csv_text = csv_file.read().decode('utf-8-sig', errors='replace')
+        payloads, parse_errors = _payloads_from_bulk_sources(lines, csv_text)
+        shared = []
+        for attachment_file in request.files.getlist('attachments'):
+            stored_name = save_uploaded_media(attachment_file)
+            if stored_name:
+                shared.append(stored_name)
+        defaults = {
+            'status': request.form.get('status') or '正常',
+            'features': request.form.get('features') or '私人',
+            'disposition': request.form.get('disposition') or None,
+        }
+        try:
+            created, errors, _catalog = _ingest_item_batch(
+                payloads,
+                current_user,
+                default_location_id=chosen_loc,
+                defaults=defaults,
+                shared_filenames=shared,
+                action_type='批量新增物品',
+            )
+        except ValueError as exc:
+            db.session.rollback()
+            flash(str(exc), 'danger')
+            return redirect(request.url)
+        messages = list(parse_errors)
+        messages.extend(err['message'] for err in errors)
+        if created:
+            flash(f'已录入 {len(created)} 个物品。', 'success')
+        if messages:
+            preview = '；'.join(messages[:8])
+            if len(messages) > 8:
+                preview += f'……共 {len(messages)} 条提示'
+            flash(preview, 'warning' if created else 'danger')
+        elif not created:
+            flash('没有可录入的物品。请每行写一个名称。', 'warning')
+        if created and chosen_loc:
+            return redirect(url_for('view_location', loc_id=chosen_loc))
+        if created:
+            return redirect(url_for('items'))
+        default_loc_id = chosen_loc
+    catalog = _location_catalog()
+    locations = sorted(catalog['locations'], key=lambda loc: catalog['paths'].get(loc.id) or loc.name)
+    return render_template(
+        'item_bulk.html',
+        locations=locations,
+        location_paths=catalog['paths'],
+        default_loc_id=default_loc_id,
+        item_status_choices=_ITEM_STOCK_STATUS_CHOICES,
+        disposition_choices=_ITEM_DISPOSITION_CHOICES,
+        posted_lines=posted_lines,
+    )
+
+
+@app.route('/find')
+@login_required
+def find_items():
+    keyword = (request.args.get('q') or '').strip()
+    items, catalog = _search_items(keyword, limit=80)
+    return render_template(
+        'find.html',
+        keyword=keyword,
+        items=items,
+        location_paths=catalog['paths'],
+        result_count=len(items),
+    )
+
+
+@app.route('/items/declutter', methods=['GET', 'POST'])
+@login_required
+def declutter_items():
+    if request.method == 'POST':
+        try:
+            updated, skipped = _apply_disposition_bulk(
+                request.form.getlist('item_ids'),
+                request.form.get('disposition'),
+                current_user,
+                stock_status=request.form.get('stock_status') or None,
+                enforce_private=True,
+            )
+        except ValueError as exc:
+            db.session.rollback()
+            flash(str(exc), 'danger')
+            return redirect(request.url)
+        if updated:
+            flash(f'已更新 {len(updated)} 个物品的处置状态。', 'success')
+        if skipped:
+            flash(f'有 {len(skipped)} 个私人物品因不是负责人而跳过。', 'warning')
+        if not updated and not skipped:
+            flash('没有物品被更新。', 'warning')
+        days = request.form.get('days') or request.args.get('days') or 180
+        return redirect(url_for('declutter_items', days=days))
+    report = _collect_declutter(request.args.get('days') or 180)
+    return render_template('declutter.html', report=report, disposition_choices=_ITEM_DISPOSITION_CHOICES, item_status_choices=_ITEM_STOCK_STATUS_CHOICES)
+
+
+@app.route('/api/v1/items', methods=['GET', 'POST'])
+@api_token_required
+def api_items():
+    if request.method == 'GET':
+        try:
+            limit = min(max(int(request.args.get('limit') or 50), 1), 200)
+            offset = max(int(request.args.get('offset') or 0), 0)
+        except ValueError:
+            return _json_error('invalid', 'limit/offset 必须是整数。', 400)
+        catalog = _location_catalog()
+        query = Item.query.options(selectinload(Item.locations))
+        if request.args.get('status'):
+            status = _normalize_item_stock_status(request.args.get('status'))
+            if not status:
+                return _json_error('invalid', '无效的库存状态。', 400)
+            query = query.filter(Item.status == status)
+        if request.args.get('disposition'):
+            disposition = normalize_disposition(request.args.get('disposition'))
+            if not disposition:
+                return _json_error('invalid', '无效的处置状态。', 400)
+            query = query.filter(Item.disposition == disposition)
+        category = (request.args.get('category') or '').strip()
+        if category:
+            query = query.filter(Item.category == category)
+        if (request.args.get('no_location') or '').strip().lower() in {'1', 'true', 'yes'}:
+            query = query.filter(~Item.locations.any())
+        if request.args.get('location_id'):
+            try:
+                location_id = int(request.args.get('location_id'))
+            except ValueError:
+                return _json_error('invalid', 'location_id 必须是整数。', 400)
+            query = query.filter(Item.locations.any(Location.id == location_id))
+        keyword = (request.args.get('q') or '').strip()
+        if keyword:
+            matched, _catalog = _search_items(keyword, limit=None)
+            ids = [item.id for item in matched]
+            if not ids:
+                return jsonify({'ok': True, 'items': [], 'count': 0})
+            query = query.filter(Item.id.in_(ids[:900]))
+        total = query.count()
+        items = query.order_by(func.lower(Item.name)).offset(offset).limit(limit).all()
+        return jsonify({
+            'ok': True,
+            'count': len(items),
+            'total': total,
+            'offset': offset,
+            'limit': limit,
+            'items': [_serialize_item(item, catalog['paths']) for item in items],
+        })
+
+    actor, error = _require_api_actor()
+    if error:
+        return error
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return _json_error('invalid_json', '需要 JSON 对象。', 400)
+    payloads = []
+    parse_errors = []
+    is_batch = bool(data.get('items') or data.get('text') or data.get('csv'))
+    if isinstance(data.get('items'), list):
+        payloads.extend(data['items'])
+    elif data.get('name') and not is_batch:
+        payloads.append(data)
+    if data.get('text'):
+        rows, row_errors = parse_bulk_lines(data.get('text'))
+        payloads.extend(rows)
+        parse_errors.extend(row_errors)
+    if data.get('csv'):
+        rows, row_errors = parse_csv_text(data.get('csv'))
+        payloads.extend(rows)
+        parse_errors.extend(row_errors)
+    if not payloads and not parse_errors:
+        return _json_error('invalid', '请提供 name、items、text 或 csv。', 400)
+    defaults = None
+    if is_batch:
+        defaults = {
+            'status': data.get('default_status') or (None if data.get('name') else data.get('status')),
+            'features': data.get('default_features') or (None if data.get('name') else data.get('features')),
+            'disposition': data.get('default_disposition') or (None if data.get('name') else data.get('disposition')),
+        }
+    try:
+        created, errors, catalog = _ingest_item_batch(
+            payloads,
+            actor,
+            default_location_id=data.get('location_id'),
+            defaults=defaults,
+            action_type='新增物品',
+        )
+    except ValueError as exc:
+        db.session.rollback()
+        return _json_error('invalid', str(exc), 400)
+    error_payload = [{'message': message} for message in parse_errors]
+    error_payload.extend(errors)
+    body = {
+        'ok': bool(created),
+        'count': len(created),
+        'items': [_serialize_item(item, catalog['paths']) for item in created],
+        'errors': error_payload,
+    }
+    if not created:
+        body['ok'] = False
+        body['error'] = 'invalid'
+        body['message'] = error_payload[0]['message'] if error_payload else '没有创建任何物品。'
+        return jsonify(body), 400
+    return jsonify(body), 201
+
+
+@app.route('/api/v1/items/<int:item_id>', methods=['GET', 'PATCH'])
+@api_token_required
+def api_item_detail(item_id):
+    item = Item.query.options(selectinload(Item.locations)).filter_by(id=item_id).first()
+    if not item:
+        return _json_error('not_found', '物品不存在。', 404)
+    catalog = _location_catalog()
+    if request.method == 'GET':
+        return jsonify({'ok': True, 'item': _serialize_item(item, catalog['paths'])})
+    actor, error = _require_api_actor()
+    if error:
+        return error
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return _json_error('invalid_json', '需要 JSON 对象。', 400)
+    try:
+        _patch_item(item, payload, actor)
+        db.session.commit()
+    except ValueError as exc:
+        db.session.rollback()
+        return _json_error('invalid', str(exc), 400)
+    catalog = _location_catalog()
+    return jsonify({'ok': True, 'item': _serialize_item(item, catalog['paths'])})
+
+
+@app.route('/api/v1/items/disposition', methods=['POST'])
+@api_token_required
+def api_items_disposition():
+    actor, error = _require_api_actor()
+    if error:
+        return error
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return _json_error('invalid_json', '需要 JSON 对象。', 400)
+    try:
+        updated, skipped = _apply_disposition_bulk(
+            data.get('ids') or data.get('item_ids') or [],
+            data.get('disposition'),
+            actor,
+            stock_status=data.get('status'),
+            enforce_private=False,
+        )
+    except ValueError as exc:
+        db.session.rollback()
+        return _json_error('invalid', str(exc), 400)
+    return jsonify({'ok': True, 'updated': updated, 'skipped': skipped})
+
+
+@app.route('/api/v1/declutter')
+@api_token_required
+def api_declutter():
+    report = _collect_declutter(request.args.get('days') or 180)
+    return jsonify({'ok': True, **report})
+
+
+@app.route('/api/v1/search')
+@api_token_required
+def api_search():
+    keyword = (request.args.get('q') or '').strip()
+    if not keyword:
+        return _json_error('invalid', '请提供查询参数 q。', 400)
+    try:
+        limit = min(max(int(request.args.get('limit') or 50), 1), 200)
+    except ValueError:
+        return _json_error('invalid', 'limit 必须是整数。', 400)
+    items, catalog = _search_items(keyword, limit=limit)
+    locations = []
+    needle = keyword.lower()
+    for loc in catalog['locations']:
+        path = catalog['paths'].get(loc.id) or loc.name
+        if needle in path.lower() or needle in (loc.name or '').lower():
+            locations.append(_serialize_location(loc, catalog['paths']))
+        if len(locations) >= limit:
+            break
+    return jsonify({
+        'ok': True,
+        'q': keyword,
+        'items': [_serialize_item(item, catalog['paths']) for item in items],
+        'locations': locations,
+    })
+
+
+@app.route('/api/v1/locations', methods=['GET', 'POST'])
+@api_token_required
+def api_locations():
+    catalog = _location_catalog()
+    if request.method == 'GET':
+        keyword = (request.args.get('q') or '').strip().lower()
+        rows = []
+        for loc in catalog['locations']:
+            path = catalog['paths'].get(loc.id) or loc.name
+            if keyword and keyword not in path.lower() and keyword not in (loc.name or '').lower():
+                continue
+            rows.append(_serialize_location(loc, catalog['paths']))
+        rows.sort(key=lambda row: row['path'])
+        return jsonify({'ok': True, 'count': len(rows), 'locations': rows})
+    actor, error = _require_api_actor()
+    if error:
+        return error
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return _json_error('invalid_json', '需要 JSON 对象。', 400)
+    try:
+        loc = _create_location_record(data, actor)
+    except ValueError as exc:
+        db.session.rollback()
+        return _json_error('invalid', str(exc), 400)
+    catalog = _location_catalog()
+    return jsonify({'ok': True, 'location': _serialize_location(loc, catalog['paths'])}), 201
+
+
+@app.route('/api/v1/locations/<int:loc_id>', methods=['GET', 'PATCH'])
+@api_token_required
+def api_location_detail(loc_id):
+    loc = db.session.get(Location, loc_id)
+    if not loc:
+        return _json_error('not_found', '位置不存在。', 404)
+    if request.method == 'GET':
+        catalog = _location_catalog()
+        return jsonify({'ok': True, 'location': _serialize_location(loc, catalog['paths'])})
+    actor, error = _require_api_actor()
+    if error:
+        return error
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return _json_error('invalid_json', '需要 JSON 对象。', 400)
+    try:
+        _patch_location(loc, payload, actor)
+    except ValueError as exc:
+        db.session.rollback()
+        return _json_error('invalid', str(exc), 400)
+    catalog = _location_catalog()
+    return jsonify({'ok': True, 'location': _serialize_location(loc, catalog['paths'])})
 
 
 @app.route('/api/forms/ai-autofill', methods=['POST'])
@@ -6253,6 +7258,10 @@ def inject_attachment_helpers():
         normalize_location_status=_normalize_location_status,
         location_status_intent=_location_status_intent,
         is_location_dirty=_is_location_dirty_status,
+        disposition_choices=_ITEM_DISPOSITION_CHOICES,
+        disposition_badge_class=lambda value: _DISPOSITION_BADGES.get(normalize_disposition(value) or '', 'text-bg-light'),
+        normalize_disposition=normalize_disposition,
+        split_tags=split_tags,
     )
 
 if __name__ == "__main__":

@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h3 class="mb-0">断舍离</h3>
+  <a href="{{ url_for('items') }}" class="btn btn-outline-secondary">返回物品列表</a>
+</div>
+<p class="text-muted">从 {{ report.total_items }} 个物品里找出可以处理的：没地方放、标了闲置或转让、很久没动过、名字很像的重复项。已处理或库存状态为「舍弃」的不再出现。想买的物品也不会被当成没地方放。</p>
+
+<form method="get" class="row g-2 align-items-end mb-4">
+  <div class="col-auto">
+    <label for="days" class="form-label">多久没更新算「很久」</label>
+    <input class="form-control" type="number" min="7" max="3650" id="days" name="days" value="{{ report.stale_days }}">
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-outline-primary" type="submit">刷新</button>
+  </div>
+</form>
+
+<form method="post" action="{{ url_for('declutter_items') }}">
+  <input type="hidden" name="days" value="{{ report.stale_days }}">
+  <div class="card mb-4">
+    <div class="card-body d-flex flex-wrap gap-2 align-items-end">
+      <div>
+        <label for="disposition" class="form-label">把勾选的物品标成</label>
+        <select class="form-select" id="disposition" name="disposition">
+          <option value="转让">转让</option>
+          <option value="已处理">已处理</option>
+          <option value="闲置">闲置</option>
+          <option value="在用">在用</option>
+          <option value="收藏">收藏</option>
+          <option value="想买">想买</option>
+        </select>
+      </div>
+      <div>
+        <label for="stock_status" class="form-label">同时改库存状态（可选）</label>
+        <select class="form-select" id="stock_status" name="stock_status">
+          <option value="">不改</option>
+          {% for opt in item_status_choices %}
+          <option value="{{ opt }}">{{ opt }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="btn btn-warning">更新勾选物品</button>
+    </div>
+  </div>
+
+  {% macro item_row(item) %}
+  <label class="list-group-item d-flex gap-3 align-items-start">
+    <input class="form-check-input mt-1" type="checkbox" name="item_ids" value="{{ item.id }}">
+    <span>
+      <a href="{{ url_for('item_detail', item_id=item.id) }}">{{ item.name }}</a>
+      {% if item.category %}<span class="badge bg-light text-dark border ms-1">{{ item.category }}</span>{% endif %}
+      {% if item.disposition %}<span class="badge {{ disposition_badge_class(item.disposition) }} ms-1">{{ item.disposition }}</span>{% endif %}
+      {% if item.status %}<span class="badge bg-light text-dark border ms-1">{{ item.status }}</span>{% endif %}
+      <span class="d-block small text-muted">
+        {% if item.locations %}
+          {% for loc in item.locations %}{{ loc.path }}{% if not loop.last %}；{% endif %}{% endfor %}
+        {% else %}
+          无位置
+        {% endif %}
+        {% if item.last_modified %} · {{ item.last_modified }}{% endif %}
+      </span>
+    </span>
+  </label>
+  {% endmacro %}
+
+  <h4 class="h5">没有位置 <span class="badge bg-warning text-dark">{{ report.no_location|length }}</span></h4>
+  {% if report.no_location %}
+  <div class="list-group mb-4">
+    {% for item in report.no_location %}{{ item_row(item) }}{% endfor %}
+  </div>
+  {% else %}
+  <p class="text-muted">都已经放到某个位置里了。</p>
+  {% endif %}
+
+  <h4 class="h5">已标闲置 / 转让 <span class="badge bg-info text-dark">{{ report.marked|length }}</span></h4>
+  {% if report.marked %}
+  <div class="list-group mb-4">
+    {% for item in report.marked %}{{ item_row(item) }}{% endfor %}
+  </div>
+  {% else %}
+  <p class="text-muted">还没有标成闲置或转让。</p>
+  {% endif %}
+
+  <h4 class="h5">超过 {{ report.stale_days }} 天没更新 <span class="badge bg-secondary">{{ report.stale|length }}</span></h4>
+  {% if report.stale %}
+  <div class="list-group mb-4">
+    {% for item in report.stale %}{{ item_row(item) }}{% endfor %}
+  </div>
+  {% else %}
+  <p class="text-muted">这段时间里没有久未更新的物品。</p>
+  {% endif %}
+
+  <h4 class="h5">同类别里名字很像 <span class="badge bg-secondary">{{ report.duplicates|length }}</span></h4>
+  {% if report.duplicates %}
+    {% for group in report.duplicates %}
+    <div class="list-group mb-3">
+      {% for item in group %}{{ item_row(item) }}{% endfor %}
+    </div>
+    {% endfor %}
+  {% else %}
+  <p class="text-muted">没有发现明显重复的名字。</p>
+  {% endif %}
+</form>
+{% endblock %}

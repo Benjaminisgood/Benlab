@@ -25,7 +25,7 @@ Benlab 当前不是“实验室限定系统”，它已经扩展为“生活管�
 
 - 数据库连接在 `app.py` 里是硬编码：`sqlite:///lab.db?timeout=30`。
 - 应用启动时会自动做 schema 纠偏、历史字段迁移、默认管理员初始化（仅空库）。
-- 无独立 REST CRUD API；主要通过 HTML 表单路由完成增删改查。
+- 页面仍以 HTML 表单为主。物品和位置另有令牌保护的 `/api/v1/*`（`BENLAB_API_TOKEN` 未设置时关闭）。
 
 ## 3. 快速启动（Agent 必备）
 
@@ -74,8 +74,10 @@ chmod +x benlab.sh
 
 ### 4.2 关键枚举（写入时必须合法）
 
-- `Item.status`：`正常 / 少量 / 用完 / 借出 / 舍弃`
+- `Item.status`（库存）：`正常 / 少量 / 用完 / 借出 / 舍弃`
+- `Item.disposition`（处置，可空）：`在用 / 闲置 / 转让 / 收藏 / 想买 / 已处理`。空值在界面上视为在用。别名：`拥有`→`在用`，`待购`→`想买`，`丢掉/扔掉/卖出`→`已处理`
 - `Item.features`：`公共 / 私人`
+- `Item.tags`：逗号分隔标签，写入前用 `inventory_ops.join_tags`
 - `Location.status`：`正常 / 脏 / 报修 / 危险 / 禁止`
 - `Event.visibility`：`personal / internal / public`
 - 位置用途 tag：`study / leisure / event / public / rental / storage / travel / residence / other`
@@ -85,7 +87,8 @@ chmod +x benlab.sh
 ### 5.1 页面路由
 
 - `/login`、`/register`、`/logout`
-- `/items`、`/items/add`、`/items/<id>`、`/items/<id>/edit`
+- `/items`、`/items/add`、`/items/bulk`（多行/CSV 快速录入）、`/items/declutter`（断舍离）、`/find`（按名称/标签/位置路径查找）
+- `/items/<id>`、`/items/<id>/edit`
 - `/locations`、`/locations/add`、`/locations/<id>`、`/locations/<id>/edit`
 - `/events`、`/events/add`、`/events/<id>`、`/events/<id>/edit`
 - `/members`、`/member/<id>`、`/member/<id>/edit`
@@ -93,10 +96,22 @@ chmod +x benlab.sh
 
 ### 5.2 API 路由（少量）
 
-- `/api/items/search`
-- `/api/locations/search`
+- `/api/items/search`、`/api/locations/search`（需登录，搜索建议）
 - `/api/forms/ai-autofill`（图片驱动自动填表，支持 item/location）
 - `/api/uploads/oss/presign`、`/api/uploads/oss/verify`（OSS 直传）
+- `/api/v1/*`：令牌接口。仅当环境变量 `BENLAB_API_TOKEN` 非空时可用；请求头 `Authorization: Bearer <token>` 或 `X-Benlab-Token`。未设置令牌时返回 404。
+
+令牌接口（助手代管库存时用这些，不要去刮 HTML 表单）：
+
+- `GET /api/v1/items` 查询参数 `q`、`location_id`、`category`、`status`、`disposition`、`no_location=1`、`limit`、`offset`
+- `POST /api/v1/items`：单个对象，或 `{"items":[...]}`，或 `{"text":"每行一个物品","location_id":1}`，或 `{"csv":"..."}`
+- `GET/PATCH /api/v1/items/<id>`
+- `POST /api/v1/items/disposition`：`{"ids":[1,2],"disposition":"转让"}`，可选 `status`
+- `GET /api/v1/declutter?days=180`
+- `GET /api/v1/search?q=` 物品结果含 `locations[].path`（`宿舍 > 书桌 > 第二个抽屉`）
+- `GET/POST /api/v1/locations`，`GET/PATCH /api/v1/locations/<id>`
+
+写入日志记在用户名 `admin` 上（没有 admin 时用 id 最小的成员）。私人物品在令牌接口里不做负责人校验；网页表单仍按原规则。
 
 ## 6. 生活管理工作流建议（Agent 执行模板）
 
@@ -177,7 +192,8 @@ Benlab 支持 `local` / `oss` / `auto` 存储模式。
 最小验证命令：
 
 ```bash
-python -m compileall app.py
+python -m compileall app.py inventory_ops.py
+python scripts/smoke_inventory.py
 ```
 
 ## 11. Agent 执行策略（推荐）
@@ -194,5 +210,14 @@ python -m compileall app.py
   - 足迹地图（Location）
   - 事项时间线（Event）
   - 社交网络（Member）
-- 优先通过页面流程操作；当前项目并未提供完整 JSON CRUD 接口。
+- 物品和位置优先走 `/api/v1/*`（需 `BENLAB_API_TOKEN`）。事项、成员、留言仍走页面表单。
 - 如果要做长期自动化，可基于“每日录入 + 每周巡检 + 每月导出”三层节奏执行。
+
+## 13. 个人物品盘点（宿舍 / 实验室）
+
+本地单人运行：`BENLAB_STORAGE_MODE=local`，可选 `BENLAB_API_TOKEN`。库存状态不要拿来表示「想丢掉」；用 `disposition`。
+
+- 快速录入：`/items/bulk`。一行一个名称，或 `名称 | 数量 | 类别 | 标签 | 库存状态 | 处置 | 备注`。CSV 列名见 readme「常见输入列名映射」。同一批可以挂一张抽屉照片。
+- 找东西：`/find?q=`，或 `GET /api/v1/search?q=`。先看 `locations[].path`。
+- 断舍离：`/items/declutter`。候选是无位置、`闲置`/`转让`、长期未改 `last_modified`、同类别近名。批量改处置用页面勾选，或 `POST /api/v1/items/disposition`。
+- 纯文本解析在 `inventory_ops.py`，不依赖 Flask。冒烟：`python scripts/smoke_inventory.py`（临时 SQLite，不碰 `instance/lab.db`）。
